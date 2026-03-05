@@ -1,25 +1,57 @@
-import { Card, CardContent } from '@/components/ui/card';
-import { Construction } from 'lucide-react';
+import ComingSoon from '@/components/ComingSoon';
+import {
+  Calendar,
+  Timer,
+  Briefcase,
+  FileEdit,
+  ClipboardList,
+  ListChecks,
+  MessageCircle,
+  CalendarDays,
+  ClipboardCheck,
+  FileText,
+  Banknote,
+  Building2,
+  BarChart3,
+} from 'lucide-react';
 
-const PlaceholderPage = ({ title, description }: { title: string; description: string }) => (
-  <div className="space-y-6 max-w-7xl">
-    <div>
-      <h1 className="text-2xl font-bold text-foreground">{title}</h1>
-      <p className="text-muted-foreground text-sm mt-1">{description}</p>
-    </div>
-    <Card>
-      <CardContent className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-        <Construction className="h-12 w-12 mb-4" />
-        <p className="text-lg font-medium">Coming Soon</p>
-        <p className="text-sm mt-1">This module is under development</p>
-      </CardContent>
-    </Card>
-  </div>
+// Time Attendance
+export const Overtime = () => (
+  <ComingSoon title="Overtime" description="Manage overtime requests and approvals." icon={Timer} />
+);
+export const BusinessTrip = () => (
+  <ComingSoon title="Business Trip" description="Track and manage business travel requests." icon={Briefcase} />
+);
+export const Correction = () => (
+  <ComingSoon title="Attendance Correction" description="Submit and review attendance corrections." icon={FileEdit} />
 );
 
-export const Overtime = () => <PlaceholderPage title="Overtime" description="Manage overtime requests and approvals" />;
-export const BusinessTrip = () => <PlaceholderPage title="Business Trip" description="Track and manage business travel requests" />;
-export const Correction = () => <PlaceholderPage title="Attendance Correction" description="Submit and review attendance corrections" />;
-export const Announcements = () => <PlaceholderPage title="Announcements" description="Company-wide announcements and updates" />;
-export const Reports = () => <PlaceholderPage title="Attendance Report" description="Generate attendance reports — lates, undertimes, absences, leave, overtime" />;
-export const SettingsPage = () => <PlaceholderPage title="Settings" description="System and company configuration" />;
+// Core
+export const SettingsPage = () => (
+  <ComingSoon title="Company" description="Company settings and configuration." icon={Building2} />
+);
+
+// Activity
+export const Announcements = () => (
+  <ComingSoon title="Chat" description="Internal communication tools for your team." icon={MessageCircle} />
+);
+export const TaskFeedback = () => (
+  <ComingSoon title="Task & Feedback" description="Employee task assignments and feedback details." icon={ClipboardList} />
+);
+export const DailyActivity = () => (
+  <ComingSoon title="Daily Activity" description="Track employee daily activities and logs." icon={ListChecks} />
+);
+export const EventScheduling = () => (
+  <ComingSoon title="Event & Scheduling" description="Company events and schedule management." icon={CalendarDays} />
+);
+export const EmployeeSurvey = () => (
+  <ComingSoon title="Employee Survey" description="Collect and manage employee survey responses." icon={ClipboardCheck} />
+);
+
+// Finance
+export const Reports = () => (
+  <ComingSoon title="Claim" description="Submit and track expense claims." icon={FileText} />
+);
+export const MyPayslip = () => (
+  <ComingSoon title="My Payslip" description="View and download your payslips." icon={Banknote} />
+);

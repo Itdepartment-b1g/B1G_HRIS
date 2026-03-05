@@ -5,11 +5,37 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import Login from "./pages/Login";
 import DashboardLayout from "./components/DashboardLayout";
+import EmployeeLayout from "./components/EmployeeLayout";
+import MasterDataLayout from "./components/MasterDataLayout";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
 import Leave from "./pages/Leave";
 import Employees from "./pages/Employees";
-import { Overtime, BusinessTrip, Correction, Announcements, Reports, SettingsPage } from "./pages/PlaceholderPages";
+import {
+  Overtime,
+  BusinessTrip,
+  Correction,
+  Announcements,
+  TaskFeedback,
+  DailyActivity,
+  EventScheduling,
+  EmployeeSurvey,
+  Reports,
+  MyPayslip,
+  SettingsPage,
+} from "./pages/PlaceholderPages";
+import Settings from "./pages/Settings";
+import Departments from "./pages/Departments";
+import Shifts from "./pages/Shifts";
+import PersonalData from "./pages/employee/PersonalData";
+import EmployeeRequests from "./pages/employee/EmployeeRequests";
+import FeaturesPage from "./pages/mobile/FeaturesPage";
+import FeedsPage from "./pages/mobile/FeedsPage";
+import WorkspacePage from "./pages/mobile/WorkspacePage";
+import TeammatesPage from "./pages/mobile/TeammatesPage";
+import TasksPage from "./pages/mobile/TasksPage";
+import BirthdaysPage from "./pages/mobile/BirthdaysPage";
+import ProfilePage from "./pages/mobile/ProfilePage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -29,10 +55,36 @@ const App = () => (
             <Route path="overtime" element={<Overtime />} />
             <Route path="business-trip" element={<BusinessTrip />} />
             <Route path="correction" element={<Correction />} />
-            <Route path="announcements" element={<Announcements />} />
-            <Route path="reports" element={<Reports />} />
+            <Route path="task-feedback" element={<TaskFeedback />} />
+            <Route path="daily-activity" element={<DailyActivity />} />
+            <Route path="chat" element={<Announcements />} />
+            <Route path="events" element={<EventScheduling />} />
+            <Route path="survey" element={<EmployeeSurvey />} />
+            <Route path="claims" element={<Reports />} />
+            <Route path="payslip" element={<MyPayslip />} />
             <Route path="employees" element={<Employees />} />
-            <Route path="settings" element={<SettingsPage />} />
+            <Route path="departments" element={<Departments />} />
+            <Route path="shifts" element={<Shifts />} />
+            <Route path="master-data" element={<MasterDataLayout />}>
+              <Route index element={<Navigate to="employees" replace />} />
+              <Route path="employees" element={<Employees />} />
+              <Route path="departments" element={<Departments />} />
+              <Route path="shifts" element={<Shifts />} />
+            </Route>
+            <Route path="employee" element={<EmployeeLayout />}>
+              <Route index element={<Navigate to="personal-data" replace />} />
+              <Route path="personal-data" element={<PersonalData />} />
+              <Route path="requests" element={<EmployeeRequests />} />
+            </Route>
+            <Route path="company" element={<SettingsPage />} />
+            <Route path="settings" element={<Settings />} />
+            <Route path="features" element={<FeaturesPage />} />
+            <Route path="feeds" element={<FeedsPage />} />
+            <Route path="workspace" element={<WorkspacePage />} />
+            <Route path="teammates" element={<TeammatesPage />} />
+            <Route path="tasks" element={<TasksPage />} />
+            <Route path="birthdays" element={<BirthdaysPage />} />
+            <Route path="profile" element={<ProfilePage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>

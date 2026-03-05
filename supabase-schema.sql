@@ -408,6 +408,20 @@ CREATE POLICY "Admins manage departments"
   USING (public.is_admin(auth.uid()));
 
 -- ============================================================
+-- LOOKUP EMAIL BY EMPLOYEE CODE (for login, accessible by anon)
+-- ============================================================
+
+CREATE OR REPLACE FUNCTION public.get_email_by_employee_code(code TEXT)
+RETURNS TEXT
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT email FROM employees WHERE employee_code = code LIMIT 1;
+$$;
+
+-- ============================================================
 -- AUTO-CREATE EMPLOYEE PROFILE ON SIGNUP (trigger)
 -- ============================================================
 

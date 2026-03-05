@@ -1,38 +1,38 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
 @layer base {
   :root {
-    --background: 220 14% 96%;
-    --foreground: 220 20% 14%;
+    --background: 0 0% 100%;
+    --foreground: 0 0% 0%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 14%;
+    --card-foreground: 0 0% 0%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 14%;
+    --popover-foreground: 0 0% 0%;
 
-    --primary: 28 100% 50%;
+    --primary: 270 70% 55%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 14% 96%;
-    --secondary-foreground: 220 20% 14%;
+    --secondary: 270 30% 96%;
+    --secondary-foreground: 0 0% 0%;
 
-    --muted: 220 14% 96%;
-    --muted-foreground: 220 9% 46%;
+    --muted: 0 0% 96%;
+    --muted-foreground: 0 0% 40%;
 
-    --accent: 28 100% 50%;
+    --accent: 270 70% 55%;
     --accent-foreground: 0 0% 100%;
 
     --destructive: 0 72% 51%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 13% 91%;
-    --input: 220 13% 91%;
-    --ring: 28 100% 50%;
+    --border: 0 0% 90%;
+    --input: 0 0% 90%;
+    --ring: 270 70% 55%;
 
     --radius: 0.625rem;
 
@@ -44,21 +44,21 @@
     --info-foreground: 0 0% 100%;
 
     --navbar-bg: 0 0% 100%;
-    --navbar-fg: 220 20% 14%;
-    --navbar-border: 220 13% 91%;
+    --navbar-fg: 0 0% 0%;
+    --navbar-border: 0 0% 90%;
 
-    --shadow-sm: 0 1px 2px 0 hsl(220 20% 14% / 0.04);
-    --shadow-md: 0 4px 6px -1px hsl(220 20% 14% / 0.06), 0 2px 4px -2px hsl(220 20% 14% / 0.04);
-    --shadow-lg: 0 10px 15px -3px hsl(220 20% 14% / 0.06), 0 4px 6px -4px hsl(220 20% 14% / 0.04);
+    --shadow-sm: 0 1px 2px 0 hsl(0 0% 0% / 0.04);
+    --shadow-md: 0 4px 6px -1px hsl(0 0% 0% / 0.06), 0 2px 4px -2px hsl(0 0% 0% / 0.04);
+    --shadow-lg: 0 10px 15px -3px hsl(0 0% 0% / 0.06), 0 4px 6px -4px hsl(0 0% 0% / 0.04);
 
     --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 220 20% 14%;
-    --sidebar-primary: 28 100% 50%;
+    --sidebar-foreground: 0 0% 0%;
+    --sidebar-primary: 270 70% 55%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 220 14% 96%;
-    --sidebar-accent-foreground: 220 20% 14%;
-    --sidebar-border: 220 13% 91%;
-    --sidebar-ring: 28 100% 50%;
+    --sidebar-accent: 270 30% 96%;
+    --sidebar-accent-foreground: 0 0% 0%;
+    --sidebar-border: 0 0% 90%;
+    --sidebar-ring: 270 70% 55%;
   }
 
   .dark {
