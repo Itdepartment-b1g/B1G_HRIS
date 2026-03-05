@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -9,15 +9,20 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { Clock, Plus, Pencil, Trash2, Search, Loader2 } from 'lucide-react';
+import { Clock, Plus, Pencil, Trash2, Search, Loader2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 
 interface Shift {
   id: string;
   name: string;
   start_time: string;
   end_time: string;
+  break_start_time: string | null;
+  break_end_time: string | null;
+  break_total_hours: number | null;
+  grace_period_minutes: number | null;
   days: string[];
   description: string | null;
   is_active: boolean;
@@ -48,6 +53,33 @@ function formatDays(days: string[]): string {
   return days.join(', ');
 }
 
+function parseTimeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function computeBreakHours(start: string, end: string): number {
+  if (!start || !end) return 0;
+  const startM = parseTimeToMinutes(start);
+  const endM = parseTimeToMinutes(end);
+  const diff = endM - startM;
+  return diff <= 0 ? 0 : Math.round((diff / 60) * 100) / 100;
+}
+
+function computeShiftTotalHours(start: string, end: string): number {
+  if (!start || !end) return 0;
+  const startM = parseTimeToMinutes(start);
+  const endM = parseTimeToMinutes(end);
+  const diff = endM >= startM ? endM - startM : 24 * 60 - startM + endM;
+  return Math.round((diff / 60) * 100) / 100;
+}
+
+function computeNetWorkingHours(shiftStart: string, shiftEnd: string, breakHours: number): number {
+  const gross = computeShiftTotalHours(shiftStart, shiftEnd);
+  const net = Math.max(0, gross - breakHours);
+  return Math.round(net * 100) / 100;
+}
+
 const Shifts = () => {
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,12 +93,18 @@ const Shifts = () => {
   const [formName, setFormName] = useState('');
   const [formStartTime, setFormStartTime] = useState('08:00');
   const [formEndTime, setFormEndTime] = useState('17:00');
+  const [formBreakStart, setFormBreakStart] = useState('');
+  const [formBreakEnd, setFormBreakEnd] = useState('');
+  const [formBreakTotalHours, setFormBreakTotalHours] = useState('');
+  const [formGracePeriodMinutes, setFormGracePeriodMinutes] = useState('15');
   const [formDays, setFormDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
   const [formDescription, setFormDescription] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
 
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [deletingShift, setDeletingShift] = useState<Shift | null>(null);
+  const [viewingShift, setViewingShift] = useState<Shift | null>(null);
+  const [page, setPage] = useState(1);
 
   const fetchShifts = useCallback(async () => {
     setLoading(true);
@@ -91,11 +129,17 @@ const Shifts = () => {
   const filtered = shifts.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase())
   );
+  const paginated = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
+  useEffect(() => setPage(1), [search]);
 
   const resetForm = () => {
     setFormName('');
     setFormStartTime('08:00');
     setFormEndTime('17:00');
+    setFormBreakStart('');
+    setFormBreakEnd('');
+    setFormBreakTotalHours('');
+    setFormGracePeriodMinutes('15');
     setFormDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setFormDescription('');
     setFormIsActive(true);
@@ -114,10 +158,16 @@ const Shifts = () => {
     setSaving(true);
 
     try {
+      const breakTotal = formBreakTotalHours ? parseFloat(formBreakTotalHours) : (formBreakStart && formBreakEnd ? computeBreakHours(formBreakStart, formBreakEnd) : null);
+      const graceMins = formGracePeriodMinutes ? parseInt(formGracePeriodMinutes, 10) : 15;
       const { error } = await supabase.from('shifts').insert({
         name: formName.trim(),
         start_time: formStartTime,
         end_time: formEndTime,
+        break_start_time: formBreakStart || null,
+        break_end_time: formBreakEnd || null,
+        break_total_hours: breakTotal,
+        grace_period_minutes: graceMins >= 0 ? graceMins : 15,
         days: formDays,
         description: formDescription.trim() || null,
         is_active: formIsActive,
@@ -141,6 +191,10 @@ const Shifts = () => {
     setFormName(shift.name);
     setFormStartTime(shift.start_time.substring(0, 5));
     setFormEndTime(shift.end_time.substring(0, 5));
+    setFormBreakStart(shift.break_start_time?.substring(0, 5) || '');
+    setFormBreakEnd(shift.break_end_time?.substring(0, 5) || '');
+    setFormBreakTotalHours(shift.break_total_hours != null ? String(shift.break_total_hours) : '');
+    setFormGracePeriodMinutes(shift.grace_period_minutes != null ? String(shift.grace_period_minutes) : '15');
     setFormDays(shift.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setFormDescription(shift.description || '');
     setFormIsActive(shift.is_active);
@@ -153,12 +207,18 @@ const Shifts = () => {
     setSaving(true);
 
     try {
+      const breakTotal = formBreakTotalHours ? parseFloat(formBreakTotalHours) : (formBreakStart && formBreakEnd ? computeBreakHours(formBreakStart, formBreakEnd) : null);
+      const graceMins = formGracePeriodMinutes ? parseInt(formGracePeriodMinutes, 10) : 15;
       const { error } = await supabase
         .from('shifts')
         .update({
           name: formName.trim(),
           start_time: formStartTime,
           end_time: formEndTime,
+          break_start_time: formBreakStart || null,
+          break_end_time: formBreakEnd || null,
+          break_total_hours: breakTotal,
+          grace_period_minutes: graceMins >= 0 ? graceMins : 15,
           days: formDays,
           description: formDescription.trim() || null,
           is_active: formIsActive,
@@ -216,6 +276,43 @@ const Shifts = () => {
           <Label>End Time <span className="text-red-500">*</span></Label>
           <Input type="time" value={formEndTime} onChange={(e) => setFormEndTime(e.target.value)} required />
         </div>
+      </div>
+      <div className="space-y-2">
+        <Label>Grace Period (minutes allowed before marking late)</Label>
+        <Input type="number" min="0" max="120" value={formGracePeriodMinutes} onChange={(e) => setFormGracePeriodMinutes(e.target.value)} placeholder="15" />
+        <p className="text-xs text-muted-foreground">Minutes after shift start before marking late. E.g. 15 = time in up to start+15min is OK.</p>
+      </div>
+      <div className="text-sm text-muted-foreground">
+        {(() => {
+          const gross = computeShiftTotalHours(formStartTime, formEndTime);
+          const breakH = formBreakTotalHours ? parseFloat(formBreakTotalHours) : (formBreakStart && formBreakEnd ? computeBreakHours(formBreakStart, formBreakEnd) : 0);
+          const net = computeNetWorkingHours(formStartTime, formEndTime, breakH);
+          return (
+            <>
+              Net working hours: <span className="font-medium text-foreground">{net}h</span>
+              {breakH > 0 && <span className="ml-2">(gross {gross}h − break {breakH}h)</span>}
+            </>
+          );
+        })()}
+      </div>
+
+      <div className="space-y-2">
+        <Label className="text-muted-foreground">Break Time</Label>
+        <div className="grid grid-cols-3 gap-4">
+          <div className="space-y-1">
+            <Label className="text-xs font-normal">Start Time</Label>
+            <Input type="time" value={formBreakStart} onChange={(e) => { const v = e.target.value; setFormBreakStart(v); if (v && formBreakEnd) setFormBreakTotalHours(computeBreakHours(v, formBreakEnd).toFixed(2)); }} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-normal">End Time</Label>
+            <Input type="time" value={formBreakEnd} onChange={(e) => { const v = e.target.value; setFormBreakEnd(v); if (formBreakStart && v) setFormBreakTotalHours(computeBreakHours(formBreakStart, v).toFixed(2)); }} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-normal">Total Hours</Label>
+            <Input type="number" step="0.25" min="0" max="24" placeholder="e.g. 1" value={formBreakTotalHours} onChange={(e) => setFormBreakTotalHours(e.target.value)} />
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">Optional. Set start/end to auto-calculate total, or enter total hours directly.</p>
       </div>
 
       <div className="space-y-2">
@@ -299,6 +396,7 @@ const Shifts = () => {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
+            <>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -306,13 +404,16 @@ const Shifts = () => {
                   <TableHead>Schedule</TableHead>
                   <TableHead>Start Time</TableHead>
                   <TableHead>End Time</TableHead>
+                  <TableHead className="hidden lg:table-cell">Net Hrs</TableHead>
+                  <TableHead className="hidden lg:table-cell">Break</TableHead>
+                  <TableHead className="hidden xl:table-cell">Grace</TableHead>
                   <TableHead className="hidden md:table-cell">Description</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((shift) => (
+                {paginated.map((shift) => (
                   <TableRow key={shift.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -327,6 +428,23 @@ const Shifts = () => {
                     </TableCell>
                     <TableCell className="text-sm font-mono">{formatTime(shift.start_time)}</TableCell>
                     <TableCell className="text-sm font-mono">{formatTime(shift.end_time)}</TableCell>
+                    <TableCell className="text-sm font-medium hidden lg:table-cell">
+                      {computeNetWorkingHours(
+                        shift.start_time.substring(0, 5),
+                        shift.end_time.substring(0, 5),
+                        shift.break_total_hours ?? 0
+                      )}h
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
+                      {shift.break_start_time && shift.break_end_time
+                        ? `${formatTime(shift.break_start_time)}–${formatTime(shift.break_end_time)}`
+                        : shift.break_total_hours != null
+                        ? `${shift.break_total_hours}h`
+                        : '—'}
+                    </TableCell>
+                    <TableCell className="text-sm hidden xl:table-cell">
+                      {shift.grace_period_minutes != null ? `${shift.grace_period_minutes}m` : '—'}
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden md:table-cell max-w-[200px] truncate">
                       {shift.description || '—'}
                     </TableCell>
@@ -337,10 +455,13 @@ const Shifts = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(shift)}>
+                        <Button variant="ghost" size="icon" onClick={() => setViewingShift(shift)} title="View">
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(shift)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => { setDeletingShift(shift); setDeleteOpen(true); }}>
+                        <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => { setDeletingShift(shift); setDeleteOpen(true); }} title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -349,16 +470,55 @@ const Shifts = () => {
                 ))}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
                       No shifts found
                     </TableCell>
                   </TableRow>
                 )}
               </TableBody>
             </Table>
+            {!loading && filtered.length > 0 && (
+              <TablePagination totalItems={filtered.length} currentPage={page} onPageChange={setPage} />
+            )}
+            </>
           )}
         </CardContent>
       </Card>
+
+      {/* View Dialog */}
+      <Dialog open={!!viewingShift} onOpenChange={(open) => { if (!open) setViewingShift(null); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-primary" /> Shift Details
+            </DialogTitle>
+            <DialogDescription>{viewingShift?.name}</DialogDescription>
+          </DialogHeader>
+          {viewingShift && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div><span className="text-muted-foreground text-sm">Name</span><p className="font-medium">{viewingShift.name}</p></div>
+                <div><span className="text-muted-foreground text-sm">Schedule</span><p>{formatDays(viewingShift.days)}</p></div>
+                <div><span className="text-muted-foreground text-sm">Start Time</span><p className="font-mono">{formatTime(viewingShift.start_time)}</p></div>
+                <div><span className="text-muted-foreground text-sm">End Time</span><p className="font-mono">{formatTime(viewingShift.end_time)}</p></div>
+                <div><span className="text-muted-foreground text-sm">Net Hours</span><p>{computeNetWorkingHours(viewingShift.start_time.substring(0, 5), viewingShift.end_time.substring(0, 5), viewingShift.break_total_hours ?? 0)}h</p></div>
+                <div><span className="text-muted-foreground text-sm">Break</span><p>{viewingShift.break_start_time && viewingShift.break_end_time ? `${formatTime(viewingShift.break_start_time)} – ${formatTime(viewingShift.break_end_time)}` : viewingShift.break_total_hours != null ? `${viewingShift.break_total_hours}h` : '—'}</p></div>
+                <div><span className="text-muted-foreground text-sm">Grace Period</span><p>{viewingShift.grace_period_minutes != null ? `${viewingShift.grace_period_minutes} min` : '—'}</p></div>
+                <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant="outline" className={viewingShift.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{viewingShift.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
+              </div>
+              {viewingShift.description && (
+                <div><span className="text-muted-foreground text-sm">Description</span><p className="text-sm mt-1">{viewingShift.description}</p></div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewingShift(null)}>Close</Button>
+            <Button onClick={() => viewingShift && openEdit(viewingShift)} className="bg-primary hover:bg-primary/90 text-white">
+              <Pencil className="h-4 w-4 mr-2" /> Edit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>

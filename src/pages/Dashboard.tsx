@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
-import { MapPin, ChevronDown, Clock, FileText, Building2 } from 'lucide-react';
+import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { TimeInOutDialog } from '@/components/TimeInOutDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -16,13 +16,19 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
+import { cn, timeTo12Hour } from '@/lib/utils';
+import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import type { AttendanceRecord } from '@/types';
 import type { Employee } from '@/types';
 import { toast } from 'sonner';
 
-const statusVariant: Record<AttendanceRecord['status'], string> = {
+const statusVariant: Record<string, string> = {
   present: 'bg-green-100 text-green-700 border-green-200',
+  eti: 'bg-sky-100 text-sky-700 border-sky-200',
+  lti: 'bg-amber-100 text-amber-700 border-amber-200',
   late: 'bg-amber-100 text-amber-700 border-amber-200',
+  eto: 'bg-orange-100 text-orange-700 border-orange-200',
+  lto: 'bg-violet-100 text-violet-700 border-violet-200',
   absent: 'bg-red-100 text-red-700 border-red-200',
   half_day: 'bg-blue-100 text-blue-700 border-blue-200',
   on_leave: 'bg-slate-100 text-slate-700 border-slate-200',
@@ -39,11 +45,17 @@ const Dashboard = () => {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [clockedIn, setClockedIn] = useState(false);
   const [clockInTime, setClockInTime] = useState<string | null>(null);
+  const [clockOutTime, setClockOutTime] = useState<string | null>(null);
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [attendanceLogOpen, setAttendanceLogOpen] = useState(false);
+  const [timeInDialogOpen, setTimeInDialogOpen] = useState(false);
+  const [timeOutDialogOpen, setTimeOutDialogOpen] = useState(false);
+  const [workLocations, setWorkLocations] = useState<Array<{ id: string; name: string; latitude: number | null; longitude: number | null; radius_meters: number | null; allow_anywhere: boolean }>>([]);
+  const [assignedShift, setAssignedShift] = useState<{ name: string; start_time: string; end_time: string } | null>(null);
 
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
+  const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [leaveRequests, setLeaveRequests] = useState<Array<{ id: string; employee_id: string; employee_name: string; leave_type: string; start_date: string; end_date: string; status: string; reason?: string | null }>>([]);
   const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
   const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string }>>([]);
@@ -109,66 +121,153 @@ const Dashboard = () => {
     return () => clearInterval(timer);
   }, []);
 
+  const fetchWorkLocations = useCallback(async () => {
+    if (!currentUser?.id) return;
+    const { data: ewData } = await supabase
+      .from('employee_work_locations')
+      .select('work_location_id')
+      .eq('employee_id', currentUser.id);
+    const wlIds = (ewData || []).map((r) => r.work_location_id);
+    if (wlIds.length === 0) {
+      setWorkLocations([]);
+    } else {
+      const { data: wlData } = await supabase
+        .from('work_locations')
+        .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
+        .in('id', wlIds)
+        .eq('is_active', true);
+      setWorkLocations((wlData || []) as any);
+    }
+  }, [currentUser?.id]);
+
+  const fetchAssignedShift = useCallback(async () => {
+    if (!currentUser?.id) return;
+    const weekday = getWeekdayForDate(new Date());
+    const { data } = await supabase
+      .from('employee_shifts')
+      .select('shift:shifts(name, start_time, end_time, days)')
+      .eq('employee_id', currentUser.id);
+    const shifts = (data || []).map((s: any) => s.shift).filter(Boolean);
+    const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
+    if (shiftForToday) {
+      const st = (shiftForToday.start_time || '08:00:00').toString();
+      const et = (shiftForToday.end_time || '17:00:00').toString();
+      setAssignedShift({ name: shiftForToday.name || 'REG', start_time: st, end_time: et });
+    } else {
+      setAssignedShift(null);
+    }
+  }, [currentUser?.id]);
+
   useEffect(() => {
     if (!currentUser) return;
     fetchAttendanceLog();
     fetchLeaveAndAnnouncements();
     fetchEmployeesAndCompany();
-  }, [currentUser, fetchAttendanceLog, fetchLeaveAndAnnouncements, fetchEmployeesAndCompany]);
+    fetchWorkLocations();
+    fetchAssignedShift();
+  }, [currentUser, fetchAttendanceLog, fetchLeaveAndAnnouncements, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
 
-  const getLocation = (): Promise<{ lat: number; lng: number }> => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('Geolocation not supported'));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (pos) => resolve({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        (err) => reject(err),
-        { enableHighAccuracy: true }
-      );
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const todayRecord = attendanceLog.find((r) => r.date === today);
+    if (todayRecord) {
+      const hasTimeOut = !!todayRecord.time_out;
+      setClockedIn(!!todayRecord.time_in && !hasTimeOut);
+      setClockInTime(todayRecord.time_in ?? null);
+      setClockOutTime(todayRecord.time_out ?? null);
+    } else {
+      setClockedIn(false);
+      setClockInTime(null);
+      setClockOutTime(null);
+    }
+  }, [attendanceLog]);
+
+  const uploadPhoto = async (blob: Blob, employeeId: string, date: string, mode: 'in' | 'out'): Promise<string | null> => {
+    const ext = 'jpg';
+    const path = `${employeeId}/${date}_time_${mode}.${ext}`;
+    const { data, error } = await supabase.storage.from('attendance-photos').upload(path, blob, {
+      contentType: 'image/jpeg',
+      upsert: true,
     });
+    if (error) {
+      console.error('Photo upload failed:', error);
+      return null;
+    }
+    const { data: urlData } = supabase.storage.from('attendance-photos').getPublicUrl(data.path);
+    return urlData.publicUrl;
   };
 
-  const handleClockAction = async () => {
+  const handleTimeInConfirm = async (data: { photoBlob: Blob; lat: number; lng: number }) => {
     if (!currentUser) return;
     setLoadingLocation(true);
     try {
-      const loc = await getLocation();
-      setLocation(loc);
       const now = new Date();
       const today = now.toISOString().split('T')[0];
+      const timeInIso = now.toISOString();
+      setLocation({ lat: data.lat, lng: data.lng });
 
-      if (!clockedIn) {
-        await supabase.from('attendance_records').upsert({
-          employee_id: currentUser.id,
-          date: today,
-          time_in: now.toISOString(),
-          lat_in: loc.lat,
-          lng_in: loc.lng,
-          address_in: null,
-          status: 'present',
-        }, { onConflict: 'employee_id,date' });
-        setClockedIn(true);
-        setClockInTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
-        toast.success(`Clocked in at ${now.toLocaleTimeString()} | 📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`);
-        fetchAttendanceLog();
-      } else {
-        const { data: existing } = await supabase.from('attendance_records').select('id').eq('employee_id', currentUser.id).eq('date', today).single();
-        if (existing) {
-          await supabase.from('attendance_records').update({
-            time_out: now.toISOString(),
-            lat_out: loc.lat,
-            lng_out: loc.lng,
-            address_out: null,
-          }).eq('id', existing.id);
-        }
-        setClockedIn(false);
-        toast.success(`Clocked out at ${now.toLocaleTimeString()} | 📍 ${loc.lat.toFixed(4)}, ${loc.lng.toFixed(4)}`);
-        fetchAttendanceLog();
+      const photoUrl = await uploadPhoto(data.photoBlob, currentUser.id, today, 'in');
+
+      const weekday = getWeekdayForDate(today);
+      const [shiftRes, empRes] = await Promise.all([
+        supabase.from('employee_shifts').select('shift:shifts(start_time, grace_period_minutes, days)').eq('employee_id', currentUser.id),
+        supabase.from('employees').select('late_exempted, grace_period_exempted').eq('id', currentUser.id).single(),
+      ]);
+      const shifts = (shiftRes.data || []).map((s: any) => s.shift).filter(Boolean);
+      const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
+      const shiftInfo = shiftForToday ? { start_time: shiftForToday.start_time || '08:00:00', grace_period_minutes: shiftForToday.grace_period_minutes ?? 15, days: shiftForToday.days } : null;
+      const exemptions = empRes.data ? { late_exempted: empRes.data.late_exempted, grace_period_exempted: empRes.data.grace_period_exempted } : undefined;
+      const { status, minutesLate } = computeAttendanceStatusFromTimeIn({ timeInIso, date: today, shift: shiftInfo, exemptions });
+
+      await supabase.from('attendance_records').upsert({
+        employee_id: currentUser.id,
+        date: today,
+        time_in: timeInIso,
+        lat_in: data.lat,
+        lng_in: data.lng,
+        address_in: null,
+        time_in_photo_url: photoUrl,
+        status,
+        minutes_late: minutesLate,
+      }, { onConflict: 'employee_id,date' });
+      setClockedIn(true);
+      setClockInTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+      setClockOutTime(null);
+      const statusMsg = status === 'late' ? ` (Late — ${(minutesLate / 60).toFixed(2)} hrs past start)` : '';
+      toast.success(`Time in at ${now.toLocaleTimeString()}${statusMsg}`);
+      fetchAttendanceLog();
+    } catch (err) {
+      toast.error('Failed to record time in');
+    }
+    setLoadingLocation(false);
+  };
+
+  const handleTimeOutConfirm = async (data: { photoBlob: Blob; lat: number; lng: number }) => {
+    if (!currentUser || !clockedIn) return;
+    setLoadingLocation(true);
+    try {
+      const now = new Date();
+      const today = now.toISOString().split('T')[0];
+      setLocation({ lat: data.lat, lng: data.lng });
+
+      const photoUrl = await uploadPhoto(data.photoBlob, currentUser.id, today, 'out');
+
+      const { data: existing } = await supabase.from('attendance_records').select('id').eq('employee_id', currentUser.id).eq('date', today).single();
+      if (existing) {
+        await supabase.from('attendance_records').update({
+          time_out: now.toISOString(),
+          lat_out: data.lat,
+          lng_out: data.lng,
+          address_out: null,
+          time_out_photo_url: photoUrl,
+        }).eq('id', existing.id);
       }
+      setClockedIn(false);
+      setClockOutTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
+      toast.success(`Time out at ${now.toLocaleTimeString()}`);
+      fetchAttendanceLog();
     } catch {
-      toast.error('Unable to get location. Please enable GPS.');
+      toast.error('Failed to record time out');
     }
     setLoadingLocation(false);
   };
@@ -183,9 +282,12 @@ const Dashboard = () => {
   );
 
   const today = currentTime.toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
-  const shiftLabel = companyProfile?.work_start_time && companyProfile?.work_end_time
-    ? `${companyProfile.work_start_time.slice(0, 5)} - ${companyProfile.work_end_time.slice(0, 5)}`
-    : '08:00 - 17:00';
+  const shiftLabel = assignedShift
+    ? `${timeTo12Hour(assignedShift.start_time)} - ${timeTo12Hour(assignedShift.end_time)}`
+    : companyProfile?.work_start_time && companyProfile?.work_end_time
+    ? `${timeTo12Hour(companyProfile.work_start_time)} - ${timeTo12Hour(companyProfile.work_end_time)}`
+    : '8:00 AM - 5:00 PM';
+  const shiftName = assignedShift?.name ?? 'REG';
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
@@ -212,7 +314,7 @@ const Dashboard = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs text-muted-foreground">Today ({today})</p>
-                  <p className="text-xs text-muted-foreground">Shift: REG {shiftLabel}</p>
+                  <p className="text-xs text-muted-foreground">Shift: {shiftName} {shiftLabel}</p>
                 </div>
                 <FileText className="h-4 w-4 text-muted-foreground" />
               </div>
@@ -237,16 +339,46 @@ const Dashboard = () => {
                   <div>
                     <p className="text-xs text-muted-foreground">End Time</p>
                     <div className="flex items-center gap-1">
-                      <span className="text-sm font-mono font-medium text-foreground">--:--</span>
-                      <MapPin className="h-3 w-3 text-destructive" />
+                      <span className="text-sm font-mono font-medium text-foreground">{clockOutTime || '--:--'}</span>
+                      <MapPin className={cn('h-3 w-3', clockOutTime ? 'text-success' : 'text-destructive')} />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <Button className="w-full" onClick={handleClockAction} disabled={loadingLocation}>
-                {loadingLocation ? 'Getting location...' : clockedIn ? 'Clock Out' : 'Record Time'}
-              </Button>
+              <div className="flex gap-2">
+                <Button
+                  className="flex-1"
+                  onClick={() => setTimeInDialogOpen(true)}
+                  disabled={loadingLocation || clockedIn}
+                  variant={clockedIn ? 'outline' : 'default'}
+                >
+                  {loadingLocation ? '...' : 'Time In'}
+                </Button>
+                <Button
+                  className="flex-1"
+                  onClick={() => setTimeOutDialogOpen(true)}
+                  disabled={loadingLocation || !clockedIn}
+                  variant={!clockedIn ? 'outline' : 'default'}
+                >
+                  {loadingLocation ? '...' : 'Time Out'}
+                </Button>
+              </div>
+
+              <TimeInOutDialog
+                open={timeInDialogOpen}
+                onOpenChange={setTimeInDialogOpen}
+                mode="in"
+                workLocations={workLocations}
+                onConfirm={handleTimeInConfirm}
+              />
+              <TimeInOutDialog
+                open={timeOutDialogOpen}
+                onOpenChange={setTimeOutDialogOpen}
+                mode="out"
+                workLocations={workLocations}
+                onConfirm={handleTimeOutConfirm}
+              />
 
               {location && (
                 <p className="text-[10px] text-center text-muted-foreground">
@@ -308,39 +440,6 @@ const Dashboard = () => {
 
       {/* CENTER COLUMN */}
       <div className="lg:col-span-6 space-y-5">
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base font-semibold">Create New Post</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex items-center gap-3 p-3 bg-muted/50 rounded-lg cursor-pointer hover:bg-muted transition-colors">
-              <Avatar className="h-9 w-9">
-                <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                  {currentUser.first_name[0]}{currentUser.last_name[0]}
-                </AvatarFallback>
-              </Avatar>
-              <p className="text-sm text-muted-foreground">Share something great today...</p>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="pt-5">
-            <div className="flex items-center justify-between mb-2">
-              <div>
-                <h3 className="font-semibold text-sm text-foreground">My Onboarding</h3>
-                <p className="text-xs text-muted-foreground">Total progress that you completed</p>
-              </div>
-              <button className="text-xs text-primary font-medium">View More</button>
-            </div>
-            <Progress value={15} className="h-2" />
-            <div className="flex justify-between mt-1">
-              <span className="text-[10px] text-muted-foreground">0%</span>
-              <span className="text-[10px] text-muted-foreground">100%</span>
-            </div>
-          </CardContent>
-        </Card>
-
         <div>
           <h3 className="font-semibold text-lg text-foreground mb-3">All Feeds</h3>
           <div className="space-y-3">
@@ -405,6 +504,72 @@ const Dashboard = () => {
 
       {/* RIGHT COLUMN */}
       <div className="lg:col-span-3 space-y-5">
+        {/* Calendar - system date */}
+        <Card>
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-semibold">Calendar</CardTitle>
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() - 1))}
+                  className="p-1.5 rounded-md hover:bg-muted"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="text-sm font-medium min-w-[120px] text-center">
+                  {calendarMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setCalendarMonth((d) => new Date(d.getFullYear(), d.getMonth() + 1))}
+                  className="p-1.5 rounded-md hover:bg-muted"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-7 gap-1 text-center">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((day) => (
+                <div key={day} className="text-[10px] font-medium text-muted-foreground py-1">
+                  {day}
+                </div>
+              ))}
+              {(() => {
+                const year = calendarMonth.getFullYear();
+                const month = calendarMonth.getMonth();
+                const first = new Date(year, month, 1);
+                const last = new Date(year, month + 1, 0);
+                const startPad = first.getDay();
+                const daysInMonth = last.getDate();
+                const todayDate = new Date();
+                const isToday = (d: number) =>
+                  todayDate.getFullYear() === year && todayDate.getMonth() === month && todayDate.getDate() === d;
+                const cells: React.ReactNode[] = [];
+                for (let i = 0; i < startPad; i++) cells.push(<div key={`pad-${i}`} className="aspect-square" />);
+                for (let d = 1; d <= daysInMonth; d++) {
+                  cells.push(
+                    <div
+                      key={d}
+                      className={cn(
+                        'aspect-square flex items-center justify-center text-sm rounded-md',
+                        isToday(d)
+                          ? 'bg-primary text-primary-foreground font-semibold'
+                          : 'text-foreground hover:bg-muted'
+                      )}
+                    >
+                      {d}
+                    </div>
+                  );
+                }
+                return cells;
+              })()}
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base font-semibold">Employee Survey</CardTitle>
@@ -429,35 +594,6 @@ const Dashboard = () => {
                     <FileText className="h-8 w-8 text-muted-foreground/40" />
                   </div>
                   <p className="text-sm text-muted-foreground">No records to display</p>
-                </div>
-              </TabsContent>
-            </Tabs>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-semibold">Today's Task</CardTitle>
-              <button className="text-xs text-primary font-medium">View More</button>
-            </div>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="you">
-              <TabsList className="w-full bg-transparent border-b rounded-none h-auto p-0 gap-0">
-                <TabsTrigger value="you" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:shadow-none px-4 pb-2 text-sm">You</TabsTrigger>
-                <TabsTrigger value="coworkers" className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:text-primary data-[state=active]:shadow-none px-4 pb-2 text-sm">Co-Workers</TabsTrigger>
-              </TabsList>
-              <TabsContent value="you" className="pt-6">
-                <div className="flex flex-col items-center text-center py-4">
-                  <p className="text-lg">🎉</p>
-                  <p className="text-sm font-medium text-foreground mt-2">Hooray! All tasks are caught up</p>
-                  <p className="text-xs text-muted-foreground mt-1">Break a leg, stay productive!</p>
-                </div>
-              </TabsContent>
-              <TabsContent value="coworkers" className="pt-6">
-                <div className="flex flex-col items-center text-center py-4">
-                  <p className="text-sm text-muted-foreground">No co-worker tasks</p>
                 </div>
               </TabsContent>
             </Tabs>
@@ -519,7 +655,7 @@ const Dashboard = () => {
                       <TableCell className="font-mono text-sm">{record.time_in ?? '--:--'}</TableCell>
                       <TableCell className="font-mono text-sm">{record.time_out ?? '--:--'}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={statusVariant[record.status]}>{record.status.replace('_', ' ')}</Badge>
+                        <Badge variant="outline" className={statusVariant[record.status] || ''}>{record.status.replace('_', ' ')}</Badge>
                       </TableCell>
                     </TableRow>
                   ))

@@ -47,7 +47,7 @@ async function callEdgeFunction<T>(
 // TYPE DEFINITIONS
 // ============================================================
 
-export type UserRole = 'employee' | 'supervisor' | 'admin' | 'super_admin';
+export type UserRole = 'employee' | 'supervisor' | 'manager' | 'executive' | 'admin' | 'super_admin';
 
 export interface CreateUserData {
   email: string;

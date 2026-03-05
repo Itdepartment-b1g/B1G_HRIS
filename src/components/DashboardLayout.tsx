@@ -123,7 +123,7 @@ const DashboardLayout = () => {
 
             {/* Desktop Nav - hover opens dropdown */}
             <nav className="hidden lg:flex items-center gap-1">
-              {navDropdowns.map((dropdown) => (
+              {navDropdowns.filter((d) => !d.hidden).map((dropdown) => (
                 <div
                   key={dropdown.label}
                   className="relative"
@@ -251,7 +251,7 @@ const DashboardLayout = () => {
         {/* Mobile Nav - disabled when using bottom nav */}
         {false && mobileMenuOpen && (
           <div className="lg:hidden border-t border-white/10 bg-black px-4 py-3 space-y-2">
-            {navDropdowns.map((dropdown) => (
+            {navDropdowns.filter((d) => !d.hidden).map((dropdown) => (
               <div key={dropdown.label}>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 py-1.5">{dropdown.label}</p>
                 {dropdown.items.map((item) => {

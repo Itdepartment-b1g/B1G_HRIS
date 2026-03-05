@@ -27,6 +27,11 @@ import {
 import Settings from "./pages/Settings";
 import Departments from "./pages/Departments";
 import Shifts from "./pages/Shifts";
+import EmploymentStatus from "./pages/EmploymentStatus";
+import WorkLocations from "./pages/WorkLocations";
+import Holidays from "./pages/Holidays";
+import Positions from "./pages/Positions";
+import CostCenters from "./pages/CostCenters";
 import PersonalData from "./pages/employee/PersonalData";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import FeaturesPage from "./pages/mobile/FeaturesPage";
@@ -58,6 +63,7 @@ const App = () => (
             <Route path="task-feedback" element={<TaskFeedback />} />
             <Route path="daily-activity" element={<DailyActivity />} />
             <Route path="chat" element={<Announcements />} />
+            <Route path="announcements" element={<Announcements />} />
             <Route path="events" element={<EventScheduling />} />
             <Route path="survey" element={<EmployeeSurvey />} />
             <Route path="claims" element={<Reports />} />
@@ -69,7 +75,12 @@ const App = () => (
               <Route index element={<Navigate to="employees" replace />} />
               <Route path="employees" element={<Employees />} />
               <Route path="departments" element={<Departments />} />
+              <Route path="employment-status" element={<EmploymentStatus />} />
+              <Route path="positions" element={<Positions />} />
               <Route path="shifts" element={<Shifts />} />
+              <Route path="work-locations" element={<WorkLocations />} />
+              <Route path="holidays" element={<Holidays />} />
+              <Route path="cost-centers" element={<CostCenters />} />
             </Route>
             <Route path="employee" element={<EmployeeLayout />}>
               <Route index element={<Navigate to="personal-data" replace />} />

@@ -33,7 +33,7 @@ export const SettingsPage = () => (
 
 // Activity
 export const Announcements = () => (
-  <ComingSoon title="Chat" description="Internal communication tools for your team." icon={MessageCircle} />
+  <ComingSoon title="Announcements" description="Company announcements and updates." icon={MessageCircle} />
 );
 export const TaskFeedback = () => (
   <ComingSoon title="Task & Feedback" description="Employee task assignments and feedback details." icon={ClipboardList} />

@@ -14,7 +14,7 @@ const FeaturesPage = () => {
       </div>
 
       <div className="space-y-6">
-        {navDropdowns.map((section) => (
+        {navDropdowns.filter((section) => !section.hidden).map((section) => (
           <Card key={section.label}>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">{section.label}</CardTitle>
