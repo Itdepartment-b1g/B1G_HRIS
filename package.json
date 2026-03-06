@@ -67,6 +67,12 @@
     "vaul": "^0.9.9",
     "zod": "^3.25.76"
   },
+  "browserslist": [
+    "chrome >= 64",
+    "firefox >= 67",
+    "safari >= 12",
+    "edge >= 79"
+  ],
   "devDependencies": {
     "@eslint/js": "^9.32.0",
     "@tailwindcss/typography": "^0.5.16",
