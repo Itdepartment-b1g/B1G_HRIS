@@ -20,6 +20,8 @@ export interface NavItem {
   iconBg?: string;
   iconColor?: string;
   icon: LucideIcon;
+  /** When set, only these roles can see this item. Omit for all roles. */
+  roles?: string[];
 }
 
 export interface NavDropdown {
@@ -36,7 +38,7 @@ export const navDropdowns: NavDropdown[] = [
     items: [
       { label: 'Company', path: '/dashboard/company', description: 'Company related data', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Building2 },
       { label: 'Employee', path: '/dashboard/employee/personal-data', description: 'Employee related data', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', icon: Users },
-      { label: 'Master Data Setting', path: '/dashboard/master-data/employees', description: 'Employees, departments & shifts', iconBg: 'bg-slate-100', iconColor: 'text-slate-600', icon: Settings },
+      { label: 'Master Data Setting', path: '/dashboard/master-data/employees', description: 'Employees, departments & shifts', iconBg: 'bg-slate-100', iconColor: 'text-slate-600', icon: Settings, roles: ['super_admin', 'admin'] },
     ],
   },
   {

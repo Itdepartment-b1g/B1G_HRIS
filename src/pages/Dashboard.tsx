@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { TimeInOutDialog } from '@/components/TimeInOutDialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -41,6 +41,7 @@ function formatTime(t: string | null): string {
 }
 
 const Dashboard = () => {
+  const navigate = useNavigate();
   const { user: currentUser } = useCurrentUser();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [clockedIn, setClockedIn] = useState(false);
@@ -49,8 +50,6 @@ const Dashboard = () => {
   const [location, setLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [attendanceLogOpen, setAttendanceLogOpen] = useState(false);
-  const [timeInDialogOpen, setTimeInDialogOpen] = useState(false);
-  const [timeOutDialogOpen, setTimeOutDialogOpen] = useState(false);
   const [workLocations, setWorkLocations] = useState<Array<{ id: string; name: string; latitude: number | null; longitude: number | null; radius_meters: number | null; allow_anywhere: boolean }>>([]);
   const [assignedShift, setAssignedShift] = useState<{ name: string; start_time: string; end_time: string } | null>(null);
 
@@ -349,7 +348,7 @@ const Dashboard = () => {
               <div className="flex gap-2">
                 <Button
                   className="flex-1"
-                  onClick={() => setTimeInDialogOpen(true)}
+                  onClick={() => navigate('/dashboard/time-in-out?mode=in')}
                   disabled={loadingLocation || clockedIn}
                   variant={clockedIn ? 'outline' : 'default'}
                 >
@@ -357,28 +356,13 @@ const Dashboard = () => {
                 </Button>
                 <Button
                   className="flex-1"
-                  onClick={() => setTimeOutDialogOpen(true)}
+                  onClick={() => navigate('/dashboard/time-in-out?mode=out')}
                   disabled={loadingLocation || !clockedIn}
                   variant={!clockedIn ? 'outline' : 'default'}
                 >
                   {loadingLocation ? '...' : 'Time Out'}
                 </Button>
               </div>
-
-              <TimeInOutDialog
-                open={timeInDialogOpen}
-                onOpenChange={setTimeInDialogOpen}
-                mode="in"
-                workLocations={workLocations}
-                onConfirm={handleTimeInConfirm}
-              />
-              <TimeInOutDialog
-                open={timeOutDialogOpen}
-                onOpenChange={setTimeOutDialogOpen}
-                mode="out"
-                workLocations={workLocations}
-                onConfirm={handleTimeOutConfirm}
-              />
 
               {location && (
                 <p className="text-[10px] text-center text-muted-foreground">

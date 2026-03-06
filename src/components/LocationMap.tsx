@@ -111,8 +111,8 @@ export function LocationMap({ userLocation, workLocations, withinRadius, classNa
 
   return (
     <div className={className}>
-      <p className="text-xs text-muted-foreground mb-2">Map shows work location radius and your position</p>
-      <div ref={mapRef} className="h-48 w-full rounded-md border bg-muted/30 z-0" />
+      <p className="text-xs text-muted-foreground mb-1.5 sm:mb-2 hidden sm:block">Map shows work location radius and your position</p>
+      <div ref={mapRef} className="h-36 sm:h-48 w-full rounded-md border bg-muted/30 z-0" />
     </div>
   );
 }

@@ -41,6 +41,7 @@ import TeammatesPage from "./pages/mobile/TeammatesPage";
 import TasksPage from "./pages/mobile/TasksPage";
 import BirthdaysPage from "./pages/mobile/BirthdaysPage";
 import ProfilePage from "./pages/mobile/ProfilePage";
+import TimeInOutPage from "./pages/TimeInOutPage";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -96,6 +97,7 @@ const App = () => (
             <Route path="tasks" element={<TasksPage />} />
             <Route path="birthdays" element={<BirthdaysPage />} />
             <Route path="profile" element={<ProfilePage />} />
+            <Route path="time-in-out" element={<TimeInOutPage />} />
           </Route>
           <Route path="*" element={<NotFound />} />
         </Routes>
