@@ -10,6 +10,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { Camera, MapPin, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { isWithinWorkLocation, type WorkLocation } from '@/lib/geoUtils';
+import { LocationMap } from '@/components/LocationMap';
 
 interface TimeInOutDialogProps {
   open: boolean;
@@ -287,6 +288,22 @@ export function TimeInOutDialog({
                   )}
                 </div>
               </div>
+
+              {(() => {
+                const hasWorkLocationsWithCoords = workLocations.some(
+                  (l) => !l.allow_anywhere && l.latitude != null && l.longitude != null && l.radius_meters != null
+                );
+                const showMap = hasWorkLocationsWithCoords && (location || locationError);
+                if (!showMap) return null;
+                return (
+                  <LocationMap
+                    userLocation={location}
+                    workLocations={workLocations}
+                    withinRadius={withinRadius}
+                    className="mt-4"
+                  />
+                );
+              })()}
             </>
           )}
         </div>
@@ -295,7 +312,12 @@ export function TimeInOutDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={handleConfirm} disabled={!canProceed || submitting}>
+          <Button
+            onClick={handleConfirm}
+            disabled={!canProceed || submitting}
+            title={!canProceed && withinRadius === false ? 'You must be within your work location to proceed' : undefined}
+            className={!canProceed && withinRadius === false ? 'opacity-60 cursor-not-allowed' : ''}
+          >
             {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
             Confirm Time {mode === 'in' ? 'In' : 'Out'}
           </Button>
