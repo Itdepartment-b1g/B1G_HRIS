@@ -297,57 +297,57 @@ const Dashboard = () => {
             <CardTitle className="text-base font-semibold">Attendance</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex items-center gap-3">
-              <Avatar className="h-10 w-10">
+            <div className="flex items-center gap-3 min-w-0">
+              <Avatar className="h-10 w-10 shrink-0">
                 <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
                   {currentUser.first_name[0]}{currentUser.last_name[0]}
                 </AvatarFallback>
               </Avatar>
-              <div>
-                <p className="font-semibold text-sm text-foreground">{currentUser.first_name.toUpperCase()} {currentUser.last_name.toUpperCase()}</p>
-                <p className="text-xs text-muted-foreground">{currentUser.position || '—'}</p>
+              <div className="min-w-0 flex-1">
+                <p className="font-semibold text-sm text-foreground truncate sm:whitespace-normal sm:overflow-visible">{currentUser.first_name.toUpperCase()} {currentUser.last_name.toUpperCase()}</p>
+                <p className="text-xs text-muted-foreground truncate sm:whitespace-normal sm:overflow-visible">{currentUser.position || '—'}</p>
               </div>
             </div>
 
-            <div className="bg-card border rounded-xl p-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
+            <div className="bg-card border rounded-xl p-3 sm:p-4 space-y-3">
+              <div className="flex items-start sm:items-center justify-between gap-2">
+                <div className="min-w-0 flex-1">
                   <p className="text-xs text-muted-foreground">Today ({today})</p>
-                  <p className="text-xs text-muted-foreground">Shift: {shiftName} {shiftLabel}</p>
+                  <p className="text-xs text-muted-foreground break-words">Shift: {shiftName} {shiftLabel}</p>
                 </div>
-                <FileText className="h-4 w-4 text-muted-foreground" />
+                <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
               </div>
 
-              <div className="flex items-center gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
                     <span className="text-[10px] font-bold text-primary">{currentUser.first_name[0]}{currentUser.last_name[0]}</span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Start Time</p>
                     <div className="flex items-center gap-1">
                       <span className="text-sm font-mono font-medium text-foreground">{clockInTime || '--:--'}</span>
-                      <MapPin className={`h-3 w-3 ${clockedIn ? 'text-success' : 'text-destructive'}`} />
+                      <MapPin className={`h-3 w-3 shrink-0 ${clockedIn ? 'text-success' : 'text-destructive'}`} />
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 rounded-full bg-primary/10 flex items-center justify-center">
+                  <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
                     <span className="text-[10px] font-bold text-primary">{currentUser.first_name[0]}{currentUser.last_name[0]}</span>
                   </div>
-                  <div>
+                  <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">End Time</p>
                     <div className="flex items-center gap-1">
                       <span className="text-sm font-mono font-medium text-foreground">{clockOutTime || '--:--'}</span>
-                      <MapPin className={cn('h-3 w-3', clockOutTime ? 'text-success' : 'text-destructive')} />
+                      <MapPin className={cn('h-3 w-3 shrink-0', clockOutTime ? 'text-success' : 'text-destructive')} />
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2">
                 <Button
-                  className="flex-1"
+                  className="w-full sm:flex-1"
                   onClick={() => navigate('/dashboard/time-in-out?mode=in')}
                   disabled={loadingLocation || clockedIn}
                   variant={clockedIn ? 'outline' : 'default'}
@@ -355,7 +355,7 @@ const Dashboard = () => {
                   {loadingLocation ? '...' : 'Time In'}
                 </Button>
                 <Button
-                  className="flex-1"
+                  className="w-full sm:flex-1"
                   onClick={() => navigate('/dashboard/time-in-out?mode=out')}
                   disabled={loadingLocation || !clockedIn}
                   variant={!clockedIn ? 'outline' : 'default'}
