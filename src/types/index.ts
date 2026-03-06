@@ -16,6 +16,7 @@ export interface Employee {
   shift_id?: string | null;
   is_active: boolean;
   hired_date?: string | null;
+  login_exempted?: boolean;
   created_at: string;
   updated_at?: string;
   role?: UserRole;

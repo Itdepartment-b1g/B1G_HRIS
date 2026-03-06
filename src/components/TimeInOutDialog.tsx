@@ -209,7 +209,7 @@ export function TimeInOutDialog({
                 autoPlay
                 playsInline
                 muted
-                className="w-full h-full object-cover"
+                className="w-full h-full object-cover scale-x-[-1] md:scale-x-100"
               />
               <canvas ref={canvasRef} className="hidden" />
               {cameraError && (

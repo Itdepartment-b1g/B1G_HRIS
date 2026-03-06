@@ -11,6 +11,14 @@ CREATE POLICY "Authenticated upload attendance photos"
   TO authenticated
   WITH CHECK (bucket_id = 'attendance-photos');
 
+-- UPDATE required for upsert: true (overwrite existing same-day photo)
+DROP POLICY IF EXISTS "Authenticated update attendance photos" ON storage.objects;
+CREATE POLICY "Authenticated update attendance photos"
+  ON storage.objects FOR UPDATE
+  TO authenticated
+  USING (bucket_id = 'attendance-photos')
+  WITH CHECK (bucket_id = 'attendance-photos');
+
 DROP POLICY IF EXISTS "Anyone can view attendance photos" ON storage.objects;
 CREATE POLICY "Anyone can view attendance photos"
   ON storage.objects FOR SELECT
