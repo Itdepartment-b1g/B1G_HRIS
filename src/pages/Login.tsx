@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, User, Building2, Database } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -12,7 +12,18 @@ const Login = () => {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSeeding, setIsSeeding] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const navigate = useNavigate();
+
+  // Redirect to dashboard if already logged in (session persists in localStorage)
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setCheckingSession(false);
+      if (session?.user) {
+        navigate('/dashboard', { replace: true });
+      }
+    });
+  }, [navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -92,6 +103,17 @@ const Login = () => {
       setIsSeeding(false);
     }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="flex min-h-screen bg-white items-center justify-center">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+          <p className="text-sm text-muted-foreground">Checking session...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-h-screen bg-white">
