@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -10,8 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
-import { Building2, Plus, Pencil, Trash2, Search, Loader2, Users } from 'lucide-react';
+import { Building2, Plus, Pencil, Trash2, Search, Loader2, Users, Eye } from 'lucide-react';
 import { toast } from 'sonner';
+import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 
 interface DepartmentHead {
   id: string;
@@ -53,6 +54,8 @@ const Departments = () => {
   const [formParentId, setFormParentId] = useState('');
   const [editingDept, setEditingDept] = useState<Department | null>(null);
   const [deletingDept, setDeletingDept] = useState<Department | null>(null);
+  const [viewingDept, setViewingDept] = useState<Department | null>(null);
+  const [page, setPage] = useState(1);
 
   const fetchDepartments = useCallback(async () => {
     setLoading(true);
@@ -110,6 +113,8 @@ const Departments = () => {
   const filtered = departments.filter((d) =>
     d.name.toLowerCase().includes(search.toLowerCase())
   );
+  const paginated = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
+  useEffect(() => setPage(1), [search]);
 
   const resetForm = () => {
     setFormName('');
@@ -271,6 +276,7 @@ const Departments = () => {
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             </div>
           ) : (
+            <>
             <Table>
               <TableHeader>
                 <TableRow>
@@ -281,7 +287,7 @@ const Departments = () => {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filtered.map((dept) => (
+                {paginated.map((dept) => (
                   <TableRow key={dept.id}>
                     <TableCell>
                       <div className="flex items-center gap-3">
@@ -313,10 +319,13 @@ const Departments = () => {
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
-                        <Button variant="ghost" size="icon" onClick={() => openEdit(dept)}>
+                        <Button variant="ghost" size="icon" onClick={() => setViewingDept(dept)} title="View">
+                          <Eye className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="icon" onClick={() => openEdit(dept)} title="Edit">
                           <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => { setDeletingDept(dept); setDeleteOpen(true); }}>
+                        <Button variant="ghost" size="icon" className="text-red-600 hover:text-red-700 hover:bg-red-50" onClick={() => { setDeletingDept(dept); setDeleteOpen(true); }} title="Delete">
                           <Trash2 className="h-4 w-4" />
                         </Button>
                       </div>
@@ -332,9 +341,41 @@ const Departments = () => {
                 )}
               </TableBody>
             </Table>
+            {!loading && filtered.length > 0 && (
+              <TablePagination totalItems={filtered.length} currentPage={page} onPageChange={setPage} />
+            )}
+            </>
           )}
         </CardContent>
       </Card>
+
+      {/* View Dialog */}
+      <Dialog open={!!viewingDept} onOpenChange={(open) => { if (!open) setViewingDept(null); }}>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-primary" /> Department Details
+            </DialogTitle>
+            <DialogDescription>{viewingDept?.name}</DialogDescription>
+          </DialogHeader>
+          {viewingDept && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="col-span-2"><span className="text-muted-foreground text-sm">Name</span><p className="font-medium">{viewingDept.name}</p></div>
+                <div><span className="text-muted-foreground text-sm">Department Head</span><p>{viewingDept.head ? `${viewingDept.head.first_name} ${viewingDept.head.last_name}` : '—'}</p></div>
+                <div><span className="text-muted-foreground text-sm">Employees</span><p><Badge variant="outline" className="gap-1"><Users className="h-3 w-3" />{employeeCounts[viewingDept.name] || 0}</Badge></p></div>
+                <div className="col-span-2"><span className="text-muted-foreground text-sm">Parent Department</span><p>{viewingDept.parent_department_id ? departments.find((d) => d.id === viewingDept.parent_department_id)?.name || '—' : 'None (top-level)'}</p></div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setViewingDept(null)}>Close</Button>
+            <Button onClick={() => viewingDept && openEdit(viewingDept)} className="bg-primary hover:bg-primary/90 text-white">
+              <Pencil className="h-4 w-4 mr-2" /> Edit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Add Dialog */}
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
