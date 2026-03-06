@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import { Users, Network, Clock, Settings, ChevronRight, Briefcase, MapPin, CalendarDays, Target, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 interface NavItem {
   path: string;

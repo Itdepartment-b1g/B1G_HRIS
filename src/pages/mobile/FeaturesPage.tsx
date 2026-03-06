@@ -2,9 +2,11 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { navDropdowns } from '@/lib/navConfig';
 import { cn } from '@/lib/utils';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 const FeaturesPage = () => {
   const navigate = useNavigate();
+  const { user } = useCurrentUser();
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto pb-24">
@@ -14,13 +16,22 @@ const FeaturesPage = () => {
       </div>
 
       <div className="space-y-6">
-        {navDropdowns.filter((section) => !section.hidden).map((section) => (
+        {navDropdowns
+          .filter((section) => !section.hidden)
+          .map((section) => ({
+            ...section,
+            items: section.items.filter((item) => !item.roles || (user?.role && item.roles.includes(user.role))),
+          }))
+          .filter((section) => section.items.length > 0)
+          .map((section) => (
           <Card key={section.label}>
             <CardHeader className="pb-2">
               <CardTitle className="text-base">{section.label}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-1">
-              {section.items.map((item) => {
+              {section.items
+                .filter((item) => !item.roles || (user?.role && item.roles.includes(user.role)))
+                .map((item) => {
                 const Icon = item.icon;
                 return (
                   <button

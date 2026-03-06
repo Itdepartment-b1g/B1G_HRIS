@@ -153,7 +153,9 @@ const DashboardLayout = () => {
                           "gap-2",
                           dropdown.grid ? "grid grid-cols-2 gap-3" : "flex flex-col"
                         )}>
-                          {dropdown.items.map((item) => {
+                          {dropdown.items
+                            .filter((item) => !item.roles || (user?.role && item.roles.includes(user.role)))
+                            .map((item) => {
                             const Icon = item.icon;
                             return (
                               <button
@@ -254,7 +256,9 @@ const DashboardLayout = () => {
             {navDropdowns.filter((d) => !d.hidden).map((dropdown) => (
               <div key={dropdown.label}>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 py-1.5">{dropdown.label}</p>
-                {dropdown.items.map((item) => {
+                {dropdown.items
+                  .filter((item) => !item.roles || (user?.role && item.roles.includes(user.role)))
+                  .map((item) => {
                   const Icon = item.icon;
                   return (
                     <button

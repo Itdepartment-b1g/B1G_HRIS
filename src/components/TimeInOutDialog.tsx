@@ -190,20 +190,18 @@ export function TimeInOutDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Camera className="h-5 w-5 text-primary" />
+      <DialogContent className="max-w-md max-h-[95dvh] sm:max-h-[90vh] overflow-y-auto p-4 sm:p-6 w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] sm:w-auto sm:max-w-md pb-[max(1rem,env(safe-area-inset-bottom))]">
+        <DialogHeader className="space-y-1 sm:space-y-1.5">
+          <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+            <Camera className="h-4 w-4 sm:h-5 sm:w-5 text-primary shrink-0" />
             Time {mode === 'in' ? 'In' : 'Out'}
           </DialogTitle>
-          <DialogDescription>
-            {mode === 'in'
-              ? 'Take a photo, then we will verify your location. You must be within your work location to proceed.'
-              : 'Take a photo, then we will verify your location. You must be within your work location to proceed.'}
+          <DialogDescription className="text-xs sm:text-sm line-clamp-2 sm:line-clamp-none">
+            Take a photo, then we verify your location. Must be within work location.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="space-y-3 sm:space-y-4">
           {!capturedPhoto ? (
             <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
               <video
@@ -239,8 +237,8 @@ export function TimeInOutDialog({
                 </Button>
               </div>
 
-              <div className="flex items-center gap-3 p-4 rounded-lg border bg-muted/30">
-                <div className="flex-shrink-0">
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 sm:p-4 rounded-lg border bg-muted/30">
+                <div className="flex-shrink-0 flex items-center gap-3 sm:block">
                   {withinRadius === true ? (
                     <div className="h-12 w-12 rounded-full bg-emerald-100 flex items-center justify-center">
                       <CheckCircle2 className="h-7 w-7 text-emerald-600" />
@@ -308,8 +306,8 @@ export function TimeInOutDialog({
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+        <DialogFooter className="flex-col gap-2 sm:flex-row sm:gap-0">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting} className="w-full sm:w-auto">
             Cancel
           </Button>
           <Button
