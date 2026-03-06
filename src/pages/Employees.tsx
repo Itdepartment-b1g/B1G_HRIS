@@ -152,6 +152,9 @@ const Employees = () => {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
+  const [viewingWorkLocations, setViewingWorkLocations] = useState<string[]>([]);
+  const [viewingSupervisors, setViewingSupervisors] = useState<string[]>([]);
+  const [viewingShifts, setViewingShifts] = useState<string[]>([]);
   const [page, setPage] = useState(1);
 
   // Multi-select states
@@ -210,6 +213,32 @@ const Employees = () => {
   }, []);
 
   useEffect(() => { fetchEmployees(); fetchLookups(); }, [fetchEmployees, fetchLookups]);
+
+  useEffect(() => {
+    if (!viewingEmployee?.id) {
+      setViewingWorkLocations([]);
+      setViewingSupervisors([]);
+      setViewingShifts([]);
+      return;
+    }
+    const load = async () => {
+      const [wlRes, supRes, shRes] = await Promise.all([
+        supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', viewingEmployee.id),
+        supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', viewingEmployee.id),
+        supabase.from('employee_shifts').select('shift_id').eq('employee_id', viewingEmployee.id),
+      ]);
+      const wlIds = (wlRes.data || []).map((r: { work_location_id: string }) => r.work_location_id);
+      const supIds = (supRes.data || []).map((r: { supervisor_id: string }) => r.supervisor_id);
+      const shIds = (shRes.data || []).map((r: { shift_id: string }) => r.shift_id);
+      setViewingWorkLocations(wlIds.map((id) => workLocations.find((w) => w.id === id)?.name).filter(Boolean) as string[]);
+      setViewingSupervisors(supIds.map((id) => {
+        const emp = employees.find((e) => e.id === id);
+        return emp ? `${emp.first_name} ${emp.last_name}` : null;
+      }).filter(Boolean) as string[]);
+      setViewingShifts(shIds.map((id) => shifts.find((s) => s.id === id)?.name).filter(Boolean) as string[]);
+    };
+    load();
+  }, [viewingEmployee?.id, workLocations, employees, shifts]);
 
   // ── Derived ──────────────────────────────────────────
 
@@ -966,17 +995,53 @@ const Employees = () => {
           </DialogHeader>
           {viewingEmployee && (
             <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-1">
-              <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-muted-foreground text-sm">Employee Code</span><p className="font-medium">{viewingEmployee.employee_code}</p></div>
-                <div><span className="text-muted-foreground text-sm">Name</span><p className="font-medium">{viewingEmployee.first_name} {viewingEmployee.middle_name} {viewingEmployee.last_name} {viewingEmployee.suffix || ''}</p></div>
-                <div><span className="text-muted-foreground text-sm">Department</span><p>{viewingEmployee.department || '—'}</p></div>
-                <div><span className="text-muted-foreground text-sm">Position</span><p>{viewingEmployee.position || '—'}</p></div>
-                <div><span className="text-muted-foreground text-sm">Role</span><p>{roleBadge(getRole(viewingEmployee))}</p></div>
-                <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
-                <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email}</p></div>
-                <div><span className="text-muted-foreground text-sm">Phone</span><p>{viewingEmployee.phone || '—'}</p></div>
-                <div><span className="text-muted-foreground text-sm">Date Hired</span><p>{viewingEmployee.hired_date || '—'}</p></div>
-                <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>
+              {/* Personal Information */}
+              <div>
+                <h4 className="text-sm font-semibold border-b pb-2 mb-3">Personal Information</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><span className="text-muted-foreground text-sm">First Name</span><p className="font-medium">{viewingEmployee.first_name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Middle Name</span><p>{viewingEmployee.middle_name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Last Name</span><p className="font-medium">{viewingEmployee.last_name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Suffix</span><p>{viewingEmployee.suffix || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Nickname</span><p>{viewingEmployee.nickname || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Gender</span><p>{viewingEmployee.gender || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Birthdate</span><p>{viewingEmployee.birthdate || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Age</span><p>{viewingEmployee.birthdate ? (computeAge(viewingEmployee.birthdate) ?? '—') : '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Birthplace</span><p>{viewingEmployee.birthplace || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Civil Status</span><p>{viewingEmployee.civil_status || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Nationality</span><p>{viewingEmployee.nationality || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Phone</span><p>{viewingEmployee.phone || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Personal Email</span><p>{viewingEmployee.personal_email || '—'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Present Address</span><p className="text-sm">{viewingEmployee.present_address || '—'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Permanent Address</span><p className="text-sm">{viewingEmployee.permanent_address || '—'}</p></div>
+                </div>
+              </div>
+              {/* Employment Information */}
+              <div>
+                <h4 className="text-sm font-semibold border-b pb-2 mb-3">Employment Information</h4>
+                <div className="grid grid-cols-2 gap-4">
+                  <div><span className="text-muted-foreground text-sm">Employee Code</span><p className="font-medium">{viewingEmployee.employee_code}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Date Hired</span><p>{viewingEmployee.hired_date || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Employment Status</span><p>{employmentStatuses.find((s) => s.id === viewingEmployee.employment_status_id)?.name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Position</span><p>{viewingEmployee.position || positions.find((p) => p.id === viewingEmployee.position_id)?.name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Department</span><p>{viewingEmployee.department || departments.find((d) => d.id === viewingEmployee.department_id)?.name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Role</span><p>{roleBadge(getRole(viewingEmployee))}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
+                  <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Cost Center</span><p>{costCenters.find((c) => c.id === viewingEmployee.cost_center_id)?.name || '—'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Work Locations</span><p className="text-sm">{viewingWorkLocations.length > 0 ? viewingWorkLocations.join(', ') : '—'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Immediate Superior</span><p className="text-sm">{viewingSupervisors.length > 0 ? viewingSupervisors.join(', ') : '—'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Assigned Shifts</span><p className="text-sm">{viewingShifts.length > 0 ? viewingShifts.join(', ') : '—'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Exemptions</span><p className="text-sm">{[
+                    viewingEmployee.overtime_exempted && 'Overtime',
+                    viewingEmployee.late_exempted && 'Late',
+                    viewingEmployee.undertime_exempted && 'Undertime',
+                    viewingEmployee.grace_period_exempted && 'Grace Period',
+                    viewingEmployee.night_differential_exempted && 'Night Differential',
+                    viewingEmployee.login_exempted && 'Login',
+                  ].filter(Boolean).join(', ') || 'None'}</p></div>
+                </div>
               </div>
             </div>
           )}
