@@ -166,7 +166,10 @@ const TimeInOutPage = () => {
       contentType: 'image/jpeg',
       upsert: true,
     });
-    if (error) return null;
+    if (error) {
+      console.error('Photo upload failed:', error);
+      return null;
+    }
     const { data: urlData } = supabase.storage.from('attendance-photos').getPublicUrl(data.path);
     return urlData.publicUrl;
   };
@@ -182,6 +185,11 @@ const TimeInOutPage = () => {
       const now = new Date();
       const today = now.toISOString().split('T')[0];
       const photoUrl = await uploadPhoto(photoBlob, currentUser.id, today, mode);
+      if (!photoUrl) {
+        toast.error('Photo upload failed. Please try again.');
+        setSubmitting(false);
+        return;
+      }
 
       if (mode === 'in') {
         const weekday = getWeekdayForDate(today);
@@ -203,7 +211,7 @@ const TimeInOutPage = () => {
           shift: shiftInfo,
           exemptions,
         });
-        await supabase.from('attendance_records').upsert(
+        const { error: upsertError } = await supabase.from('attendance_records').upsert(
           {
             employee_id: currentUser.id,
             date: today,
@@ -217,6 +225,10 @@ const TimeInOutPage = () => {
           },
           { onConflict: 'employee_id,date' }
         );
+        if (upsertError) {
+          console.error('Time in upsert error:', upsertError);
+          throw new Error(upsertError.message);
+        }
         const statusMsg = status === 'late' ? ` (Late — ${(minutesLate / 60).toFixed(2)} hrs past start)` : '';
         toast.success(`Time in at ${now.toLocaleTimeString()}${statusMsg}`);
       } else {
@@ -226,23 +238,34 @@ const TimeInOutPage = () => {
           .eq('employee_id', currentUser.id)
           .eq('date', today)
           .single();
-        if (existing) {
-          await supabase
-            .from('attendance_records')
-            .update({
-              time_out: now.toISOString(),
-              lat_out: location.lat,
-              lng_out: location.lng,
-              address_out: null,
-              time_out_photo_url: photoUrl,
-            })
-            .eq('id', existing.id);
+        if (!existing) {
+          toast.error('No time-in record found for today');
+          setSubmitting(false);
+          return;
+        }
+        const { error: updateError } = await supabase
+          .from('attendance_records')
+          .update({
+            time_out: now.toISOString(),
+            lat_out: location.lat,
+            lng_out: location.lng,
+            address_out: null,
+            time_out_photo_url: photoUrl,
+          })
+          .eq('id', existing.id);
+        if (updateError) {
+          console.error('Time out update error:', updateError);
+          throw new Error(updateError.message);
         }
         toast.success(`Time out at ${now.toLocaleTimeString()}`);
       }
       navigate('/dashboard');
-    } catch {
-      toast.error(mode === 'in' ? 'Failed to record time in' : 'Failed to record time out');
+    } catch (err: any) {
+      const msg = err?.message || (mode === 'in' ? 'Failed to record time in' : 'Failed to record time out');
+      toast.error(msg);
+      if (msg.includes('time_in_photo_url') || msg.includes('time_out_photo_url')) {
+        toast.error('Run the attendance-photos migration to add photo URL columns.');
+      }
     } finally {
       setSubmitting(false);
     }
@@ -278,7 +301,7 @@ const TimeInOutPage = () => {
               autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-cover"
+              className="absolute inset-0 w-full h-full object-cover scale-x-[-1] md:scale-x-100"
             />
             <canvas ref={canvasRef} className="hidden" />
             {cameraError && (

@@ -181,6 +181,39 @@ const Dashboard = () => {
     }
   }, [attendanceLog]);
 
+  // Auto-create/update attendance for login-exempted users (no time in/out required)
+  // Always upsert so times match shift — fixes any existing records created with wrong timezone
+  useEffect(() => {
+    if (!currentUser?.login_exempted || !assignedShift) return;
+    const today = new Date().toISOString().split('T')[0];
+
+    const pad = (t: string) => (t.length >= 8 ? t : t + ':00'.slice(0, 8 - t.length));
+    const st = pad((assignedShift.start_time || '08:00:00').toString());
+    const et = pad((assignedShift.end_time || '17:00:00').toString());
+    const [y, m, d] = today.split('-').map(Number);
+    const parseTime = (t: string) => t.split(':').map((n) => parseInt(n, 10) || 0);
+    const [sh, sm, ss] = parseTime(st);
+    const [eh, em, es] = parseTime(et);
+    const timeInDate = new Date(y, m - 1, d, sh, sm, ss || 0);
+    const timeOutDate = new Date(y, m - 1, d, eh, em, es || 0);
+    timeInDate.setMilliseconds(0);
+    timeOutDate.setMilliseconds(0);
+    const timeInIso = timeInDate.toISOString();
+    const timeOutIso = timeOutDate.toISOString();
+
+    supabase
+      .from('attendance_records')
+      .upsert({
+        employee_id: currentUser.id,
+        date: today,
+        time_in: timeInIso,
+        time_out: timeOutIso,
+        status: 'present',
+        minutes_late: 0,
+      }, { onConflict: 'employee_id,date' })
+      .then(() => fetchAttendanceLog());
+  }, [currentUser?.id, currentUser?.login_exempted, assignedShift, attendanceLog, fetchAttendanceLog]);
+
   const uploadPhoto = async (blob: Blob, employeeId: string, date: string, mode: 'in' | 'out'): Promise<string | null> => {
     const ext = 'jpg';
     const path = `${employeeId}/${date}_time_${mode}.${ext}`;
@@ -345,24 +378,30 @@ const Dashboard = () => {
                 </div>
               </div>
 
-              <div className="flex flex-col sm:flex-row gap-2">
-                <Button
-                  className="w-full sm:flex-1"
-                  onClick={() => navigate('/dashboard/time-in-out?mode=in')}
-                  disabled={loadingLocation || clockedIn}
-                  variant={clockedIn ? 'outline' : 'default'}
-                >
-                  {loadingLocation ? '...' : 'Time In'}
-                </Button>
-                <Button
-                  className="w-full sm:flex-1"
-                  onClick={() => navigate('/dashboard/time-in-out?mode=out')}
-                  disabled={loadingLocation || !clockedIn}
-                  variant={!clockedIn ? 'outline' : 'default'}
-                >
-                  {loadingLocation ? '...' : 'Time Out'}
-                </Button>
-              </div>
+              {currentUser?.login_exempted ? (
+                <p className="text-sm text-muted-foreground text-center py-2">
+                  Login exempted — attendance is auto-recorded based on your assigned shift.
+                </p>
+              ) : (
+                <div className="flex flex-col sm:flex-row gap-2">
+                  <Button
+                    className="w-full sm:flex-1"
+                    onClick={() => navigate('/dashboard/time-in-out?mode=in')}
+                    disabled={loadingLocation || clockedIn}
+                    variant={clockedIn ? 'outline' : 'default'}
+                  >
+                    {loadingLocation ? '...' : 'Time In'}
+                  </Button>
+                  <Button
+                    className="w-full sm:flex-1"
+                    onClick={() => navigate('/dashboard/time-in-out?mode=out')}
+                    disabled={loadingLocation || !clockedIn}
+                    variant={!clockedIn ? 'outline' : 'default'}
+                  >
+                    {loadingLocation ? '...' : 'Time Out'}
+                  </Button>
+                </div>
+              )}
 
               {location && (
                 <p className="text-[10px] text-center text-muted-foreground">

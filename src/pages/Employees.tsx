@@ -734,54 +734,18 @@ const Employees = () => {
         </div>
       </div>
 
-      {/* Exemptions */}
+      {/* Exemptions — Login Exempted only (others hidden for now) */}
       <div className="space-y-2">
         <Label className="text-muted-foreground">Exemptions</Label>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border rounded-md p-4 bg-muted/30">
+        <div className="border rounded-md p-4 bg-muted/30">
           <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={employment.overtime_exempted}
-              onChange={(e) => setEmployment((prev) => ({ ...prev, overtime_exempted: e.target.checked }))}
-              className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            <span className="text-sm">Overtime Exempted — time out past shift end auto-set to end time</span>
-          </label>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={employment.late_exempted}
-              onChange={(e) => setEmployment((prev) => ({ ...prev, late_exempted: e.target.checked }))}
-              className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            <span className="text-sm">Late Exempted — time in auto-set to shift start time</span>
-          </label>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={employment.undertime_exempted}
-              onChange={(e) => setEmployment((prev) => ({ ...prev, undertime_exempted: e.target.checked }))}
-              className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            <span className="text-sm">Undertime Exempted — same as Late Exempted</span>
-          </label>
-          <label className="flex items-start gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={employment.grace_period_exempted}
-              onChange={(e) => setEmployment((prev) => ({ ...prev, grace_period_exempted: e.target.checked }))}
-              className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
-            />
-            <span className="text-sm">Grace Period Exempted — same as Late Exempted</span>
-          </label>
-          <label className="flex items-start gap-2 cursor-pointer md:col-span-2">
             <input
               type="checkbox"
               checked={employment.login_exempted}
               onChange={(e) => setEmployment((prev) => ({ ...prev, login_exempted: e.target.checked }))}
               className="h-4 w-4 mt-0.5 rounded border-gray-300 text-primary focus:ring-primary"
             />
-            <span className="text-sm">Login Exempted — does not require time in/out, always on time</span>
+            <span className="text-sm">Login Exempted — no time in/out required; attendance is auto-recorded based on assigned shift</span>
           </label>
         </div>
       </div>
@@ -1033,14 +997,7 @@ const Employees = () => {
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Work Locations</span><p className="text-sm">{viewingWorkLocations.length > 0 ? viewingWorkLocations.join(', ') : '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Immediate Superior</span><p className="text-sm">{viewingSupervisors.length > 0 ? viewingSupervisors.join(', ') : '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Assigned Shifts</span><p className="text-sm">{viewingShifts.length > 0 ? viewingShifts.join(', ') : '—'}</p></div>
-                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Exemptions</span><p className="text-sm">{[
-                    viewingEmployee.overtime_exempted && 'Overtime',
-                    viewingEmployee.late_exempted && 'Late',
-                    viewingEmployee.undertime_exempted && 'Undertime',
-                    viewingEmployee.grace_period_exempted && 'Grace Period',
-                    viewingEmployee.night_differential_exempted && 'Night Differential',
-                    viewingEmployee.login_exempted && 'Login',
-                  ].filter(Boolean).join(', ') || 'None'}</p></div>
+                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Exemptions</span><p className="text-sm">{viewingEmployee.login_exempted ? 'Login Exempted' : 'None'}</p></div>
                 </div>
               </div>
             </div>

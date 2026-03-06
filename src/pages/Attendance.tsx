@@ -10,10 +10,17 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Search, Loader2, Eye, ChevronDown, ChevronRight, Pencil, Camera } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Search, Loader2, Eye, ChevronDown, ChevronRight, Pencil, Camera, Filter, MapPin, MoreVertical, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
+import { timeTo12Hour } from '@/lib/utils';
 
 interface RecordRow {
   id: string;
@@ -22,6 +29,7 @@ interface RecordRow {
   employee_code: string;
   employee_name: string;
   assigned_shift: string;
+  assigned_shift_formatted: string; // e.g. "REG 10am to 7pm"
   time_in: string | null;
   time_out: string | null;
   time_in_photo_url: string | null;
@@ -42,6 +50,23 @@ const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave'
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function formatDateLong(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function statusShort(status: string): string {
+  const map: Record<string, string> = {
+    present: 'PRES',
+    late: 'LATE',
+    lti: 'LATE',
+    eti: 'PRES',
+    absent: 'ABS',
+    half_day: 'HD',
+    on_leave: 'LV',
+  };
+  return map[status] || status.toUpperCase().slice(0, 4);
 }
 
 function formatTime(iso: string | null): string | null {
@@ -82,18 +107,36 @@ const Attendance = () => {
   const [editTimeOut, setEditTimeOut] = useState('');
   const [saving, setSaving] = useState(false);
   const [page, setPage] = useState(1);
+  type MobileFilter = 'all_today' | 'my_30_days' | 'absent';
+  const [mobileFilter, setMobileFilter] = useState<MobileFilter>('my_30_days');
 
   const isAdmin = user?.role === 'super_admin' || user?.role === 'admin';
 
+  // Sync date range when mobile filter changes
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (mobileFilter === 'all_today') {
+      setDateFrom(today);
+      setDateTo(today);
+    } else if (mobileFilter === 'my_30_days' || mobileFilter === 'absent') {
+      const d = new Date();
+      d.setDate(d.getDate() - 30);
+      setDateFrom(d.toISOString().slice(0, 10));
+      setDateTo(today);
+    }
+  }, [mobileFilter]);
+
   const fetchRecords = useCallback(async () => {
     setLoading(true);
-    const { data } = await supabase
+    let query = supabase
       .from('attendance_records')
       .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name)')
       .gte('date', dateFrom)
-      .lte('date', dateTo)
-      .order('date', { ascending: false })
-      .order('time_in', { ascending: false });
+      .lte('date', dateTo);
+    if (mobileFilter === 'my_30_days' && user?.id) query = query.eq('employee_id', user.id);
+    if (mobileFilter === 'all_today' && !isAdmin && user?.id) query = query.eq('employee_id', user.id);
+    if (mobileFilter === 'absent') query = query.eq('status', 'absent');
+    const { data } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
 
     if (!data?.length) {
       setRecords([]);
@@ -104,20 +147,26 @@ const Attendance = () => {
     const empIds = [...new Set((data as any[]).map((r) => r.employee?.id).filter(Boolean))];
     const { data: shiftData } = await supabase
       .from('employee_shifts')
-      .select('employee_id, shift:shifts(name)')
+      .select('employee_id, shift:shifts(name, start_time, end_time)')
       .in('employee_id', empIds);
 
     const shiftMap = new Map<string, string[]>();
+    const shiftFormattedMap = new Map<string, string>();
     (shiftData || []).forEach((s: any) => {
-      const name = s.shift?.name || '—';
+      const sh = s.shift;
+      const name = sh?.name || 'REG';
       const list = shiftMap.get(s.employee_id) || [];
       if (!list.includes(name)) list.push(name);
       shiftMap.set(s.employee_id, list);
+      if (!shiftFormattedMap.has(s.employee_id) && sh?.start_time && sh?.end_time) {
+        shiftFormattedMap.set(s.employee_id, `${name} ${timeTo12Hour(sh.start_time)} to ${timeTo12Hour(sh.end_time)}`);
+      }
     });
 
     const rows: RecordRow[] = (data as any[]).map((r) => {
       const emp = r.employee;
       const shifts = shiftMap.get(emp?.id) || [];
+      const formatted = shiftFormattedMap.get(emp?.id) || shifts.join(', ') || '—';
       return {
         id: r.id,
         date: r.date,
@@ -125,6 +174,7 @@ const Attendance = () => {
         employee_code: emp?.employee_code || '—',
         employee_name: emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown',
         assigned_shift: shifts.join(', ') || '—',
+        assigned_shift_formatted: formatted,
         time_in: r.time_in,
         time_out: r.time_out,
         time_in_photo_url: r.time_in_photo_url,
@@ -143,7 +193,7 @@ const Attendance = () => {
     });
     setRecords(rows);
     setLoading(false);
-  }, [dateFrom, dateTo]);
+  }, [dateFrom, dateTo, mobileFilter, user?.id, isAdmin]);
 
   useEffect(() => {
     fetchRecords();
@@ -303,8 +353,142 @@ const Attendance = () => {
         <p className="text-muted-foreground text-sm mt-1">View daily attendance with geolocation and photo capture</p>
       </div>
 
-      {/* Search & Date Filter */}
-      <div className="flex flex-col sm:flex-row gap-3">
+      {/* Mobile: Filter tabs + Cards */}
+      <div className="block lg:hidden space-y-4">
+        <div className="flex items-center gap-2 overflow-x-auto pb-2">
+          <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <div className="flex gap-2 shrink-0">
+            {(['all_today', 'my_30_days', 'absent'] as const).map((f) => (
+              <button
+                key={f}
+                onClick={() => setMobileFilter(f)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                  mobileFilter === f
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                }`}
+              >
+                {f === 'all_today' ? 'All Today' : f === 'my_30_days' ? 'My Last 30 Days' : 'Absent'}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-12">
+            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filtered.map((r) => {
+              const hasWarning = r.status === 'absent' || r.status === 'late' || r.status === 'lti';
+              return (
+                <Card key={r.id} className="overflow-hidden">
+                  <CardContent className="p-4">
+                    <div className="flex items-start justify-between gap-2 mb-4">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-semibold truncate uppercase">{r.employee_name}</span>
+                        {hasWarning && (
+                          <div className="shrink-0 h-6 w-6 rounded-full bg-amber-100 flex items-center justify-center">
+                            <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                          </div>
+                        )}
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => setViewingRecord(r)}>
+                            <Eye className="h-4 w-4 mr-2" /> View
+                          </DropdownMenuItem>
+                          {isAdmin && (
+                            <>
+                              <DropdownMenuItem onClick={() => openEditStatus(r)}>
+                                <Pencil className="h-4 w-4 mr-2" /> Edit status
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => openEditRemarks(r)}>
+                                <Pencil className="h-4 w-4 mr-2" /> Edit remarks
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+
+                    <div className="space-y-2 text-sm text-muted-foreground mb-4">
+                      <div><span className="font-medium text-foreground">Date</span> — {formatDateLong(r.date)}</div>
+                      <div><span className="font-medium text-foreground">Shift</span> — {r.assigned_shift_formatted}</div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="rounded-lg border p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">Start Time</p>
+                        <div className="flex flex-col items-center gap-1">
+                          {r.time_in_photo_url ? (
+                            <a href={r.time_in_photo_url} target="_blank" rel="noopener noreferrer">
+                              <img src={r.time_in_photo_url} alt="Time in" className="h-20 w-20 object-cover rounded-full border" />
+                            </a>
+                          ) : (
+                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
+                              <span className="text-xs text-muted-foreground">No Data</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-xs">
+                            <MapPin className="h-3 w-3" />
+                            {r.address_in || formatTime(r.time_in) || '--:--'}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="rounded-lg border p-3 space-y-2">
+                        <p className="text-xs font-medium text-muted-foreground">End Time</p>
+                        <div className="flex flex-col items-center gap-1">
+                          {r.time_out_photo_url ? (
+                            <a href={r.time_out_photo_url} target="_blank" rel="noopener noreferrer">
+                              <img src={r.time_out_photo_url} alt="Time out" className="h-20 w-20 object-cover rounded-full border" />
+                            </a>
+                          ) : (
+                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
+                              <span className="text-xs text-muted-foreground">No Data</span>
+                            </div>
+                          )}
+                          <div className="flex items-center gap-1 text-xs">
+                            <MapPin className="h-3 w-3" />
+                            {r.address_out || formatTime(r.time_out) || '--:--'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="mt-3">
+                      <Badge
+                        variant="outline"
+                        className={
+                          r.status === 'absent'
+                            ? 'bg-red-100 text-red-700 border-red-200'
+                            : r.status === 'late' || r.status === 'lti'
+                            ? 'bg-amber-100 text-amber-700 border-amber-200'
+                            : 'bg-emerald-100 text-emerald-700 border-emerald-200'
+                        }
+                      >
+                        {statusShort(r.status)}
+                      </Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+            {filtered.length === 0 && (
+              <p className="text-center text-muted-foreground py-8">No attendance records found</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Desktop: Search & Date Filter */}
+      <div className="hidden lg:flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -321,7 +505,7 @@ const Attendance = () => {
         </div>
       </div>
 
-      <Card>
+      <Card className="hidden lg:block">
         <CardHeader>
           <CardTitle className="text-base">Attendance ({filtered.length})</CardTitle>
           <p className="text-sm text-muted-foreground">
