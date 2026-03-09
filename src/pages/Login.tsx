@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Lock, User, Building2, Database } from 'lucide-react';
+import { Lock, User, Building2, Eye, EyeOff } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -10,8 +10,8 @@ import { toast } from 'sonner';
 const Login = () => {
   const [employeeCode, setEmployeeCode] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
-  const [isSeeding, setIsSeeding] = useState(false);
   const [checkingSession, setCheckingSession] = useState(true);
   const navigate = useNavigate();
 
@@ -51,57 +51,6 @@ const Login = () => {
       toast.error(err instanceof Error ? err.message : 'Invalid employee code or password');
     }
     setIsLoading(false);
-  };
-
-  const handleSeedDatabase = async () => {
-    setIsSeeding(true);
-    try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-
-      if (!supabaseUrl || !supabaseAnonKey) {
-        toast.error('Supabase credentials not configured in .env file');
-        setIsSeeding(false);
-        return;
-      }
-
-      toast.loading('Seeding database...', { id: 'seed' });
-
-      const response = await fetch(`${supabaseUrl}/functions/v1/seed-database`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${supabaseAnonKey}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.error || 'Failed to seed database');
-      }
-
-      const result = await response.json();
-
-      toast.success(
-        `Database seeded successfully! Created ${result.created_users?.length ?? 0} users.`,
-        { id: 'seed', duration: 5000 }
-      );
-
-      if (result.errors?.length > 0) {
-        toast.warning(
-          `${result.errors.length} users already existed and were skipped`,
-          { duration: 4000 }
-        );
-      }
-    } catch (error) {
-      console.error('Seed error:', error);
-      toast.error(
-        error instanceof Error ? error.message : 'Failed to seed database',
-        { id: 'seed' }
-      );
-    } finally {
-      setIsSeeding(false);
-    }
   };
 
   if (checkingSession) {
@@ -155,7 +104,7 @@ const Login = () => {
                 <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                 <Input
                   id="code"
-                  placeholder="e.g. EMP-001"
+                  placeholder="Employee Code"
                   value={employeeCode}
                   onChange={(e) => setEmployeeCode(e.target.value)}
                   className="pl-10 border-gray-300 text-black placeholder:text-gray-400"
@@ -170,13 +119,21 @@ const Login = () => {
                 <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-500" />
                 <Input
                   id="password"
-                  type="password"
+                  type={showPassword ? 'text' : 'password'}
                   placeholder="••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 border-gray-300 text-black placeholder:text-gray-400"
+                  className="pl-10 pr-10 border-gray-300 text-black placeholder:text-gray-400"
                   required
                 />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((p) => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700 focus:outline-none"
+                  aria-label={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
               </div>
             </div>
 
@@ -188,22 +145,6 @@ const Login = () => {
           <p className="text-center text-xs text-gray-600">
             Sign in with your company employee code and password.
           </p>
-
-          <div className="pt-4 border-t border-gray-200">
-            <Button
-              type="button"
-              variant="outline"
-              className="w-full border-purple-300 text-purple-700 hover:bg-purple-50 hover:text-purple-800"
-              onClick={handleSeedDatabase}
-              disabled={isSeeding}
-            >
-              <Database className="mr-2 h-4 w-4" />
-              {isSeeding ? 'Seeding Database...' : 'Seed Database'}
-            </Button>
-            <p className="text-center text-xs text-gray-500 mt-2">
-              Populate database with sample data (employees + records)
-            </p>
-          </div>
         </div>
       </div>
     </div>

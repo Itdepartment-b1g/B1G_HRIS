@@ -29,7 +29,7 @@ const TeammatesPage = () => {
     ? employeesWithRole.find((e) => e.id === currentUser.supervisor_id)
     : employeesWithRole.find((e) => e.role === 'supervisor' || e.role === 'admin');
   const coworkers = employeesWithRole.filter(
-    (e) => e.role === 'employee' && e.supervisor_id === currentUser?.supervisor_id && e.id !== currentUser?.id
+    (e) => (e.role === 'employee' || e.role === 'intern') && e.supervisor_id === currentUser?.supervisor_id && e.id !== currentUser?.id
   );
 
   if (!currentUser) return null;

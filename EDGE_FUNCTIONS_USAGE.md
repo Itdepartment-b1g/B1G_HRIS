@@ -36,18 +36,24 @@ const response = await fetch(`${SUPABASE_URL}/functions/v1/seed-database`, {
 Creates a new employee user with authentication.
 
 **Required fields:**
-- `email` - Employee email address
-- `password` - Initial password
+- `email` - Employee company email (login + where password is sent)
 - `employee_code` - Unique employee code (e.g., EMP-011)
 - `first_name` - First name
 - `last_name` - Last name
 
 **Optional fields:**
+- `password` - If omitted, a random password is generated and emailed to the user
 - `phone` - Phone number
 - `department` - Department name
 - `position` - Job position
 - `role` - User role ('employee', 'supervisor', 'admin', 'super_admin')
 - `hired_date` - Date hired (YYYY-MM-DD)
+
+**Email setup (for password delivery):** Set Supabase secrets:
+```bash
+supabase secrets set GMAIL_USER=your@gmail.com GMAIL_PASSWORD="your-app-password"
+```
+Use a Gmail [App Password](https://support.google.com/accounts/answer/185833) if 2FA is enabled.
 
 **Example:**
 ```javascript
@@ -59,7 +65,6 @@ const response = await fetch(`${SUPABASE_URL}/functions/v1/create-user`, {
   },
   body: JSON.stringify({
     email: 'newuser@b1gcorp.com',
-    password: 'password123',
     employee_code: 'EMP-011',
     first_name: 'New',
     last_name: 'Employee',

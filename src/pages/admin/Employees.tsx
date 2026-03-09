@@ -57,6 +57,7 @@ const AdminEmployees = () => {
       admin: 'bg-blue-100 text-blue-700 border-blue-300',
       supervisor: 'bg-orange-100 text-orange-700 border-orange-300',
       employee: 'bg-gray-100 text-gray-700 border-gray-300',
+      intern: 'bg-gray-100 text-gray-700 border-gray-300',
     };
     return <Badge variant="outline" className={styles[role] || ''}>{role.replace('_', ' ')}</Badge>;
   };

@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { createUser } from '@/lib/edgeFunctions';
+import { createUser, type UserRole } from '@/lib/edgeFunctions';
 
 const AddEmployee = () => {
   const navigate = useNavigate();
@@ -18,7 +18,6 @@ const AddEmployee = () => {
     first_name: '',
     last_name: '',
     email: '',
-    password: 'password123',
     phone: '',
     department: '',
     position: '',
@@ -35,10 +34,14 @@ const AddEmployee = () => {
     setIsLoading(true);
 
     try {
-      const result = await createUser(formData);
+      const result = await createUser({
+        ...formData,
+        phone: formData.phone || undefined,
+        role: formData.role as UserRole,
+      });
       
       toast.success(
-        `Employee ${result.user.employee_code} created successfully!`,
+        `Employee ${result.user.employee_code} created successfully! Login credentials have been sent to their company email.`,
         { duration: 5000 }
       );
       
@@ -76,7 +79,7 @@ const AddEmployee = () => {
             Employee Information
           </CardTitle>
           <CardDescription>
-            Fill in the employee details below. A default password will be set.
+            Fill in the employee details below. A random password will be generated and sent to the employee&apos;s company email.
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -217,24 +220,13 @@ const AddEmployee = () => {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="employee">Employee</SelectItem>
+                      <SelectItem value="intern">Intern</SelectItem>
                       <SelectItem value="supervisor">Supervisor</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-xs text-gray-500">Admins can only create Employee and Supervisor roles</p>
+                  <p className="text-xs text-gray-500">Admins can only create Employee, Intern, and Supervisor roles</p>
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-black">Initial Password</Label>
-                  <Input
-                    id="password"
-                    type="text"
-                    value={formData.password}
-                    onChange={(e) => handleInputChange('password', e.target.value)}
-                    className="border-gray-300 text-black font-mono"
-                    required
-                  />
-                  <p className="text-xs text-gray-500">User can change this after first login</p>
-                </div>
               </div>
             </div>
 

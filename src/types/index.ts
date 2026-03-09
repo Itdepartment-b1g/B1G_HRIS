@@ -1,6 +1,6 @@
 // Shared types aligned with Supabase schema
 
-export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'employee';
+export type UserRole = 'super_admin' | 'admin' | 'supervisor' | 'employee' | 'intern' | 'manager' | 'executive';
 
 export interface Employee {
   id: string;
