@@ -84,7 +84,7 @@ function toDateTimeLocal(iso: string | null, dateFallback: string): string {
 }
 
 const Attendance = () => {
-  const { user } = useCurrentUser();
+  const { user, loading: userLoading } = useCurrentUser();
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -133,8 +133,10 @@ const Attendance = () => {
       .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name)')
       .gte('date', dateFrom)
       .lte('date', dateTo);
-    if (mobileFilter === 'my_30_days' && user?.id) query = query.eq('employee_id', user.id);
-    if (mobileFilter === 'all_today' && !isAdmin && user?.id) query = query.eq('employee_id', user.id);
+    // Super admin and admin see all employees' attendance; others see only their own
+    const restrictToSelf = !userLoading && !isAdmin && user?.id;
+    if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
+    if (mobileFilter === 'all_today' && restrictToSelf) query = query.eq('employee_id', user.id);
     if (mobileFilter === 'absent') query = query.eq('status', 'absent');
     const { data } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
 
@@ -193,11 +195,11 @@ const Attendance = () => {
     });
     setRecords(rows);
     setLoading(false);
-  }, [dateFrom, dateTo, mobileFilter, user?.id, isAdmin]);
+  }, [dateFrom, dateTo, mobileFilter, user?.id, isAdmin, userLoading]);
 
   useEffect(() => {
-    fetchRecords();
-  }, [fetchRecords]);
+    if (!userLoading) fetchRecords();
+  }, [fetchRecords, userLoading]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return records;
