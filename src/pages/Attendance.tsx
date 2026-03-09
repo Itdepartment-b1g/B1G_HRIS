@@ -128,17 +128,46 @@ const Attendance = () => {
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
-    let query = supabase
-      .from('attendance_records')
-      .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name)')
-      .gte('date', dateFrom)
-      .lte('date', dateTo);
-    // Super admin and admin see all employees' attendance; others see only their own
-    const restrictToSelf = !userLoading && !isAdmin && user?.id;
-    if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
-    if (mobileFilter === 'all_today' && restrictToSelf) query = query.eq('employee_id', user.id);
-    if (mobileFilter === 'absent') query = query.eq('status', 'absent');
-    const { data } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
+    // Use RPC to ensure admins always see all records (handles RLS edge cases)
+    const statusFilter = mobileFilter === 'absent' ? 'absent' : null;
+    let data: any[] | null = null;
+
+    const { data: rpcData, error } = await supabase.rpc('get_attendance_records', {
+      _date_from: dateFrom,
+      _date_to: dateTo,
+      _status_filter: statusFilter,
+    });
+
+    if (error) {
+      // Fallback to direct query if RPC doesn't exist yet (migration not run)
+      console.warn('RPC get_attendance_records failed, falling back to direct query:', error.message);
+      const restrictToSelf = !userLoading && !isAdmin && user?.id;
+      let query = supabase
+        .from('attendance_records')
+        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name)')
+        .gte('date', dateFrom)
+        .lte('date', dateTo);
+      if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
+      if (mobileFilter === 'all_today' && restrictToSelf) query = query.eq('employee_id', user.id);
+      if (mobileFilter === 'absent') query = query.eq('status', 'absent');
+      const { data: directData } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
+
+      if (!directData?.length) {
+        setRecords([]);
+        setLoading(false);
+        return;
+      }
+      // Transform direct query format to match RPC format for unified handling below
+      data = (directData as any[]).map((r) => ({
+        ...r,
+        employee_id: r.employee?.id,
+        employee_code: r.employee?.employee_code,
+        employee_first_name: r.employee?.first_name,
+        employee_last_name: r.employee?.last_name,
+      }));
+    } else {
+      data = rpcData;
+    }
 
     if (!data?.length) {
       setRecords([]);
@@ -146,7 +175,7 @@ const Attendance = () => {
       return;
     }
 
-    const empIds = [...new Set((data as any[]).map((r) => r.employee?.id).filter(Boolean))];
+    const empIds = [...new Set((data as any[]).map((r) => r.employee_id).filter(Boolean))];
     const { data: shiftData } = await supabase
       .from('employee_shifts')
       .select('employee_id, shift:shifts(name, start_time, end_time)')
@@ -166,15 +195,15 @@ const Attendance = () => {
     });
 
     const rows: RecordRow[] = (data as any[]).map((r) => {
-      const emp = r.employee;
-      const shifts = shiftMap.get(emp?.id) || [];
-      const formatted = shiftFormattedMap.get(emp?.id) || shifts.join(', ') || '—';
+      const shifts = shiftMap.get(r.employee_id) || [];
+      const formatted = shiftFormattedMap.get(r.employee_id) || shifts.join(', ') || '—';
+      const employeeName = [r.employee_first_name, r.employee_last_name].filter(Boolean).join(' ') || 'Unknown';
       return {
         id: r.id,
         date: r.date,
-        employee_id: emp?.id || '',
-        employee_code: emp?.employee_code || '—',
-        employee_name: emp ? `${emp.first_name} ${emp.last_name}` : 'Unknown',
+        employee_id: r.employee_id || '',
+        employee_code: r.employee_code || '—',
+        employee_name: employeeName,
         assigned_shift: shifts.join(', ') || '—',
         assigned_shift_formatted: formatted,
         time_in: r.time_in,
@@ -195,7 +224,7 @@ const Attendance = () => {
     });
     setRecords(rows);
     setLoading(false);
-  }, [dateFrom, dateTo, mobileFilter, user?.id, isAdmin, userLoading]);
+  }, [dateFrom, dateTo, mobileFilter, userLoading, isAdmin, user?.id]);
 
   useEffect(() => {
     if (!userLoading) fetchRecords();
