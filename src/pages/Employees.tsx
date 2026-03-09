@@ -14,7 +14,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from '@/components/ui/textarea';
 import { UserPlus, Pencil, Trash2, Search, Loader2, ChevronRight, ChevronLeft, Eye } from 'lucide-react';
 import { toast } from 'sonner';
-import { cn, timeTo12Hour } from '@/lib/utils';
+import { cn, timeTo12Hour, formatPhonePH, normalizePhonePH, isValidPhonePH } from '@/lib/utils';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 
 // ── Types ──────────────────────────────────────────────
@@ -70,6 +70,7 @@ const SUFFIXES = ['', 'Jr.', 'Sr.', 'II', 'III', 'IV', 'V'];
 
 const ROLE_LABELS: Record<string, string> = {
   employee: 'Rank and File',
+  intern: 'Intern',
   supervisor: 'Supervisory',
   manager: 'Manager',
   executive: 'Executive',
@@ -84,6 +85,7 @@ const ROLE_STYLES: Record<string, string> = {
   manager: 'bg-teal-100 text-teal-700 border-teal-200',
   executive: 'bg-purple-100 text-purple-700 border-purple-200',
   employee: 'bg-secondary text-secondary-foreground',
+  intern: 'bg-secondary text-secondary-foreground',
 };
 
 const emptyPersonal = {
@@ -106,7 +108,6 @@ const emptyPersonal = {
 const emptyEmployment = {
   employee_code: '',
   email: '',
-  password: 'password123',
   hired_date: new Date().toISOString().split('T')[0],
   employment_status_id: '',
   position_id: '',
@@ -285,7 +286,7 @@ const Employees = () => {
     });
   };
 
-  const canProceedToStep2 = personal.first_name.trim() && personal.last_name.trim() && personal.phone.trim();
+  const canProceedToStep2 = personal.first_name.trim() && personal.last_name.trim() && personal.phone.trim() && isValidPhonePH(personal.phone);
 
   // ── Junction Table Saves ─────────────────────────────
 
@@ -344,18 +345,25 @@ const Employees = () => {
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!employment.company_email?.trim()) {
+      toast.error('Company email is required');
+      return;
+    }
+    if (!isValidPhonePH(personal.phone)) {
+      toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
+      return;
+    }
     setSaving(true);
     try {
       const deptName = departments.find((d) => d.id === employment.department_id)?.name;
       const posName = positions.find((p) => p.id === employment.position_id)?.name;
 
       const result = await createUser({
-        email: employment.email,
-        password: employment.password,
+        email: employment.company_email,
         employee_code: employment.employee_code,
         first_name: personal.first_name,
         last_name: personal.last_name,
-        phone: personal.phone || undefined,
+        phone: normalizePhonePH(personal.phone) || undefined,
         department: deptName || undefined,
         position: posName || undefined,
         role: employment.role as UserRole,
@@ -367,7 +375,7 @@ const Employees = () => {
       await supabase.from('employees').update(buildEmployeeUpdate()).eq('id', userId);
       await saveJunctions(userId);
 
-      toast.success('Employee created successfully');
+      toast.success('Employee created successfully. Login credentials have been sent to their company email.');
       setAddOpen(false);
       resetForm();
       fetchEmployees();
@@ -393,7 +401,7 @@ const Employees = () => {
       birthplace: emp.birthplace || '',
       civil_status: emp.civil_status || '',
       nationality: emp.nationality || '',
-      phone: emp.phone || '',
+      phone: formatPhonePH(emp.phone || '') || '',
       personal_email: emp.personal_email || '',
       present_address: emp.present_address || '',
       permanent_address: emp.permanent_address || '',
@@ -401,7 +409,6 @@ const Employees = () => {
     setEmployment({
       employee_code: emp.employee_code,
       email: emp.email,
-      password: '',
       hired_date: emp.hired_date || '',
       employment_status_id: emp.employment_status_id || '',
       position_id: emp.position_id || '',
@@ -433,6 +440,10 @@ const Employees = () => {
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEmployee) return;
+    if (personal.phone.trim() && !isValidPhonePH(personal.phone)) {
+      toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
+      return;
+    }
     setSaving(true);
     try {
       const deptName = departments.find((d) => d.id === employment.department_id)?.name;
@@ -444,7 +455,7 @@ const Employees = () => {
           employee_code: employment.employee_code,
           first_name: personal.first_name,
           last_name: personal.last_name,
-          phone: personal.phone || undefined,
+          phone: normalizePhonePH(personal.phone) || undefined,
           department: deptName || undefined,
           position: posName || undefined,
           role: employment.role as UserRole,
@@ -562,13 +573,7 @@ const Employees = () => {
         </div>
         <div className="space-y-2">
           <Label>Phone Number <span className="text-red-500">*</span></Label>
-          <Input type="tel" value={personal.phone} onChange={(e) => setP('phone', e.target.value)} placeholder="+63-917-1234567" required />
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Personal Email Address</Label>
-          <Input type="email" value={personal.personal_email} onChange={(e) => setP('personal_email', e.target.value)} placeholder="john.doe@gmail.com" />
+          <Input type="tel" value={personal.phone} onChange={(e) => setP('phone', formatPhonePH(e.target.value))} placeholder="09XX XXX XXXX" required />
         </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -680,8 +685,9 @@ const Employees = () => {
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Company Email Address</Label>
-          <Input type="email" value={employment.company_email} onChange={(e) => setE('company_email', e.target.value)} placeholder="john.doe@company.com" />
+          <Label>Company Email Address {!isEdit && <span className="text-red-500">*</span>}</Label>
+          <Input type="email" value={employment.company_email} onChange={(e) => setE('company_email', e.target.value)} placeholder="john.doe@company.com" required={!isEdit} />
+          {!isEdit && <p className="text-xs text-muted-foreground">Used for login. A random password will be generated and sent here.</p>}
         </div>
       </div>
 
@@ -750,19 +756,6 @@ const Employees = () => {
         </div>
       </div>
 
-      {!isEdit && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label>Email (for login) <span className="text-red-500">*</span></Label>
-            <Input type="email" value={employment.email} onChange={(e) => setE('email', e.target.value)} placeholder="user@company.com" required />
-          </div>
-          <div className="space-y-2">
-            <Label>Initial Password</Label>
-            <Input type="text" value={employment.password} onChange={(e) => setE('password', e.target.value)} className="font-mono" required />
-            <p className="text-xs text-muted-foreground">User can change this after first login</p>
-          </div>
-        </div>
-      )}
     </div>
   );
 
@@ -974,8 +967,7 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Birthplace</span><p>{viewingEmployee.birthplace || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Civil Status</span><p>{viewingEmployee.civil_status || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Nationality</span><p>{viewingEmployee.nationality || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Phone</span><p>{viewingEmployee.phone || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Personal Email</span><p>{viewingEmployee.personal_email || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Phone</span><p>{viewingEmployee.phone ? formatPhonePH(viewingEmployee.phone) : '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Present Address</span><p className="text-sm">{viewingEmployee.present_address || '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Permanent Address</span><p className="text-sm">{viewingEmployee.permanent_address || '—'}</p></div>
                 </div>

@@ -310,7 +310,7 @@ const Dashboard = () => {
     ? employeesWithRole.find((e) => e.id === currentUser.supervisor_id)
     : employeesWithRole.find((e) => e.role === 'supervisor' || e.role === 'admin');
   const coworkers = employeesWithRole.filter(
-    (e) => e.role === 'employee' && e.supervisor_id === currentUser.supervisor_id && e.id !== currentUser.id
+    (e) => (e.role === 'employee' || e.role === 'intern') && e.supervisor_id === currentUser.supervisor_id && e.id !== currentUser.id
   );
 
   const today = currentTime.toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });

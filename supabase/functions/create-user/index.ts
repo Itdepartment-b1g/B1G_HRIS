@@ -1,16 +1,70 @@
 // Edge Function: Create User
 // Deploy: supabase functions deploy create-user
+// Requires secrets: GMAIL_USER, GMAIL_PASSWORD (set via: supabase secrets set GMAIL_USER=xxx GMAIL_PASSWORD=xxx)
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import nodemailer from "npm:nodemailer@6.9.10"
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+/** Generate a random password: 12 chars, letters + numbers */
+function generatePassword(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  let pwd = ''
+  const arr = new Uint8Array(12)
+  crypto.getRandomValues(arr)
+  for (let i = 0; i < 12; i++) pwd += chars[arr[i]! % chars.length]
+  return pwd
+}
+
+/** Send password to user's company email via Gmail SMTP */
+async function sendPasswordEmail(toEmail: string, password: string, employeeCode: string, firstName: string, lastName: string): Promise<void> {
+  const gmailUser = Deno.env.get('GMAIL_USER')
+  const gmailPass = Deno.env.get('GMAIL_PASSWORD')
+
+  if (!gmailUser || !gmailPass) {
+    console.warn('GMAIL_USER or GMAIL_PASSWORD not set - skipping email. Set secrets: supabase secrets set GMAIL_USER=xxx GMAIL_PASSWORD=xxx')
+    return
+  }
+
+  const transport = nodemailer.createTransport({
+    host: 'smtp.gmail.com',
+    port: 587,
+    secure: false,
+    auth: { user: gmailUser, pass: gmailPass },
+  })
+
+  const html = `
+    <h2>Welcome to B1G HRIS</h2>
+    <p>Hi ${firstName} ${lastName},</p>
+    <p>Your account has been created. Use the credentials below to sign in:</p>
+    <ul>
+      <li><strong>Employee Code:</strong> ${employeeCode}</li>
+      <li><strong>Password:</strong> <code>${password}</code></li>
+    </ul>
+    <p>Please sign in and change your password in Settings for security.</p>
+    <p>— B1G HR Team</p>
+  `
+
+  await new Promise<void>((resolve, reject) => {
+    transport.sendMail(
+      {
+        from: gmailUser,
+        to: toEmail,
+        subject: 'Your B1G HRIS Login Credentials',
+        html,
+        text: `Hi ${firstName} ${lastName},\n\nYour account has been created.\nEmployee Code: ${employeeCode}\nPassword: ${password}\n\nPlease sign in and change your password in Settings.\n— B1G HR Team`,
+      },
+      (err) => (err ? reject(err) : resolve())
+    )
+  })
+}
+
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
@@ -29,7 +83,7 @@ serve(async (req) => {
 
     const { 
       email, 
-      password, 
+      password: providedPassword, 
       employee_code, 
       first_name, 
       last_name, 
@@ -40,16 +94,21 @@ serve(async (req) => {
       hired_date
     } = await req.json()
 
-    // Validate required fields
-    if (!email || !password || !employee_code || !first_name || !last_name) {
+    // Validate required fields (password is no longer required - we generate it)
+    if (!email || !employee_code || !first_name || !last_name) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields: email, password, employee_code, first_name, last_name' }),
+        JSON.stringify({ error: 'Missing required fields: email, employee_code, first_name, last_name' }),
         { 
           headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
           status: 400 
         }
       )
     }
+
+    // Generate random password if not provided
+    const password = providedPassword && String(providedPassword).trim()
+      ? String(providedPassword)
+      : generatePassword()
 
     // Create auth user
     const { data: authUser, error: authError } = await supabaseClient.auth.admin.createUser({
@@ -92,7 +151,6 @@ serve(async (req) => {
 
     if (employeeError) {
       console.error('Employee update error:', employeeError)
-      // Don't fail the whole operation, employee was created by trigger
     }
 
     // Assign role if not default
@@ -105,6 +163,13 @@ serve(async (req) => {
       if (roleError) {
         console.error('Role assignment error:', roleError)
       }
+    }
+
+    // Send password to user's company email (non-blocking)
+    if (!providedPassword) {
+      sendPasswordEmail(email, password, employee_code, first_name, last_name).catch((err) => {
+        console.error('Failed to send password email:', err)
+      })
     }
 
     return new Response(

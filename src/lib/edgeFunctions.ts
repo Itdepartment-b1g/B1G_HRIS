@@ -47,11 +47,11 @@ async function callEdgeFunction<T>(
 // TYPE DEFINITIONS
 // ============================================================
 
-export type UserRole = 'employee' | 'supervisor' | 'manager' | 'executive' | 'admin' | 'super_admin';
+export type UserRole = 'employee' | 'intern' | 'supervisor' | 'manager' | 'executive' | 'admin' | 'super_admin';
 
 export interface CreateUserData {
   email: string;
-  password: string;
+  password?: string; // Optional - if omitted, a random password is generated and emailed to the user
   employee_code: string;
   first_name: string;
   last_name: string;
@@ -193,9 +193,9 @@ export async function seedDatabase(): Promise<SeedDatabaseResponse> {
  * });
  */
 export async function createUser(data: CreateUserData): Promise<CreateUserResponse> {
-  // Validate required fields
-  if (!data.email || !data.password || !data.employee_code || !data.first_name || !data.last_name) {
-    throw new Error('Missing required fields: email, password, employee_code, first_name, last_name');
+  // Validate required fields (password is optional - backend generates and emails it)
+  if (!data.email || !data.employee_code || !data.first_name || !data.last_name) {
+    throw new Error('Missing required fields: email, employee_code, first_name, last_name');
   }
 
   return callEdgeFunction<CreateUserResponse>('create-user', data);
