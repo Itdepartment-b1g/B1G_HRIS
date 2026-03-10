@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { createUser, type UserRole } from '@/lib/edgeFunctions';
+import { supabase } from '@/lib/supabase';
 
 const AddEmployee = () => {
   const navigate = useNavigate();
@@ -18,15 +19,22 @@ const AddEmployee = () => {
     first_name: '',
     last_name: '',
     email: '',
+    personal_email: '',
     phone: '',
     department: '',
     position: '',
-    role: 'employee',
+    roles: ['employee'] as string[],
     hired_date: new Date().toISOString().split('T')[0]
   });
 
-  const handleInputChange = (field: string, value: string) => {
+  const handleInputChange = (field: string, value: string | string[]) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const toggleRole = (role: string) => {
+    const curr = formData.roles;
+    const next = curr.includes(role) ? curr.filter(r => r !== role) : [...curr, role];
+    if (next.length > 0) setFormData(prev => ({ ...prev, roles: next }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -35,10 +43,20 @@ const AddEmployee = () => {
 
     try {
       const result = await createUser({
-        ...formData,
+        email: formData.email,
+        employee_code: formData.employee_code,
+        first_name: formData.first_name,
+        last_name: formData.last_name,
         phone: formData.phone || undefined,
-        role: formData.role as UserRole,
+        department: formData.department || undefined,
+        position: formData.position || undefined,
+        roles: formData.roles.map(r => r as UserRole),
+        hired_date: formData.hired_date || undefined,
       });
+
+      if (formData.personal_email?.trim()) {
+        await supabase.from('employees').update({ personal_email: formData.personal_email.trim() }).eq('id', result.user.id);
+      }
       
       toast.success(
         `Employee ${result.user.employee_code} created successfully! Login credentials have been sent to their company email.`,
@@ -105,7 +123,7 @@ const AddEmployee = () => {
 
                 <div className="space-y-2">
                   <Label htmlFor="email" className="text-black">
-                    Email <span className="text-red-500">*</span>
+                    Company Email <span className="text-red-500">*</span>
                   </Label>
                   <Input
                     id="email"
@@ -116,6 +134,20 @@ const AddEmployee = () => {
                     className="border-gray-300 text-black"
                     required
                   />
+                  <p className="text-xs text-gray-500">For login. Password will be sent here.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="personal_email" className="text-black">Personal Email</Label>
+                  <Input
+                    id="personal_email"
+                    type="email"
+                    placeholder="john.doe@gmail.com"
+                    value={formData.personal_email}
+                    onChange={(e) => handleInputChange('personal_email', e.target.value)}
+                    className="border-gray-300 text-black"
+                  />
+                  <p className="text-xs text-gray-500">Optional. Password is not sent here.</p>
                 </div>
 
                 <div className="space-y-2">
@@ -208,23 +240,23 @@ const AddEmployee = () => {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="role" className="text-black">
-                    User Role <span className="text-red-500">*</span>
+                  <Label className="text-black">
+                    User Roles <span className="text-red-500">*</span>
                   </Label>
-                  <Select
-                    value={formData.role}
-                    onValueChange={(value) => handleInputChange('role', value)}
-                  >
-                    <SelectTrigger className="border-gray-300 text-black">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="employee">Employee</SelectItem>
-                      <SelectItem value="intern">Intern</SelectItem>
-                      <SelectItem value="supervisor">Supervisor</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-gray-500">Admins can only create Employee, Intern, and Supervisor roles</p>
+                  <div className="border rounded-md p-3 space-y-1">
+                    {['employee', 'intern', 'supervisor'].map((r) => (
+                      <label key={r} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+                        <input
+                          type="checkbox"
+                          checked={formData.roles.includes(r)}
+                          onChange={() => toggleRole(r)}
+                          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                        />
+                        <span className="text-sm capitalize">{r.replace('_', ' ')}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-500">Select one or more roles (e.g. Rank and File + Supervisory). Admins can create Employee, Intern, and Supervisor.</p>
                 </div>
 
               </div>

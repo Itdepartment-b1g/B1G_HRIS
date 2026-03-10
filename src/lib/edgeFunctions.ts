@@ -59,6 +59,7 @@ export interface CreateUserData {
   department?: string;
   position?: string;
   role?: UserRole;
+  roles?: UserRole[];
   hired_date?: string; // YYYY-MM-DD format
 }
 
@@ -70,7 +71,8 @@ export interface CreateUserResponse {
     employee_code: string;
     first_name: string;
     last_name: string;
-    role: UserRole;
+    roles?: UserRole[];
+    role?: UserRole; // kept for backward compat
   };
 }
 
@@ -100,6 +102,7 @@ export interface UpdateUserProfileData {
   hired_date?: string;
   avatar_url?: string;
   role?: UserRole;
+  roles?: UserRole[];
 }
 
 export interface UpdateUserProfileResponse {
@@ -114,6 +117,7 @@ export interface UpdateUserProfileResponse {
     phone?: string;
     department?: string;
     position?: string;
+    roles?: UserRole[];
     role: UserRole;
     [key: string]: any;
   };

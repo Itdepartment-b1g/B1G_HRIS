@@ -16,9 +16,16 @@ const TeammatesPage = () => {
         supabase.from('employees').select('*').eq('is_active', true).order('first_name'),
         supabase.from('user_roles').select('user_id, role'),
       ]);
-      const roleMap = new Map<string, string>();
-      (roleRes.data || []).forEach((r: { user_id: string; role: string }) => roleMap.set(r.user_id, r.role));
-      const merged = (empRes.data || []).map((e) => ({ ...e, role: roleMap.get(e.id) || 'employee' }));
+  const roleMap = new Map<string, string[]>();
+    (roleRes.data || []).forEach((r: { user_id: string; role: string }) => {
+      const arr = roleMap.get(r.user_id) || [];
+      arr.push(r.role);
+      roleMap.set(r.user_id, arr);
+    });
+    const merged = (empRes.data || []).map((e) => {
+      const roles = roleMap.get(e.id) || ['employee'];
+      return { ...e, roles, role: roles[0] || 'employee' };
+    });
       setEmployeesWithRole(merged as Array<Employee & { role: string }>);
       setLoading(false);
     };
@@ -27,9 +34,9 @@ const TeammatesPage = () => {
 
   const supervisor = currentUser?.supervisor_id
     ? employeesWithRole.find((e) => e.id === currentUser.supervisor_id)
-    : employeesWithRole.find((e) => e.role === 'supervisor' || e.role === 'admin');
+    : employeesWithRole.find((e) => (e as any).roles?.includes('supervisor') || (e as any).roles?.includes('admin'));
   const coworkers = employeesWithRole.filter(
-    (e) => (e.role === 'employee' || e.role === 'intern') && e.supervisor_id === currentUser?.supervisor_id && e.id !== currentUser?.id
+    (e) => ((e as any).roles?.includes('employee') || (e as any).roles?.includes('intern')) && e.supervisor_id === currentUser?.supervisor_id && e.id !== currentUser?.id
   );
 
   if (!currentUser) return null;

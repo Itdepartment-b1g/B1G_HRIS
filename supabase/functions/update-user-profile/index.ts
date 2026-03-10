@@ -40,7 +40,8 @@ serve(async (req) => {
       is_active,
       hired_date,
       avatar_url,
-      role
+      role,
+      roles
     } = await req.json()
 
     // Must provide user_id or email to identify the user
@@ -122,25 +123,45 @@ serve(async (req) => {
       }
     }
 
-    // Update user role if provided
-    if (role) {
-      const { error: roleError } = await supabaseClient
+    // Sync user roles if provided (roles array or single role for backward compat)
+    const roleList = Array.isArray(roles) && roles.length > 0
+      ? roles
+      : role ? [role] : null
+
+    if (roleList) {
+      const { error: delError } = await supabaseClient
         .from('user_roles')
-        .update({ role })
+        .delete()
         .eq('user_id', targetUserId)
 
-      if (roleError) {
-        console.error('Role update error:', roleError)
-        // Don't fail the whole operation
+      if (delError) {
+        console.error('Role delete error:', delError)
+        return new Response(
+          JSON.stringify({ error: `Failed to update roles: ${delError.message}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        )
+      }
+
+      const { error: insertError } = await supabaseClient
+        .from('user_roles')
+        .insert(roleList.map((r) => ({ user_id: targetUserId, role: String(r) })))
+
+      if (insertError) {
+        console.error('Role insert error:', insertError)
+        return new Response(
+          JSON.stringify({ error: `Failed to save roles: ${insertError.message}` }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        )
       }
     }
 
-    // Fetch updated user with role
-    const { data: userRole } = await supabaseClient
+    // Fetch updated user roles
+    const { data: userRoles } = await supabaseClient
       .from('user_roles')
       .select('role')
       .eq('user_id', targetUserId)
-      .single()
+
+    const rolesArr = (userRoles || []).map((r) => r.role)
 
     return new Response(
       JSON.stringify({ 
@@ -148,7 +169,8 @@ serve(async (req) => {
         message: 'User profile updated successfully',
         user: {
           ...employeeData,
-          role: userRole?.role || 'employee'
+          roles: rolesArr,
+          role: rolesArr[0] || 'employee'
         }
       }),
       { 
