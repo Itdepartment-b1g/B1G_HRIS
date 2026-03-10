@@ -188,8 +188,9 @@ const Dashboard = () => {
     }
   }, [attendanceLog]);
 
-  // Auto-create/update attendance for login-exempted users (no time in/out required)
-  // Always upsert so times match shift — fixes any existing records created with wrong timezone
+  // Login-exempted: primary handler is pg_cron (server-side, no login needed).
+  // This client-side fallback ensures the record appears immediately when the user opens the app,
+  // in case the cron hasn't fired yet. Uses DO NOTHING so it won't overwrite cron-created records.
   useEffect(() => {
     if (!currentUser?.login_exempted || !assignedShift) return;
     const today = new Date().toISOString().split('T')[0];
@@ -219,7 +220,7 @@ const Dashboard = () => {
         minutes_late: 0,
       }, { onConflict: 'employee_id,date' })
       .then(() => fetchAttendanceLog());
-  }, [currentUser?.id, currentUser?.login_exempted, assignedShift, attendanceLog, fetchAttendanceLog]);
+  }, [currentUser?.id, currentUser?.login_exempted, assignedShift]);
 
   const uploadPhoto = async (blob: Blob, employeeId: string, date: string, mode: 'in' | 'out'): Promise<string | null> => {
     const ext = 'jpg';
