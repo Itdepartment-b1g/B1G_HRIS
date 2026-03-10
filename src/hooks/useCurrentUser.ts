@@ -3,8 +3,11 @@ import { supabase } from '@/lib/supabase';
 import type { Employee } from '@/types';
 import type { UserRole } from '@/lib/edgeFunctions';
 
+const ROLE_HIERARCHY: UserRole[] = ['super_admin', 'admin', 'executive', 'manager', 'supervisor', 'employee', 'intern'];
+
 export interface CurrentUser extends Employee {
-  role: UserRole;
+  role: UserRole; // primary (highest) role for backward compat
+  roles: UserRole[]; // all roles
 }
 
 export function useCurrentUser(): { user: CurrentUser | null; loading: boolean; error: string | null; refetch: () => Promise<void> } {
@@ -21,14 +24,16 @@ export function useCurrentUser(): { user: CurrentUser | null; loading: boolean; 
     }
     const [empRes, roleRes] = await Promise.all([
       supabase.from('employees').select('*').eq('id', session.user.id).maybeSingle(),
-      supabase.from('user_roles').select('role').eq('user_id', session.user.id).limit(1),
+      supabase.from('user_roles').select('role').eq('user_id', session.user.id),
     ]);
     if (empRes.error) {
       setError(empRes.error.message);
       setUser(null);
     } else if (empRes.data) {
-      const role = (roleRes.data?.[0]?.role as UserRole) || 'employee';
-      setUser({ ...empRes.data, role } as CurrentUser);
+      const roles = (roleRes.data || []).map((r) => r.role as UserRole);
+      const roleList = roles.length > 0 ? roles : ['employee'];
+      const primary = ROLE_HIERARCHY.find((r) => roleList.includes(r)) ?? 'employee';
+      setUser({ ...empRes.data, role: primary, roles: roleList } as CurrentUser);
       setError(null);
     } else {
       setUser(null);

@@ -110,7 +110,7 @@ const Attendance = () => {
   type MobileFilter = 'all_today' | 'my_30_days' | 'absent';
   const [mobileFilter, setMobileFilter] = useState<MobileFilter>('my_30_days');
 
-  const isAdmin = user?.role === 'super_admin' || user?.role === 'admin';
+  const isAdmin = user?.roles?.includes('super_admin') || user?.roles?.includes('admin');
 
   // Sync date range when mobile filter changes
   useEffect(() => {

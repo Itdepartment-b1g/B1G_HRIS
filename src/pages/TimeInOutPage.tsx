@@ -29,6 +29,7 @@ const TimeInOutPage = () => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [clockedIn, setClockedIn] = useState(false);
+  const [todayRecord, setTodayRecord] = useState<{ time_in: string | null; time_out: string | null } | null>(null);
 
   const getLocation = useCallback((options?: { retries?: number }): Promise<{ lat: number; lng: number }> => {
     const maxRetries = options?.retries ?? 0;
@@ -138,12 +139,14 @@ const TimeInOutPage = () => {
           .eq('is_active', true);
         setWorkLocations((wlData || []) as WorkLocation[]);
       }
+      const today = new Date().toISOString().split('T')[0];
       const { data: log } = await supabase
         .from('attendance_records')
         .select('time_in, time_out')
         .eq('employee_id', currentUser.id)
-        .eq('date', new Date().toISOString().split('T')[0])
+        .eq('date', today)
         .maybeSingle();
+      setTodayRecord(log ? { time_in: log.time_in, time_out: log.time_out } : { time_in: null, time_out: null });
       setClockedIn(!!log?.time_in && !log?.time_out);
     };
     load();
@@ -153,6 +156,21 @@ const TimeInOutPage = () => {
     startCamera();
     return () => stopCamera();
   }, [startCamera, stopCamera]);
+
+  // Prevent double time in/out when navigating directly
+  useEffect(() => {
+    if (!currentUser || !todayRecord) return;
+    if (mode === 'in' && todayRecord.time_in) {
+      toast.error('You have already timed in today.');
+      navigate('/dashboard');
+    } else if (mode === 'out' && todayRecord.time_out) {
+      toast.error('You have already timed out today.');
+      navigate('/dashboard');
+    } else if (mode === 'out' && !todayRecord.time_in) {
+      toast.error('You must time in first before timing out.');
+      navigate('/dashboard');
+    }
+  }, [currentUser, todayRecord, mode, navigate]);
 
   useEffect(() => {
     if (capturedPhoto && photoBlob && !location && !locationError && !locationLoading) {
@@ -176,9 +194,19 @@ const TimeInOutPage = () => {
 
   const handleConfirm = async () => {
     if (!currentUser || !photoBlob || !location || withinRadius !== true) return;
-    if (mode === 'out' && !clockedIn) {
-      toast.error('You must clock in first');
+    if (mode === 'in' && todayRecord?.time_in) {
+      toast.error('You have already timed in today.');
       return;
+    }
+    if (mode === 'out') {
+      if (!todayRecord?.time_in) {
+        toast.error('You must clock in first');
+        return;
+      }
+      if (todayRecord?.time_out) {
+        toast.error('You have already timed out today.');
+        return;
+      }
     }
     setSubmitting(true);
     try {

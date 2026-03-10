@@ -1,6 +1,25 @@
 import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 
+/** Check if user has any of the given roles (supports multi-role) */
+export function hasRole(
+  user: { role?: string; roles?: string[] } | null,
+  ...roles: string[]
+): boolean {
+  if (!user) return false;
+  const userRoles = user.roles ?? (user.role ? [user.role] : []);
+  return roles.some((r) => userRoles.includes(r));
+}
+
+/** Check if user can see nav item (has any of item's required roles) */
+export function canSeeNavItem(
+  user: { role?: string; roles?: string[] } | null,
+  itemRoles?: string[]
+): boolean {
+  if (!itemRoles || itemRoles.length === 0) return true;
+  return hasRole(user, ...itemRoles);
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
