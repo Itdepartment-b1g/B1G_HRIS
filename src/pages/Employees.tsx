@@ -111,7 +111,6 @@ const emptyEmployment = {
   hired_date: new Date().toISOString().split('T')[0],
   employment_status_id: '',
   position_id: '',
-  department_id: '',
   roles: ['employee'] as string[],
   cost_center_id: '',
   company_email: '',
@@ -153,12 +152,15 @@ const Employees = () => {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
+  const [viewingDepartments, setViewingDepartments] = useState<string[]>([]);
   const [viewingWorkLocations, setViewingWorkLocations] = useState<string[]>([]);
   const [viewingSupervisors, setViewingSupervisors] = useState<string[]>([]);
   const [viewingShifts, setViewingShifts] = useState<string[]>([]);
+  const [employeeDepartmentNames, setEmployeeDepartmentNames] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
 
   // Multi-select states
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [selectedWorkLocations, setSelectedWorkLocations] = useState<string[]>([]);
   const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([]);
   const [selectedShifts, setSelectedShifts] = useState<string[]>([]);
@@ -175,9 +177,11 @@ const Employees = () => {
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
-    const [empResult, rolesResult] = await Promise.all([
+    const [empResult, rolesResult, edResult, deptResult] = await Promise.all([
       supabase.from('employees').select('*').order('created_at', { ascending: true }),
       supabase.from('user_roles').select('user_id, role'),
+      supabase.from('employee_departments').select('employee_id, department_id'),
+      supabase.from('departments').select('id, name'),
     ]);
 
     if (empResult.error) {
@@ -189,6 +193,14 @@ const Employees = () => {
         existing.push({ role: r.role });
         roleMap.set(r.user_id, existing);
       });
+      const deptMap = new Map<string, string>((deptResult.data || []).map((d) => [d.id, d.name]));
+      const empDeptMap: Record<string, string[]> = {};
+      (edResult.data || []).forEach((ed: { employee_id: string; department_id: string }) => {
+        const name = deptMap.get(ed.department_id);
+        if (!empDeptMap[ed.employee_id]) empDeptMap[ed.employee_id] = [];
+        if (name) empDeptMap[ed.employee_id].push(name);
+      });
+      setEmployeeDepartmentNames(empDeptMap);
       setEmployees(
         (empResult.data || []).map((emp) => ({ ...emp, user_roles: roleMap.get(emp.id) || [] })) as Employee[]
       );
@@ -217,17 +229,21 @@ const Employees = () => {
 
   useEffect(() => {
     if (!viewingEmployee?.id) {
+      setViewingDepartments([]);
       setViewingWorkLocations([]);
       setViewingSupervisors([]);
       setViewingShifts([]);
       return;
     }
     const load = async () => {
-      const [wlRes, supRes, shRes] = await Promise.all([
+      const [edRes, wlRes, supRes, shRes] = await Promise.all([
+        supabase.from('employee_departments').select('department_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_shifts').select('shift_id').eq('employee_id', viewingEmployee.id),
       ]);
+      const deptIds = (edRes.data || []).map((r: { department_id: string }) => r.department_id);
+      setViewingDepartments(deptIds.map((id) => departments.find((d) => d.id === id)?.name).filter(Boolean) as string[]);
       const wlIds = (wlRes.data || []).map((r: { work_location_id: string }) => r.work_location_id);
       const supIds = (supRes.data || []).map((r: { supervisor_id: string }) => r.supervisor_id);
       const shIds = (shRes.data || []).map((r: { shift_id: string }) => r.shift_id);
@@ -239,7 +255,7 @@ const Employees = () => {
       setViewingShifts(shIds.map((id) => shifts.find((s) => s.id === id)?.name).filter(Boolean) as string[]);
     };
     load();
-  }, [viewingEmployee?.id, workLocations, employees, shifts]);
+  }, [viewingEmployee?.id, departments, workLocations, employees, shifts]);
 
   // ── Derived ──────────────────────────────────────────
 
@@ -277,6 +293,7 @@ const Employees = () => {
   const resetForm = () => {
     setPersonal(emptyPersonal);
     setEmployment(emptyEmployment);
+    setSelectedDepartments([]);
     setSelectedWorkLocations([]);
     setSelectedSupervisors([]);
     setSelectedShifts([]);
@@ -296,6 +313,14 @@ const Employees = () => {
   // ── Junction Table Saves ─────────────────────────────
 
   const saveJunctions = async (employeeId: string) => {
+    // Departments (multi)
+    await supabase.from('employee_departments').delete().eq('employee_id', employeeId);
+    if (selectedDepartments.length > 0) {
+      await supabase.from('employee_departments').insert(
+        selectedDepartments.map((deptId) => ({ employee_id: employeeId, department_id: deptId }))
+      );
+    }
+
     // Work locations
     await supabase.from('employee_work_locations').delete().eq('employee_id', employeeId);
     if (selectedWorkLocations.length > 0) {
@@ -321,22 +346,26 @@ const Employees = () => {
     }
   };
 
-  const buildEmployeeUpdate = () => ({
-    middle_name: personal.middle_name || null,
-    suffix: personal.suffix || null,
-    nickname: personal.nickname || null,
-    gender: personal.gender || null,
-    birthdate: personal.birthdate || null,
-    birthplace: personal.birthplace || null,
-    civil_status: personal.civil_status || null,
-    nationality: personal.nationality || null,
-    personal_email: personal.personal_email || null,
-    present_address: personal.present_address || null,
-    permanent_address: personal.permanent_address || null,
-    employment_status_id: employment.employment_status_id || null,
-    position_id: employment.position_id || null,
-    department_id: employment.department_id || null,
-    cost_center_id: employment.cost_center_id || null,
+  const buildEmployeeUpdate = () => {
+    const firstDeptId = selectedDepartments[0] || null;
+    const firstDeptName = firstDeptId ? departments.find((d) => d.id === firstDeptId)?.name ?? null : null;
+    return {
+      middle_name: personal.middle_name || null,
+      suffix: personal.suffix || null,
+      nickname: personal.nickname || null,
+      gender: personal.gender || null,
+      birthdate: personal.birthdate || null,
+      birthplace: personal.birthplace || null,
+      civil_status: personal.civil_status || null,
+      nationality: personal.nationality || null,
+      personal_email: personal.personal_email || null,
+      present_address: personal.present_address || null,
+      permanent_address: personal.permanent_address || null,
+      employment_status_id: employment.employment_status_id || null,
+      position_id: employment.position_id || null,
+      department_id: firstDeptId,
+      department: firstDeptName,
+      cost_center_id: employment.cost_center_id || null,
     company_email: employment.company_email || null,
     supervisor_id: selectedSupervisors[0] || null,
     overtime_exempted: employment.overtime_exempted,
@@ -344,7 +373,8 @@ const Employees = () => {
     undertime_exempted: employment.undertime_exempted,
     grace_period_exempted: employment.grace_period_exempted,
     login_exempted: employment.login_exempted,
-  });
+  };
+  };
 
   // ── ADD ──────────────────────────────────────────────
 
@@ -354,13 +384,17 @@ const Employees = () => {
       toast.error('Company email is required');
       return;
     }
+    if (selectedDepartments.length === 0) {
+      toast.error('At least one department is required');
+      return;
+    }
     if (!isValidPhonePH(personal.phone)) {
       toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
       return;
     }
     setSaving(true);
     try {
-      const deptName = departments.find((d) => d.id === employment.department_id)?.name;
+      const firstDeptName = selectedDepartments[0] ? departments.find((d) => d.id === selectedDepartments[0])?.name : undefined;
       const posName = positions.find((p) => p.id === employment.position_id)?.name;
 
       const result = await createUser({
@@ -369,7 +403,7 @@ const Employees = () => {
         first_name: personal.first_name,
         last_name: personal.last_name,
         phone: normalizePhonePH(personal.phone) || undefined,
-        department: deptName || undefined,
+        department: firstDeptName || undefined,
         position: posName || undefined,
         roles: (employment.roles || ['employee']).map((r) => r as UserRole),
         hired_date: employment.hired_date || undefined,
@@ -417,7 +451,6 @@ const Employees = () => {
       hired_date: emp.hired_date || '',
       employment_status_id: emp.employment_status_id || '',
       position_id: emp.position_id || '',
-      department_id: emp.department_id || '',
       roles: getRoles(emp),
       cost_center_id: emp.cost_center_id || '',
       company_email: emp.company_email || '',
@@ -429,11 +462,14 @@ const Employees = () => {
     });
 
     // Fetch junction data
-    const [wlRes, supRes, shRes] = await Promise.all([
+    const [edRes, wlRes, supRes, shRes] = await Promise.all([
+      supabase.from('employee_departments').select('department_id').eq('employee_id', emp.id),
       supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', emp.id),
       supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', emp.id),
       supabase.from('employee_shifts').select('shift_id').eq('employee_id', emp.id),
     ]);
+    const deptIds = (edRes.data || []).map((r) => r.department_id);
+    setSelectedDepartments(deptIds.length > 0 ? deptIds : (emp.department_id ? [emp.department_id] : []));
     setSelectedWorkLocations((wlRes.data || []).map((r) => r.work_location_id));
     setSelectedSupervisors((supRes.data || []).map((r) => r.supervisor_id));
     setSelectedShifts((shRes.data || []).map((r) => r.shift_id));
@@ -445,13 +481,17 @@ const Employees = () => {
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEmployee) return;
+    if (selectedDepartments.length === 0) {
+      toast.error('At least one department is required');
+      return;
+    }
     if (personal.phone.trim() && !isValidPhonePH(personal.phone)) {
       toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
       return;
     }
     setSaving(true);
     try {
-      const deptName = departments.find((d) => d.id === employment.department_id)?.name;
+      const firstDeptName = selectedDepartments[0] ? departments.find((d) => d.id === selectedDepartments[0])?.name : undefined;
       const posName = positions.find((p) => p.id === employment.position_id)?.name;
 
       await updateUserProfile(
@@ -461,7 +501,7 @@ const Employees = () => {
           first_name: personal.first_name,
           last_name: personal.last_name,
           phone: normalizePhonePH(personal.phone) || undefined,
-          department: deptName || undefined,
+          department: firstDeptName || undefined,
           position: posName || undefined,
           roles: (employment.roles || ['employee']).map((r) => r as UserRole),
           hired_date: employment.hired_date || undefined,
@@ -636,17 +676,29 @@ const Employees = () => {
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Department <span className="text-red-500">*</span></Label>
-          <Select value={employment.department_id} onValueChange={(v) => setE('department_id', v === '_none' ? '' : v)}>
-            <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_none">—</SelectItem>
-              {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+      {/* Departments multi-select */}
+      <div className="space-y-2">
+        <Label>Departments <span className="text-red-500">*</span> <span className="text-xs text-muted-foreground font-normal">(1 or more)</span></Label>
+        <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+          {departments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No departments available</p>
+          ) : departments.map((d) => (
+            <label key={d.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+              <input
+                type="checkbox"
+                checked={selectedDepartments.includes(d.id)}
+                onChange={() => toggleMulti(selectedDepartments, setSelectedDepartments, d.id)}
+                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+              />
+              <span className="text-sm">{d.name}</span>
+            </label>
+          ))}
         </div>
+        {selectedDepartments.length > 0 && (
+          <p className="text-xs text-muted-foreground">{selectedDepartments.length} selected</p>
+        )}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Roles <span className="text-red-500">*</span></Label>
           <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
@@ -933,7 +985,7 @@ const Employees = () => {
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-sm">{emp.employee_code}</TableCell>
-                    <TableCell className="text-sm hidden md:table-cell">{emp.department || '—'}</TableCell>
+                    <TableCell className="text-sm hidden md:table-cell">{employeeDepartmentNames[emp.id]?.join(', ') || emp.department || '—'}</TableCell>
                     <TableCell className="text-sm hidden md:table-cell">{emp.position || '—'}</TableCell>
                     <TableCell>{rolesBadges(emp)}</TableCell>
                   <TableCell>
@@ -1017,7 +1069,7 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Date Hired</span><p>{viewingEmployee.hired_date || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Employment Status</span><p>{employmentStatuses.find((s) => s.id === viewingEmployee.employment_status_id)?.name || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Position</span><p>{viewingEmployee.position || positions.find((p) => p.id === viewingEmployee.position_id)?.name || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Department</span><p>{viewingEmployee.department || departments.find((d) => d.id === viewingEmployee.department_id)?.name || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Departments</span><p>{viewingDepartments.length > 0 ? viewingDepartments.join(', ') : viewingEmployee.department || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Roles</span><div className="flex flex-wrap gap-1 mt-1">{getRoles(viewingEmployee).map((r) => roleBadge(r))}</div></div>
                   <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
                   <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
