@@ -16,6 +16,8 @@ interface LocationMapProps {
   workLocations: WorkLocation[];
   withinRadius: boolean | null;
   className?: string;
+  /** True when the active work-location allows time in/out from anywhere */
+  isAnywhere?: boolean;
 }
 
 function getInitialCenter(userLocation: { lat: number; lng: number } | null, workLocations: WorkLocation[]) {
@@ -25,7 +27,7 @@ function getInitialCenter(userLocation: { lat: number; lng: number } | null, wor
   return [14.5995, 120.9842] as [number, number]; // Manila fallback
 }
 
-export function LocationMap({ userLocation, workLocations, withinRadius, className = '' }: LocationMapProps) {
+export function LocationMap({ userLocation, workLocations, withinRadius, className = '', isAnywhere = false }: LocationMapProps) {
   const mapRef = useRef<HTMLDivElement>(null);
   const mapInstanceRef = useRef<L.Map | null>(null);
   const layersRef = useRef<L.Layer[]>([]);
@@ -93,8 +95,15 @@ export function LocationMap({ userLocation, workLocations, withinRadius, classNa
     if (userLocation) {
       bounds.unshift([userLocation.lat, userLocation.lng]);
       const userMarker = L.marker([userLocation.lat, userLocation.lng]).addTo(map);
+      const statusText = isAnywhere
+        ? '✓ Anywhere allowed'
+        : withinRadius === true
+        ? '✓ Within radius'
+        : withinRadius === false
+        ? '✗ Outside radius'
+        : 'Checking...';
       userMarker.bindTooltip(
-        `<strong>You</strong><br/>${withinRadius === true ? '✓ Within radius' : withinRadius === false ? '✗ Outside radius' : 'Checking...'}`,
+        `<strong>You</strong><br/>${statusText}`,
         { permanent: true, direction: 'top', offset: [0, -25] }
       ).openTooltip();
       layersRef.current.push(userMarker);
@@ -107,11 +116,13 @@ export function LocationMap({ userLocation, workLocations, withinRadius, classNa
     } else {
       map.setView(center, 16);
     }
-  }, [userLocation, workLocations, withinRadius, center]);
+  }, [userLocation, workLocations, withinRadius, center, isAnywhere]);
 
   return (
     <div className={className}>
-      <p className="text-xs text-muted-foreground mb-1.5 sm:mb-2 hidden sm:block">Map shows work location radius and your position</p>
+      <p className="text-xs text-muted-foreground mb-1.5 sm:mb-2 hidden sm:block">
+        {isAnywhere ? 'Map shows your time in/out location' : 'Map shows work location radius and your position'}
+      </p>
       <div ref={mapRef} className="h-36 sm:h-48 w-full rounded-md border bg-muted/30 z-0" />
     </div>
   );
