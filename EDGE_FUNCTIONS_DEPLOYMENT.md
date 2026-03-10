@@ -33,6 +33,9 @@ supabase functions deploy update-user-profile
 
 # Deploy seed-database function
 supabase functions deploy seed-database
+
+# Deploy seed-attendance function (generates 1 month of attendance for all employees)
+supabase functions deploy seed-attendance
 ```
 
 ## Set Environment Secrets
@@ -45,6 +48,14 @@ supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key_here
 
 You can find your Service Role Key in:
 Supabase Dashboard > Settings > API > service_role key (secret)
+
+**For create-user to send password emails via Gmail:**
+
+```bash
+supabase secrets set GMAIL_USER=your@gmail.com GMAIL_PASSWORD="your-app-password"
+```
+
+Use a [Gmail App Password](https://support.google.com/accounts/answer/185833) if 2FA is enabled. Quote the password if it contains spaces. If these are not set, user creation succeeds but no email is sent.
 
 ## Function URLs
 

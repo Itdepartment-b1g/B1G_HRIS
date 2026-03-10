@@ -174,6 +174,22 @@ export async function seedDatabase(): Promise<SeedDatabaseResponse> {
   return callEdgeFunction<SeedDatabaseResponse>('seed-database');
 }
 
+export interface SeedAttendanceResponse {
+  success: boolean;
+  records_created: number;
+  employees_count: number;
+  days_covered: number;
+  errors?: string[];
+}
+
+/**
+ * Seed attendance_records with 1 month of data for all employees (weekdays only).
+ * Skips dates that already have records.
+ */
+export async function seedAttendance(): Promise<SeedAttendanceResponse> {
+  return callEdgeFunction<SeedAttendanceResponse>('seed-attendance');
+}
+
 /**
  * Create a new user with authentication and employee profile
  * 
