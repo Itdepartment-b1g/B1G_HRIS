@@ -20,7 +20,7 @@ const FeaturesPage = () => {
           .filter((section) => !section.hidden)
           .map((section) => ({
             ...section,
-            items: section.items.filter((item) => !item.roles || (user?.role && item.roles.includes(user.role))),
+            items: section.items.filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r)))),
           }))
           .filter((section) => section.items.length > 0)
           .map((section) => (
@@ -30,7 +30,7 @@ const FeaturesPage = () => {
             </CardHeader>
             <CardContent className="space-y-1">
               {section.items
-                .filter((item) => !item.roles || (user?.role && item.roles.includes(user.role)))
+                .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r))))
                 .map((item) => {
                 const Icon = item.icon;
                 return (

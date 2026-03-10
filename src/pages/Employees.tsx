@@ -112,7 +112,7 @@ const emptyEmployment = {
   employment_status_id: '',
   position_id: '',
   department_id: '',
-  role: 'employee' as string,
+  roles: ['employee'] as string[],
   cost_center_id: '',
   company_email: '',
   overtime_exempted: false,
@@ -243,17 +243,22 @@ const Employees = () => {
 
   // ── Derived ──────────────────────────────────────────
 
-  const getRole = (emp: Employee): string => emp.user_roles?.[0]?.role || 'employee';
+  const getRoles = (emp: Employee): string[] => {
+    const roles = emp.user_roles?.map((r) => r.role)?.filter(Boolean) ?? [];
+    return roles.length > 0 ? roles : ['employee'];
+  };
+  const getRole = (emp: Employee): string => getRoles(emp)[0] || 'employee';
+  const hasAnyRole = (emp: Employee, roles: string[]) => getRoles(emp).some((r) => roles.includes(r));
 
   const supervisorCandidates = useMemo(
-    () => employees.filter((e) => ['supervisor', 'admin', 'super_admin', 'manager', 'executive'].includes(getRole(e))),
+    () => employees.filter((e) => hasAnyRole(e, ['supervisor', 'admin', 'super_admin', 'manager', 'executive'])),
     [employees]
   );
 
   const filtered = employees.filter((emp) => {
     const name = `${emp.first_name} ${emp.last_name} ${emp.email} ${emp.employee_code}`.toLowerCase();
     const matchesSearch = name.includes(search.toLowerCase());
-    const matchesRole = roleFilter === 'all' || getRole(emp) === roleFilter;
+    const matchesRole = roleFilter === 'all' || getRoles(emp).includes(roleFilter);
     return matchesSearch && matchesRole;
   });
 
@@ -366,7 +371,7 @@ const Employees = () => {
         phone: normalizePhonePH(personal.phone) || undefined,
         department: deptName || undefined,
         position: posName || undefined,
-        role: employment.role as UserRole,
+        roles: (employment.roles || ['employee']).map((r) => r as UserRole),
         hired_date: employment.hired_date || undefined,
       });
 
@@ -413,7 +418,7 @@ const Employees = () => {
       employment_status_id: emp.employment_status_id || '',
       position_id: emp.position_id || '',
       department_id: emp.department_id || '',
-      role: getRole(emp),
+      roles: getRoles(emp),
       cost_center_id: emp.cost_center_id || '',
       company_email: emp.company_email || '',
       overtime_exempted: emp.overtime_exempted ?? false,
@@ -458,7 +463,7 @@ const Employees = () => {
           phone: normalizePhonePH(personal.phone) || undefined,
           department: deptName || undefined,
           position: posName || undefined,
-          role: employment.role as UserRole,
+          roles: (employment.roles || ['employee']).map((r) => r as UserRole),
           hired_date: employment.hired_date || undefined,
           is_active: editingEmployee.is_active,
         }
@@ -575,6 +580,11 @@ const Employees = () => {
           <Label>Phone Number <span className="text-red-500">*</span></Label>
           <Input type="tel" value={personal.phone} onChange={(e) => setP('phone', formatPhonePH(e.target.value))} placeholder="09XX XXX XXXX" required />
         </div>
+        <div className="space-y-2">
+          <Label>Personal Email Address</Label>
+          <Input type="email" value={personal.personal_email} onChange={(e) => setP('personal_email', e.target.value)} placeholder="john.doe@gmail.com" />
+          <p className="text-xs text-muted-foreground">Optional. Password is sent to company email only.</p>
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -638,15 +648,28 @@ const Employees = () => {
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>Level / Role <span className="text-red-500">*</span></Label>
-          <Select value={employment.role} onValueChange={(v) => setE('role', v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Object.entries(ROLE_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label>Roles <span className="text-red-500">*</span></Label>
+          <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+            {Object.entries(ROLE_LABELS).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={(employment.roles || []).includes(value)}
+                  onChange={() => {
+                    const curr = employment.roles || ['employee'];
+                    const next = curr.includes(value)
+                      ? curr.filter((r) => r !== value)
+                      : [...curr, value];
+                    if (next.length === 0) return;
+                    setEmployment((prev) => ({ ...prev, roles: next }));
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">Select one or more roles (e.g. Rank and File + Supervisory)</p>
         </div>
       </div>
 
@@ -827,6 +850,19 @@ const Employees = () => {
     </Badge>
   );
 
+  const rolesBadges = (emp: Employee) => {
+    const roles = getRoles(emp);
+    return (
+      <div className="flex flex-wrap gap-1 min-w-[100px]">
+        {roles.map((r) => (
+          <Badge key={r} variant="outline" className={cn('text-[11px] font-medium px-1.5 py-0', ROLE_STYLES[r] || 'bg-muted text-muted-foreground')}>
+            {ROLE_LABELS[r] || r.replace('_', ' ')}
+          </Badge>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -875,7 +911,7 @@ const Employees = () => {
                 <TableHead>Code</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
                   <TableHead className="hidden md:table-cell">Position</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead className="min-w-[140px]">Role</TableHead>
                 <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -899,7 +935,7 @@ const Employees = () => {
                   <TableCell className="font-mono text-sm">{emp.employee_code}</TableCell>
                     <TableCell className="text-sm hidden md:table-cell">{emp.department || '—'}</TableCell>
                     <TableCell className="text-sm hidden md:table-cell">{emp.position || '—'}</TableCell>
-                    <TableCell>{roleBadge(getRole(emp))}</TableCell>
+                    <TableCell>{rolesBadges(emp)}</TableCell>
                   <TableCell>
                       <Badge variant={emp.is_active ? 'outline' : 'secondary'} className={emp.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : ''}>
                       {emp.is_active ? 'Active' : 'Inactive'}
@@ -968,6 +1004,7 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Civil Status</span><p>{viewingEmployee.civil_status || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Nationality</span><p>{viewingEmployee.nationality || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Phone</span><p>{viewingEmployee.phone ? formatPhonePH(viewingEmployee.phone) : '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Personal Email</span><p>{viewingEmployee.personal_email || '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Present Address</span><p className="text-sm">{viewingEmployee.present_address || '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Permanent Address</span><p className="text-sm">{viewingEmployee.permanent_address || '—'}</p></div>
                 </div>
@@ -981,7 +1018,7 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Employment Status</span><p>{employmentStatuses.find((s) => s.id === viewingEmployee.employment_status_id)?.name || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Position</span><p>{viewingEmployee.position || positions.find((p) => p.id === viewingEmployee.position_id)?.name || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Department</span><p>{viewingEmployee.department || departments.find((d) => d.id === viewingEmployee.department_id)?.name || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Role</span><p>{roleBadge(getRole(viewingEmployee))}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Roles</span><div className="flex flex-wrap gap-1 mt-1">{getRoles(viewingEmployee).map((r) => roleBadge(r))}</div></div>
                   <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
                   <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>

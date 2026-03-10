@@ -90,9 +90,15 @@ serve(async (req) => {
       phone, 
       department, 
       position,
-      role = 'employee',
+      role,
+      roles,
       hired_date
     } = await req.json()
+
+    // Support both role (single) and roles (array); ensure at least one role
+    const roleList: string[] = Array.isArray(roles) && roles.length > 0
+      ? roles
+      : role ? [role] : ['employee']
 
     // Validate required fields (password is no longer required - we generate it)
     if (!email || !employee_code || !first_name || !last_name) {
@@ -153,15 +159,19 @@ serve(async (req) => {
       console.error('Employee update error:', employeeError)
     }
 
-    // Assign role if not default
-    if (role !== 'employee') {
-      const { error: roleError } = await supabaseClient
-        .from('user_roles')
-        .update({ role })
-        .eq('user_id', authUser.user.id)
+    // Sync roles: trigger inserts employee; replace with desired set
+    const { error: roleError } = await supabaseClient
+      .from('user_roles')
+      .delete()
+      .eq('user_id', authUser.user.id)
 
-      if (roleError) {
-        console.error('Role assignment error:', roleError)
+    if (!roleError && roleList.length > 0) {
+      const { error: insertError } = await supabaseClient
+        .from('user_roles')
+        .insert(roleList.map((r) => ({ user_id: authUser.user.id, role: r })))
+
+      if (insertError) {
+        console.error('Role assignment error:', insertError)
       }
     }
 
@@ -181,7 +191,7 @@ serve(async (req) => {
           employee_code,
           first_name,
           last_name,
-          role
+          roles: roleList
         }
       }),
       { 
