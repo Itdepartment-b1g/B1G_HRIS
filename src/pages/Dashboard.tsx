@@ -129,20 +129,42 @@ const Dashboard = () => {
 
   const fetchWorkLocations = useCallback(async () => {
     if (!currentUser?.id) return;
-    const { data: ewData } = await supabase
-      .from('employee_work_locations')
-      .select('work_location_id')
+
+    // Try to resolve from today's shift (if shift has a linked work_location_id)
+    const weekday = getWeekdayForDate(new Date());
+    const { data: esData } = await supabase
+      .from('employee_shifts')
+      .select('shift:shifts(work_location_id, days)')
       .eq('employee_id', currentUser.id);
-    const wlIds = (ewData || []).map((r) => r.work_location_id);
-    if (wlIds.length === 0) {
-      setWorkLocations([]);
-    } else {
+    const shifts = (esData || []).map((s: any) => s.shift).filter(Boolean);
+    const shiftForToday = shifts.find((s: any) => s.days?.includes(weekday));
+
+    if (shiftForToday?.work_location_id) {
+      // Shift has a linked location — use only that one
       const { data: wlData } = await supabase
         .from('work_locations')
         .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
-        .in('id', wlIds)
-        .eq('is_active', true);
-      setWorkLocations((wlData || []) as any);
+        .eq('id', shiftForToday.work_location_id)
+        .eq('is_active', true)
+        .maybeSingle();
+      setWorkLocations(wlData ? [wlData] : []);
+    } else {
+      // Fallback: all employee work locations
+      const { data: ewData } = await supabase
+        .from('employee_work_locations')
+        .select('work_location_id')
+        .eq('employee_id', currentUser.id);
+      const wlIds = (ewData || []).map((r) => r.work_location_id);
+      if (wlIds.length === 0) {
+        setWorkLocations([]);
+      } else {
+        const { data: wlData } = await supabase
+          .from('work_locations')
+          .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
+          .in('id', wlIds)
+          .eq('is_active', true);
+        setWorkLocations((wlData || []) as any);
+      }
     }
   }, [currentUser?.id]);
 

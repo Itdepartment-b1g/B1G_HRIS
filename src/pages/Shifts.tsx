@@ -27,6 +27,14 @@ interface Shift {
   description: string | null;
   is_active: boolean;
   created_at: string;
+  work_location_id: string | null;
+  work_location?: { name: string } | null;
+}
+
+interface WorkLocationOption {
+  id: string;
+  name: string;
+  allow_anywhere: boolean;
 }
 
 const ALL_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'] as const;
@@ -100,17 +108,19 @@ const Shifts = () => {
   const [formDays, setFormDays] = useState<string[]>(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
   const [formDescription, setFormDescription] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formWorkLocationId, setFormWorkLocationId] = useState<string>('');
 
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [deletingShift, setDeletingShift] = useState<Shift | null>(null);
   const [viewingShift, setViewingShift] = useState<Shift | null>(null);
   const [page, setPage] = useState(1);
+  const [workLocations, setWorkLocations] = useState<WorkLocationOption[]>([]);
 
   const fetchShifts = useCallback(async () => {
     setLoading(true);
     const { data, error } = await supabase
       .from('shifts')
-      .select('*')
+      .select('*, work_location:work_locations(name)')
       .order('name');
 
     if (error) {
@@ -122,9 +132,19 @@ const Shifts = () => {
     setLoading(false);
   }, []);
 
+  const fetchWorkLocations = useCallback(async () => {
+    const { data } = await supabase
+      .from('work_locations')
+      .select('id, name, allow_anywhere')
+      .eq('is_active', true)
+      .order('name');
+    setWorkLocations((data || []) as WorkLocationOption[]);
+  }, []);
+
   useEffect(() => {
     fetchShifts();
-  }, [fetchShifts]);
+    fetchWorkLocations();
+  }, [fetchShifts, fetchWorkLocations]);
 
   const filtered = shifts.filter((s) =>
     s.name.toLowerCase().includes(search.toLowerCase())
@@ -143,6 +163,7 @@ const Shifts = () => {
     setFormDays(['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setFormDescription('');
     setFormIsActive(true);
+    setFormWorkLocationId('');
   };
 
   const toggleDay = (day: string) => {
@@ -171,6 +192,7 @@ const Shifts = () => {
         days: formDays,
         description: formDescription.trim() || null,
         is_active: formIsActive,
+        work_location_id: formWorkLocationId || null,
       });
 
       if (error) throw error;
@@ -198,6 +220,7 @@ const Shifts = () => {
     setFormDays(shift.days || ['Mon', 'Tue', 'Wed', 'Thu', 'Fri']);
     setFormDescription(shift.description || '');
     setFormIsActive(shift.is_active);
+    setFormWorkLocationId(shift.work_location_id || '');
     setEditOpen(true);
   };
 
@@ -222,6 +245,7 @@ const Shifts = () => {
           days: formDays,
           description: formDescription.trim() || null,
           is_active: formIsActive,
+          work_location_id: formWorkLocationId || null,
         })
         .eq('id', editingShift.id);
 
@@ -349,6 +373,25 @@ const Shifts = () => {
       </div>
 
       <div className="space-y-2">
+        <Label>Work Location</Label>
+        <select
+          value={formWorkLocationId}
+          onChange={(e) => setFormWorkLocationId(e.target.value)}
+          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <option value="">— No location linked —</option>
+          {workLocations.map((wl) => (
+            <option key={wl.id} value={wl.id}>
+              {wl.name}{wl.allow_anywhere ? ' (Anywhere)' : ''}
+            </option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground">
+          Link a work location to this shift. Employees will be validated against this location on shift days.
+        </p>
+      </div>
+
+      <div className="space-y-2">
         <Label>Description</Label>
         <Textarea value={formDescription} onChange={(e) => setFormDescription(e.target.value)} placeholder="Optional shift description..." rows={3} />
       </div>
@@ -404,6 +447,7 @@ const Shifts = () => {
                   <TableHead>Schedule</TableHead>
                   <TableHead>Start Time</TableHead>
                   <TableHead>End Time</TableHead>
+                  <TableHead className="hidden lg:table-cell">Location</TableHead>
                   <TableHead className="hidden lg:table-cell">Net Hrs</TableHead>
                   <TableHead className="hidden lg:table-cell">Break</TableHead>
                   <TableHead className="hidden xl:table-cell">Grace</TableHead>
@@ -428,6 +472,9 @@ const Shifts = () => {
                     </TableCell>
                     <TableCell className="text-sm font-mono">{formatTime(shift.start_time)}</TableCell>
                     <TableCell className="text-sm font-mono">{formatTime(shift.end_time)}</TableCell>
+                    <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
+                      {shift.work_location?.name || '—'}
+                    </TableCell>
                     <TableCell className="text-sm font-medium hidden lg:table-cell">
                       {computeNetWorkingHours(
                         shift.start_time.substring(0, 5),
@@ -470,7 +517,7 @@ const Shifts = () => {
                 ))}
                 {filtered.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={10} className="text-center py-8 text-muted-foreground">
+                    <TableCell colSpan={11} className="text-center py-8 text-muted-foreground">
                       No shifts found
                     </TableCell>
                   </TableRow>
@@ -504,6 +551,7 @@ const Shifts = () => {
                 <div><span className="text-muted-foreground text-sm">Net Hours</span><p>{computeNetWorkingHours(viewingShift.start_time.substring(0, 5), viewingShift.end_time.substring(0, 5), viewingShift.break_total_hours ?? 0)}h</p></div>
                 <div><span className="text-muted-foreground text-sm">Break</span><p>{viewingShift.break_start_time && viewingShift.break_end_time ? `${formatTime(viewingShift.break_start_time)} – ${formatTime(viewingShift.break_end_time)}` : viewingShift.break_total_hours != null ? `${viewingShift.break_total_hours}h` : '—'}</p></div>
                 <div><span className="text-muted-foreground text-sm">Grace Period</span><p>{viewingShift.grace_period_minutes != null ? `${viewingShift.grace_period_minutes} min` : '—'}</p></div>
+                <div><span className="text-muted-foreground text-sm">Work Location</span><p>{viewingShift.work_location?.name || '—'}</p></div>
                 <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant="outline" className={viewingShift.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{viewingShift.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
               </div>
               {viewingShift.description && (

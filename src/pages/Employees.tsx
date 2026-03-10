@@ -60,7 +60,7 @@ interface Employee {
 
 interface LookupItem { id: string; name: string; }
 
-interface ShiftItem { id: string; name: string; start_time: string; end_time: string; days: string[]; }
+interface ShiftItem { id: string; name: string; start_time: string; end_time: string; days: string[]; work_location?: { name: string } | null; }
 
 // ── Constants ──────────────────────────────────────────
 
@@ -153,7 +153,6 @@ const Employees = () => {
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
   const [viewingDepartments, setViewingDepartments] = useState<string[]>([]);
-  const [viewingWorkLocations, setViewingWorkLocations] = useState<string[]>([]);
   const [viewingSupervisors, setViewingSupervisors] = useState<string[]>([]);
   const [viewingShifts, setViewingShifts] = useState<string[]>([]);
   const [employeeDepartmentNames, setEmployeeDepartmentNames] = useState<Record<string, string[]>>({});
@@ -161,7 +160,6 @@ const Employees = () => {
 
   // Multi-select states
   const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
-  const [selectedWorkLocations, setSelectedWorkLocations] = useState<string[]>([]);
   const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([]);
   const [selectedShifts, setSelectedShifts] = useState<string[]>([]);
 
@@ -169,7 +167,6 @@ const Employees = () => {
   const [departments, setDepartments] = useState<LookupItem[]>([]);
   const [positions, setPositions] = useState<LookupItem[]>([]);
   const [employmentStatuses, setEmploymentStatuses] = useState<LookupItem[]>([]);
-  const [workLocations, setWorkLocations] = useState<LookupItem[]>([]);
   const [costCenters, setCostCenters] = useState<LookupItem[]>([]);
   const [shifts, setShifts] = useState<ShiftItem[]>([]);
 
@@ -209,18 +206,16 @@ const Employees = () => {
   }, []);
 
   const fetchLookups = useCallback(async () => {
-    const [deptRes, posRes, esRes, wlRes, ccRes, shRes] = await Promise.all([
+    const [deptRes, posRes, esRes, ccRes, shRes] = await Promise.all([
       supabase.from('departments').select('id, name').order('name'),
       supabase.from('positions').select('id, name').order('name'),
       supabase.from('employment_statuses').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('work_locations').select('id, name').eq('is_active', true).order('name'),
       supabase.from('cost_centers').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('shifts').select('id, name, start_time, end_time, days').eq('is_active', true).order('name'),
+      supabase.from('shifts').select('id, name, start_time, end_time, days, work_location:work_locations(name)').eq('is_active', true).order('name'),
     ]);
     setDepartments(deptRes.data || []);
     setPositions(posRes.data || []);
     setEmploymentStatuses(esRes.data || []);
-    setWorkLocations(wlRes.data || []);
     setCostCenters(ccRes.data || []);
     setShifts((shRes.data as ShiftItem[]) || []);
   }, []);
@@ -230,24 +225,20 @@ const Employees = () => {
   useEffect(() => {
     if (!viewingEmployee?.id) {
       setViewingDepartments([]);
-      setViewingWorkLocations([]);
       setViewingSupervisors([]);
       setViewingShifts([]);
       return;
     }
     const load = async () => {
-      const [edRes, wlRes, supRes, shRes] = await Promise.all([
+      const [edRes, supRes, shRes] = await Promise.all([
         supabase.from('employee_departments').select('department_id').eq('employee_id', viewingEmployee.id),
-        supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_shifts').select('shift_id').eq('employee_id', viewingEmployee.id),
       ]);
       const deptIds = (edRes.data || []).map((r: { department_id: string }) => r.department_id);
       setViewingDepartments(deptIds.map((id) => departments.find((d) => d.id === id)?.name).filter(Boolean) as string[]);
-      const wlIds = (wlRes.data || []).map((r: { work_location_id: string }) => r.work_location_id);
       const supIds = (supRes.data || []).map((r: { supervisor_id: string }) => r.supervisor_id);
       const shIds = (shRes.data || []).map((r: { shift_id: string }) => r.shift_id);
-      setViewingWorkLocations(wlIds.map((id) => workLocations.find((w) => w.id === id)?.name).filter(Boolean) as string[]);
       setViewingSupervisors(supIds.map((id) => {
         const emp = employees.find((e) => e.id === id);
         return emp ? `${emp.first_name} ${emp.last_name}` : null;
@@ -255,7 +246,7 @@ const Employees = () => {
       setViewingShifts(shIds.map((id) => shifts.find((s) => s.id === id)?.name).filter(Boolean) as string[]);
     };
     load();
-  }, [viewingEmployee?.id, departments, workLocations, employees, shifts]);
+  }, [viewingEmployee?.id, departments, employees, shifts]);
 
   // ── Derived ──────────────────────────────────────────
 
@@ -294,7 +285,6 @@ const Employees = () => {
     setPersonal(emptyPersonal);
     setEmployment(emptyEmployment);
     setSelectedDepartments([]);
-    setSelectedWorkLocations([]);
     setSelectedSupervisors([]);
     setSelectedShifts([]);
     setFormStep(1);
@@ -321,14 +311,6 @@ const Employees = () => {
       );
     }
 
-    // Work locations
-    await supabase.from('employee_work_locations').delete().eq('employee_id', employeeId);
-    if (selectedWorkLocations.length > 0) {
-      await supabase.from('employee_work_locations').insert(
-        selectedWorkLocations.map((wlId) => ({ employee_id: employeeId, work_location_id: wlId }))
-      );
-    }
-
     // Supervisors
     await supabase.from('employee_supervisors').delete().eq('employee_id', employeeId);
     if (selectedSupervisors.length > 0) {
@@ -337,7 +319,7 @@ const Employees = () => {
       );
     }
 
-    // Shifts
+    // Shifts (work location is linked to the shift, not the employee)
     await supabase.from('employee_shifts').delete().eq('employee_id', employeeId);
     if (selectedShifts.length > 0) {
       await supabase.from('employee_shifts').insert(
@@ -462,15 +444,13 @@ const Employees = () => {
     });
 
     // Fetch junction data
-    const [edRes, wlRes, supRes, shRes] = await Promise.all([
+    const [edRes, supRes, shRes] = await Promise.all([
       supabase.from('employee_departments').select('department_id').eq('employee_id', emp.id),
-      supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', emp.id),
       supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', emp.id),
       supabase.from('employee_shifts').select('shift_id').eq('employee_id', emp.id),
     ]);
     const deptIds = (edRes.data || []).map((r) => r.department_id);
     setSelectedDepartments(deptIds.length > 0 ? deptIds : (emp.department_id ? [emp.department_id] : []));
-    setSelectedWorkLocations((wlRes.data || []).map((r) => r.work_location_id));
     setSelectedSupervisors((supRes.data || []).map((r) => r.supervisor_id));
     setSelectedShifts((shRes.data || []).map((r) => r.shift_id));
 
@@ -725,29 +705,6 @@ const Employees = () => {
         </div>
       </div>
 
-      {/* Work Locations multi-select */}
-      <div className="space-y-2">
-        <Label>Work Location <span className="text-red-500">*</span></Label>
-        <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
-          {workLocations.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No work locations available</p>
-          ) : workLocations.map((wl) => (
-            <label key={wl.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
-              <input
-                type="checkbox"
-                checked={selectedWorkLocations.includes(wl.id)}
-                onChange={() => toggleMulti(selectedWorkLocations, setSelectedWorkLocations, wl.id)}
-                className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
-              />
-              <span className="text-sm">{wl.name}</span>
-            </label>
-          ))}
-        </div>
-        {selectedWorkLocations.length > 0 && (
-          <p className="text-xs text-muted-foreground">{selectedWorkLocations.length} selected</p>
-        )}
-      </div>
-
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Cost Center</Label>
@@ -795,7 +752,7 @@ const Employees = () => {
       {/* Assigned Shifts multi-select */}
       <div className="space-y-2">
         <Label>Assigned Shifts</Label>
-        <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+        <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-1">
           {shifts.length === 0 ? (
             <p className="text-sm text-muted-foreground">No shifts available</p>
           ) : shifts.map((sh) => (
@@ -806,13 +763,19 @@ const Employees = () => {
                 onChange={() => toggleMulti(selectedShifts, setSelectedShifts, sh.id)}
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
-              <span className="text-sm">{sh.name}</span>
-              <span className="text-xs text-muted-foreground ml-auto">
+              <div className="flex-1 min-w-0">
+                <span className="text-sm">{sh.name}</span>
+                {sh.work_location?.name && (
+                  <span className="text-xs text-blue-600 ml-1.5">• {sh.work_location.name}</span>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground shrink-0">
                 {timeTo12Hour(sh.start_time || '')}–{timeTo12Hour(sh.end_time || '')} ({sh.days?.join(', ')})
               </span>
             </label>
           ))}
         </div>
+        <p className="text-xs text-muted-foreground">Work location is linked per shift. Manage in the Shifts page.</p>
       </div>
 
       {/* Exemptions — Login Exempted only (others hidden for now) */}
@@ -1075,9 +1038,27 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Cost Center</span><p>{costCenters.find((c) => c.id === viewingEmployee.cost_center_id)?.name || '—'}</p></div>
-                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Work Locations</span><p className="text-sm">{viewingWorkLocations.length > 0 ? viewingWorkLocations.join(', ') : '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Immediate Superior</span><p className="text-sm">{viewingSupervisors.length > 0 ? viewingSupervisors.join(', ') : '—'}</p></div>
-                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Assigned Shifts</span><p className="text-sm">{viewingShifts.length > 0 ? viewingShifts.join(', ') : '—'}</p></div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground text-sm">Assigned Shifts & Work Locations</span>
+                    {viewingShifts.length > 0 ? (
+                      <div className="mt-1 space-y-1">
+                        {viewingShifts.map((shName, i) => {
+                          const sh = shifts.find((s) => s.name === shName);
+                          return (
+                            <p key={i} className="text-sm">
+                              {shName}
+                              {sh?.work_location?.name && (
+                                <span className="text-blue-600 ml-1.5">• {sh.work_location.name}</span>
+                              )}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm">—</p>
+                    )}
+                  </div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Exemptions</span><p className="text-sm">{viewingEmployee.login_exempted ? 'Login Exempted' : 'None'}</p></div>
                 </div>
               </div>
