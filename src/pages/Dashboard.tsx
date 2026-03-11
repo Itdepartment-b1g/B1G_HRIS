@@ -212,37 +212,50 @@ const Dashboard = () => {
 
   // Login-exempted: primary handler is pg_cron (server-side, no login needed).
   // This client-side fallback ensures the record appears immediately when the user opens the app,
-  // in case the cron hasn't fired yet. Uses DO NOTHING so it won't overwrite cron-created records.
+  // in case the cron hasn't fired yet. Uses onConflict so it won't overwrite cron-created records.
   useEffect(() => {
     if (!currentUser?.login_exempted || !assignedShift) return;
-    const today = new Date().toISOString().split('T')[0];
 
-    const pad = (t: string) => (t.length >= 8 ? t : t + ':00'.slice(0, 8 - t.length));
-    const st = pad((assignedShift.start_time || '08:00:00').toString());
-    const et = pad((assignedShift.end_time || '17:00:00').toString());
-    const [y, m, d] = today.split('-').map(Number);
-    const parseTime = (t: string) => t.split(':').map((n) => parseInt(n, 10) || 0);
-    const [sh, sm, ss] = parseTime(st);
-    const [eh, em, es] = parseTime(et);
-    const timeInDate = new Date(y, m - 1, d, sh, sm, ss || 0);
-    const timeOutDate = new Date(y, m - 1, d, eh, em, es || 0);
-    timeInDate.setMilliseconds(0);
-    timeOutDate.setMilliseconds(0);
-    const timeInIso = timeInDate.toISOString();
-    const timeOutIso = timeOutDate.toISOString();
+    const recordAttendance = async () => {
+      try {
+        const today = new Date().toISOString().split('T')[0];
 
-    supabase
-      .from('attendance_records')
-      .upsert({
-        employee_id: currentUser.id,
-        date: today,
-        time_in: timeInIso,
-        time_out: timeOutIso,
-        status: 'present',
-        minutes_late: 0,
-      }, { onConflict: 'employee_id,date' })
-      .then(() => fetchAttendanceLog());
-  }, [currentUser?.id, currentUser?.login_exempted, assignedShift]);
+        const pad = (t: string) => (t.length >= 8 ? t : t + ':00'.slice(0, 8 - t.length));
+        const st = pad((assignedShift.start_time || '08:00:00').toString());
+        const et = pad((assignedShift.end_time || '17:00:00').toString());
+        const [y, m, d] = today.split('-').map(Number);
+        const parseTime = (t: string) => t.split(':').map((n) => parseInt(n, 10) || 0);
+        const [sh, sm, ss] = parseTime(st);
+        const [eh, em, es] = parseTime(et);
+        const timeInDate = new Date(y, m - 1, d, sh, sm, ss || 0);
+        const timeOutDate = new Date(y, m - 1, d, eh, em, es || 0);
+        timeInDate.setMilliseconds(0);
+        timeOutDate.setMilliseconds(0);
+        const timeInIso = timeInDate.toISOString();
+        const timeOutIso = timeOutDate.toISOString();
+
+        const { error } = await supabase
+          .from('attendance_records')
+          .upsert({
+            employee_id: currentUser.id,
+            date: today,
+            time_in: timeInIso,
+            time_out: timeOutIso,
+            status: 'present',
+            minutes_late: 0,
+          }, { onConflict: 'employee_id,date', ignoreDuplicates: true });
+
+        if (error) {
+          console.error('[Login-exempted] Failed to auto-record attendance:', error.message);
+        }
+      } catch (err) {
+        console.error('[Login-exempted] Unexpected error auto-recording attendance:', err);
+      }
+      fetchAttendanceLog();
+    };
+
+    recordAttendance();
+  }, [currentUser?.id, currentUser?.login_exempted, assignedShift, fetchAttendanceLog]);
 
   const uploadPhoto = async (blob: Blob, employeeId: string, date: string, mode: 'in' | 'out'): Promise<string | null> => {
     const ext = 'jpg';
