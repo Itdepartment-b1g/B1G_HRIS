@@ -4,11 +4,7 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { corsHeaders, verifyUserJwt, requireSuperAdmin } from './auth.ts'
 
 const MANILA_LAT = 14.5995
 const MANILA_LNG = 120.9842
@@ -25,10 +21,14 @@ function isWeekday(d: Date): boolean {
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders(req) })
   }
 
   try {
+    const auth = await verifyUserJwt(req)
+    const forbidden = requireSuperAdmin(auth, req)
+    if (forbidden) return forbidden
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -43,7 +43,7 @@ serve(async (req) => {
     if (empError || !employees?.length) {
       return new Response(
         JSON.stringify({ error: 'No employees found', records_created: 0 }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
       )
     }
 
@@ -113,13 +113,13 @@ serve(async (req) => {
         days_covered: 30,
         errors: errors.length > 0 ? errors.slice(0, 5) : undefined,
       }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (error) {
     console.error('Seed attendance error:', error)
     return new Response(
       JSON.stringify({ error: error.message }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
     )
   }
 })

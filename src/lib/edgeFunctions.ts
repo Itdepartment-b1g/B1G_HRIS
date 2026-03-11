@@ -1,35 +1,50 @@
 /**
  * Edge Functions Helper Library
- * 
+ *
  * This module provides typed helper functions for calling Supabase Edge Functions.
- * All functions require proper environment variables to be set in .env file.
+ * Admin functions require user JWT (session) for authorization.
  */
+
+import { supabase } from '@/lib/supabase';
 
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-/**
- * Check if Supabase credentials are configured
- */
 function checkCredentials() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
     throw new Error('Supabase credentials not configured. Please check your .env file.');
   }
 }
 
+export interface CallEdgeFunctionOptions {
+  /** When true, sends the current user's JWT instead of anon key (required for admin functions) */
+  useUserAuth?: boolean;
+}
+
 /**
- * Generic fetch wrapper for Edge Functions
+ * Generic fetch wrapper for Edge Functions.
+ * Pass useUserAuth: true for functions that require admin authorization.
  */
 async function callEdgeFunction<T>(
   functionName: string,
-  body?: Record<string, any>
+  body?: Record<string, any>,
+  options?: CallEdgeFunctionOptions
 ): Promise<T> {
   checkCredentials();
+
+  let authHeader = `Bearer ${SUPABASE_ANON_KEY}`;
+  if (options?.useUserAuth) {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('You must be logged in to perform this action.');
+    }
+    authHeader = `Bearer ${session.access_token}`;
+  }
 
   const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+      Authorization: authHeader,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -175,7 +190,7 @@ export async function getEmailByEmployeeCode(employeeCode: string): Promise<{ em
  * console.log(`Created ${result.created_users.length} users`);
  */
 export async function seedDatabase(): Promise<SeedDatabaseResponse> {
-  return callEdgeFunction<SeedDatabaseResponse>('seed-database');
+  return callEdgeFunction<SeedDatabaseResponse>('seed-database', undefined, { useUserAuth: true });
 }
 
 export interface SeedAttendanceResponse {
@@ -191,7 +206,7 @@ export interface SeedAttendanceResponse {
  * Skips dates that already have records.
  */
 export async function seedAttendance(): Promise<SeedAttendanceResponse> {
-  return callEdgeFunction<SeedAttendanceResponse>('seed-attendance');
+  return callEdgeFunction<SeedAttendanceResponse>('seed-attendance', undefined, { useUserAuth: true });
 }
 
 /**
@@ -218,7 +233,7 @@ export async function createUser(data: CreateUserData): Promise<CreateUserRespon
     throw new Error('Missing required fields: email, employee_code, first_name, last_name');
   }
 
-  return callEdgeFunction<CreateUserResponse>('create-user', data);
+  return callEdgeFunction<CreateUserResponse>('create-user', data, { useUserAuth: true });
 }
 
 /**
@@ -250,7 +265,7 @@ export async function resetPassword(
   return callEdgeFunction<ResetPasswordResponse>('reset-password', {
     ...identifier,
     new_password: newPassword,
-  });
+  }, { useUserAuth: true });
 }
 
 /**
@@ -281,7 +296,7 @@ export async function updateUserProfile(
   return callEdgeFunction<UpdateUserProfileResponse>('update-user-profile', {
     ...identifier,
     ...updates,
-  });
+  }, { useUserAuth: true });
 }
 
 /**
@@ -294,7 +309,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResponse> {
   if (!userId) {
     throw new Error('user_id is required');
   }
-  return callEdgeFunction<DeleteUserResponse>('delete-user', { user_id: userId });
+  return callEdgeFunction<DeleteUserResponse>('delete-user', { user_id: userId }, { useUserAuth: true });
 }
 
 // ============================================================
