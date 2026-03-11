@@ -16,10 +16,11 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Search, Loader2, Eye, ChevronDown, ChevronRight, Pencil, Camera, Filter, MapPin, MoreVertical, AlertCircle } from 'lucide-react';
+import { Search, Loader2, Eye, ChevronDown, ChevronRight, Pencil, Camera, Filter, MapPin, MoreVertical, AlertCircle, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
+import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
 import { timeTo12Hour } from '@/lib/utils';
 
 interface RecordRow {
@@ -106,6 +107,7 @@ const Attendance = () => {
   const [editTimeIn, setEditTimeIn] = useState('');
   const [editTimeOut, setEditTimeOut] = useState('');
   const [saving, setSaving] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
   const [page, setPage] = useState(1);
   type MobileFilter = 'all_today' | 'my_30_days' | 'absent';
   const [mobileFilter, setMobileFilter] = useState<MobileFilter>('my_30_days');
@@ -365,6 +367,18 @@ const Attendance = () => {
     }
   };
 
+  const handleExport = async (format: 'csv' | 'xlsx') => {
+    setExportLoading(true);
+    try {
+      await exportAttendanceReport({ dateFrom, dateTo, format });
+      toast.success(`Report exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export report');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   const statusBadge = (status: string) => {
     const displayStatus = status === 'eti' ? 'present' : status === 'lti' ? 'late' : status; // legacy mapping
     const styles: Record<string, string> = {
@@ -386,10 +400,11 @@ const Attendance = () => {
 
       {/* Mobile: Filter tabs + Cards */}
       <div className="block lg:hidden space-y-4">
-        <div className="flex items-center gap-2 overflow-x-auto pb-2">
-          <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="flex gap-2 shrink-0">
-            {(['all_today', 'my_30_days', 'absent'] as const).map((f) => (
+        <div className="flex items-center justify-between gap-2 overflow-x-auto pb-2">
+          <div className="flex items-center gap-2 shrink-0">
+            <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
+            <div className="flex gap-2 shrink-0">
+              {(['all_today', 'my_30_days', 'absent'] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setMobileFilter(f)}
@@ -402,7 +417,21 @@ const Attendance = () => {
                 {f === 'all_today' ? 'All Today' : f === 'my_30_days' ? 'My Last 30 Days' : 'Absent'}
               </button>
             ))}
+            </div>
           </div>
+          {isAdmin && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0" disabled={exportLoading}>
+                  {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
 
         {loading ? (
@@ -533,6 +562,20 @@ const Attendance = () => {
           <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px]" />
           <span className="text-muted-foreground text-sm">to</span>
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[140px]" />
+          {isAdmin && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={exportLoading}>
+                  {exportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 

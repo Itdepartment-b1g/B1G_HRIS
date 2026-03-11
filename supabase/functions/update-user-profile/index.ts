@@ -3,19 +3,19 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { corsHeaders, verifyUserJwt, requireAdmin } from './auth.ts'
+import { updateUserProfileSchema, validateOr400, ValidationError } from './validation.ts'
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders(req) })
   }
 
   try {
+    const auth = await verifyUserJwt(req)
+    const forbidden = requireAdmin(auth, req)
+    if (forbidden) return forbidden
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -27,7 +27,18 @@ serve(async (req) => {
       }
     )
 
-    const { 
+    const body = await req.json()
+    let parsed
+    try {
+      parsed = validateOr400(updateUserProfileSchema, body)
+    } catch (e) {
+      return new Response(
+        JSON.stringify({ error: e instanceof ValidationError ? e.message : 'Invalid request body' }),
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
+      )
+    }
+
+    const {
       user_id,
       email,
       employee_code,
@@ -41,19 +52,8 @@ serve(async (req) => {
       hired_date,
       avatar_url,
       role,
-      roles
-    } = await req.json()
-
-    // Must provide user_id or email to identify the user
-    if (!user_id && !email) {
-      return new Response(
-        JSON.stringify({ error: 'Must provide either user_id or email' }),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-          status: 400 
-        }
-      )
-    }
+      roles,
+    } = parsed
 
     // Find user by email if user_id not provided
     let targetUserId = user_id
@@ -68,7 +68,7 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({ error: 'User not found' }),
           { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+            headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
             status: 404 
           }
         )
@@ -104,7 +104,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: employeeError.message }),
         { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
           status: 400 
         }
       )
@@ -138,7 +138,7 @@ serve(async (req) => {
         console.error('Role delete error:', delError)
         return new Response(
           JSON.stringify({ error: `Failed to update roles: ${delError.message}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
         )
       }
 
@@ -150,7 +150,7 @@ serve(async (req) => {
         console.error('Role insert error:', insertError)
         return new Response(
           JSON.stringify({ error: `Failed to save roles: ${insertError.message}` }),
-          { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+          { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
         )
       }
     }
@@ -174,7 +174,7 @@ serve(async (req) => {
         }
       }),
       { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
         status: 200 
       }
     )
@@ -184,7 +184,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ error: error.message }),
       { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
         status: 500 
       }
     )

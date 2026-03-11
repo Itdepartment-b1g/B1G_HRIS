@@ -3,15 +3,11 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { corsHeaders } from './auth.ts'
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders(req)(req) })
   }
 
   try {
@@ -26,7 +22,7 @@ serve(async (req) => {
     if (!employee_code || typeof employee_code !== 'string') {
       return new Response(
         JSON.stringify({ error: 'employee_code is required' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
       )
     }
 
@@ -41,26 +37,26 @@ serve(async (req) => {
       console.error('Lookup error:', error)
       return new Response(
         JSON.stringify({ error: error.message }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
       )
     }
 
     if (!data?.email) {
       return new Response(
         JSON.stringify({ error: 'Invalid employee code' }),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 404 }
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 404 }
       )
     }
 
     return new Response(
       JSON.stringify({ email: data.email }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+      { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 200 }
     )
   } catch (error) {
     console.error('Unexpected error:', error)
     return new Response(
       JSON.stringify({ error: error.message }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 500 }
+      { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
     )
   }
 })

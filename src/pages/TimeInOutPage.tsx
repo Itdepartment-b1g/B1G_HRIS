@@ -7,6 +7,7 @@ import { supabase } from '@/lib/supabase';
 import { isWithinWorkLocation, type WorkLocation } from '@/lib/geoUtils';
 import { LocationMap } from '@/components/LocationMap';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
+import { detectFaceInCanvas } from '@/lib/faceDetection';
 import { toast } from 'sonner';
 
 const TimeInOutPage = () => {
@@ -28,6 +29,7 @@ const TimeInOutPage = () => {
   const [submitting, setSubmitting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [faceCheckLoading, setFaceCheckLoading] = useState(false);
   const [clockedIn, setClockedIn] = useState(false);
   const [todayRecord, setTodayRecord] = useState<{ time_in: string | null; time_out: string | null } | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
@@ -72,7 +74,7 @@ const TimeInOutPage = () => {
     if (videoRef.current) videoRef.current.srcObject = null;
   }, []);
 
-  const capturePhoto = useCallback(() => {
+  const capturePhoto = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.srcObject) return;
@@ -81,10 +83,20 @@ const TimeInOutPage = () => {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-    setCapturedPhoto(dataUrl);
-    canvas.toBlob((blob) => blob && setPhotoBlob(blob), 'image/jpeg', 0.9);
-    stopCamera();
+    setFaceCheckLoading(true);
+    try {
+      const faceDetected = await detectFaceInCanvas(canvas);
+      if (!faceDetected) {
+        toast.error('No face detected. Please position your face in the camera and try again.');
+        return;
+      }
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      setCapturedPhoto(dataUrl);
+      canvas.toBlob((blob) => blob && setPhotoBlob(blob), 'image/jpeg', 0.9);
+      stopCamera();
+    } finally {
+      setFaceCheckLoading(false);
+    }
   }, [stopCamera]);
 
   const retakePhoto = useCallback(() => {
@@ -400,9 +412,14 @@ const TimeInOutPage = () => {
               <button
                 type="button"
                 onClick={capturePhoto}
-                className="w-20 h-20 rounded-full bg-primary border-4 border-white shadow-lg flex items-center justify-center hover:bg-primary/90 active:scale-95 transition-transform"
+                disabled={faceCheckLoading}
+                className="w-20 h-20 rounded-full bg-primary border-4 border-white shadow-lg flex items-center justify-center hover:bg-primary/90 active:scale-95 transition-transform disabled:opacity-70 disabled:cursor-not-allowed"
               >
-                <Camera className="h-10 w-10 text-primary-foreground" />
+                {faceCheckLoading ? (
+                  <Loader2 className="h-10 w-10 text-primary-foreground animate-spin" />
+                ) : (
+                  <Camera className="h-10 w-10 text-primary-foreground" />
+                )}
               </button>
             </div>
           )}

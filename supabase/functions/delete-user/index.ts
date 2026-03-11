@@ -3,19 +3,19 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { corsHeaders, verifyUserJwt, requireAdmin } from './auth.ts'
+import { deleteUserSchema, validateOr400, ValidationError } from './validation.ts'
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { status: 200, headers: corsHeaders })
+    return new Response('ok', { status: 200, headers: corsHeaders(req) })
   }
 
   try {
+    const auth = await verifyUserJwt(req)
+    const forbidden = requireAdmin(auth, req)
+    if (forbidden) return forbidden
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -27,17 +27,18 @@ serve(async (req) => {
       }
     )
 
-    const { user_id } = await req.json()
-
-    if (!user_id) {
+    const body = await req.json()
+    let parsed
+    try {
+      parsed = validateOr400(deleteUserSchema, body)
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: 'user_id is required' }),
-        {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-          status: 400
-        }
+        JSON.stringify({ error: e instanceof ValidationError ? e.message : 'Invalid request body' }),
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
       )
     }
+
+    const { user_id } = parsed
 
     // Clear supervisor references pointing to this user first
     await supabaseClient
@@ -59,7 +60,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: deleteError.message }),
         {
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
           status: 400
         }
       )
@@ -72,7 +73,7 @@ serve(async (req) => {
         user_id
       }),
       {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
         status: 200
       }
     )
@@ -82,7 +83,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ error: error.message }),
       {
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
         status: 500
       }
     )
