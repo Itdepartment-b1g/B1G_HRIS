@@ -3,19 +3,19 @@
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-}
+import { corsHeaders, verifyUserJwt, requireAdmin } from './auth.ts'
+import { resetPasswordSchema, validateOr400, ValidationError } from './validation.ts'
 
 serve(async (req) => {
-  // Handle CORS preflight requests
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders(req) })
   }
 
   try {
+    const auth = await verifyUserJwt(req)
+    const forbidden = requireAdmin(auth, req)
+    if (forbidden) return forbidden
+
     const supabaseClient = createClient(
       Deno.env.get('SUPABASE_URL') ?? '',
       Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '',
@@ -27,29 +27,18 @@ serve(async (req) => {
       }
     )
 
-    const { user_id, email, new_password } = await req.json()
-
-    // Must provide either user_id or email
-    if (!user_id && !email) {
+    const body = await req.json()
+    let parsed
+    try {
+      parsed = validateOr400(resetPasswordSchema, body)
+    } catch (e) {
       return new Response(
-        JSON.stringify({ error: 'Must provide either user_id or email' }),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-          status: 400 
-        }
+        JSON.stringify({ error: e instanceof ValidationError ? e.message : 'Invalid request body' }),
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
       )
     }
 
-    // Must provide new password
-    if (!new_password) {
-      return new Response(
-        JSON.stringify({ error: 'new_password is required' }),
-        { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
-          status: 400 
-        }
-      )
-    }
+    const { user_id, email, new_password } = parsed
 
     // Find user by email if user_id not provided
     let targetUserId = user_id
@@ -64,7 +53,7 @@ serve(async (req) => {
         return new Response(
           JSON.stringify({ error: 'User not found' }),
           { 
-            headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+            headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
             status: 404 
           }
         )
@@ -83,7 +72,7 @@ serve(async (req) => {
       return new Response(
         JSON.stringify({ error: error.message }),
         { 
-          headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
           status: 400 
         }
       )
@@ -96,7 +85,7 @@ serve(async (req) => {
         user_id: data.user.id
       }),
       { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
         status: 200 
       }
     )
@@ -106,7 +95,7 @@ serve(async (req) => {
     return new Response(
       JSON.stringify({ error: error.message }),
       { 
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' }, 
+        headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, 
         status: 500 
       }
     )

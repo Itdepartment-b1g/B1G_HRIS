@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import DashboardLayout from "./components/DashboardLayout";
 import EmployeeLayout from "./components/EmployeeLayout";
 import MasterDataLayout from "./components/MasterDataLayout";
+import { RequireRole } from "./components/RequireRole";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
 import Leave from "./pages/Leave";
@@ -69,10 +70,10 @@ const App = () => (
             <Route path="survey" element={<EmployeeSurvey />} />
             <Route path="claims" element={<Reports />} />
             <Route path="payslip" element={<MyPayslip />} />
-            <Route path="employees" element={<Employees />} />
-            <Route path="departments" element={<Departments />} />
+            <Route path="employees" element={<RequireRole roles={['admin', 'super_admin']}><Employees /></RequireRole>} />
+            <Route path="departments" element={<RequireRole roles={['admin', 'super_admin']}><Departments /></RequireRole>} />
             <Route path="shifts" element={<Shifts />} />
-            <Route path="master-data" element={<MasterDataLayout />}>
+            <Route path="master-data" element={<RequireRole roles={['admin', 'super_admin']}><MasterDataLayout /></RequireRole>}>
               <Route index element={<Navigate to="employees" replace />} />
               <Route path="employees" element={<Employees />} />
               <Route path="departments" element={<Departments />} />

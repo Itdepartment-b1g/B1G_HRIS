@@ -10,6 +10,8 @@ import {
 import { Button } from '@/components/ui/button';
 import { Camera, MapPin, Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import { isWithinWorkLocation, type WorkLocation } from '@/lib/geoUtils';
+import { detectFaceInCanvas } from '@/lib/faceDetection';
+import { toast } from 'sonner';
 import { LocationMap } from '@/components/LocationMap';
 
 interface TimeInOutDialogProps {
@@ -39,6 +41,7 @@ export function TimeInOutDialog({
   const [submitting, setSubmitting] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
+  const [faceCheckLoading, setFaceCheckLoading] = useState(false);
 
   const getLocation = useCallback((options?: { retries?: number }): Promise<{ lat: number; lng: number }> => {
     const maxRetries = options?.retries ?? 0;
@@ -93,7 +96,7 @@ export function TimeInOutDialog({
     }
   }, []);
 
-  const capturePhoto = useCallback(() => {
+  const capturePhoto = useCallback(async () => {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !video.srcObject) return;
@@ -104,18 +107,26 @@ export function TimeInOutDialog({
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
     ctx.drawImage(video, 0, 0);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-    setCapturedPhoto(dataUrl);
-
-    canvas.toBlob(
-      (blob) => {
-        if (blob) setPhotoBlob(blob);
-      },
-      'image/jpeg',
-      0.9
-    );
-
-    stopCamera();
+    setFaceCheckLoading(true);
+    try {
+      const faceDetected = await detectFaceInCanvas(canvas);
+      if (!faceDetected) {
+        toast.error('No face detected. Please position your face in the camera and try again.');
+        return;
+      }
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+      setCapturedPhoto(dataUrl);
+      canvas.toBlob(
+        (blob) => {
+          if (blob) setPhotoBlob(blob);
+        },
+        'image/jpeg',
+        0.9
+      );
+      stopCamera();
+    } finally {
+      setFaceCheckLoading(false);
+    }
   }, [stopCamera]);
 
   const retakePhoto = useCallback(() => {
@@ -223,8 +234,17 @@ export function TimeInOutDialog({
                   size="lg"
                   className="absolute bottom-4 left-1/2 -translate-x-1/2"
                   onClick={capturePhoto}
+                  disabled={faceCheckLoading}
                 >
-                  <Camera className="h-5 w-5 mr-2" /> Capture Photo
+                  {faceCheckLoading ? (
+                    <>
+                      <Loader2 className="h-5 w-5 mr-2 animate-spin" /> Checking...
+                    </>
+                  ) : (
+                    <>
+                      <Camera className="h-5 w-5 mr-2" /> Capture Photo
+                    </>
+                  )}
                 </Button>
               )}
             </div>
