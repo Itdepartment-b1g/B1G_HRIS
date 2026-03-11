@@ -288,16 +288,19 @@ export function TimeInOutDialog({
               </div>
 
               {(() => {
+                const isAnywhere = workLocations.some((l) => l.allow_anywhere);
                 const hasWorkLocationsWithCoords = workLocations.some(
                   (l) => !l.allow_anywhere && l.latitude != null && l.longitude != null && l.radius_meters != null
                 );
-                const showMap = hasWorkLocationsWithCoords && (location || locationError);
+                // Show map when we have user location (anywhere or specific), or work-location circles + GPS error
+                const showMap = !!location || (hasWorkLocationsWithCoords && !!locationError);
                 if (!showMap) return null;
                 return (
                   <LocationMap
                     userLocation={location}
                     workLocations={workLocations}
                     withinRadius={withinRadius}
+                    isAnywhere={isAnywhere}
                     className="mt-4"
                   />
                 );

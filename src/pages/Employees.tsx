@@ -60,7 +60,7 @@ interface Employee {
 
 interface LookupItem { id: string; name: string; }
 
-interface ShiftItem { id: string; name: string; start_time: string; end_time: string; days: string[]; }
+interface ShiftItem { id: string; name: string; start_time: string; end_time: string; days: string[]; work_location?: { name: string } | null; }
 
 // ── Constants ──────────────────────────────────────────
 
@@ -111,8 +111,7 @@ const emptyEmployment = {
   hired_date: new Date().toISOString().split('T')[0],
   employment_status_id: '',
   position_id: '',
-  department_id: '',
-  role: 'employee' as string,
+  roles: ['employee'] as string[],
   cost_center_id: '',
   company_email: '',
   overtime_exempted: false,
@@ -153,13 +152,14 @@ const Employees = () => {
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
   const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null);
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
-  const [viewingWorkLocations, setViewingWorkLocations] = useState<string[]>([]);
+  const [viewingDepartments, setViewingDepartments] = useState<string[]>([]);
   const [viewingSupervisors, setViewingSupervisors] = useState<string[]>([]);
   const [viewingShifts, setViewingShifts] = useState<string[]>([]);
+  const [employeeDepartmentNames, setEmployeeDepartmentNames] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
 
   // Multi-select states
-  const [selectedWorkLocations, setSelectedWorkLocations] = useState<string[]>([]);
+  const [selectedDepartments, setSelectedDepartments] = useState<string[]>([]);
   const [selectedSupervisors, setSelectedSupervisors] = useState<string[]>([]);
   const [selectedShifts, setSelectedShifts] = useState<string[]>([]);
 
@@ -167,7 +167,6 @@ const Employees = () => {
   const [departments, setDepartments] = useState<LookupItem[]>([]);
   const [positions, setPositions] = useState<LookupItem[]>([]);
   const [employmentStatuses, setEmploymentStatuses] = useState<LookupItem[]>([]);
-  const [workLocations, setWorkLocations] = useState<LookupItem[]>([]);
   const [costCenters, setCostCenters] = useState<LookupItem[]>([]);
   const [shifts, setShifts] = useState<ShiftItem[]>([]);
 
@@ -175,9 +174,11 @@ const Employees = () => {
 
   const fetchEmployees = useCallback(async () => {
     setLoading(true);
-    const [empResult, rolesResult] = await Promise.all([
+    const [empResult, rolesResult, edResult, deptResult] = await Promise.all([
       supabase.from('employees').select('*').order('created_at', { ascending: true }),
       supabase.from('user_roles').select('user_id, role'),
+      supabase.from('employee_departments').select('employee_id, department_id'),
+      supabase.from('departments').select('id, name'),
     ]);
 
     if (empResult.error) {
@@ -189,6 +190,14 @@ const Employees = () => {
         existing.push({ role: r.role });
         roleMap.set(r.user_id, existing);
       });
+      const deptMap = new Map<string, string>((deptResult.data || []).map((d) => [d.id, d.name]));
+      const empDeptMap: Record<string, string[]> = {};
+      (edResult.data || []).forEach((ed: { employee_id: string; department_id: string }) => {
+        const name = deptMap.get(ed.department_id);
+        if (!empDeptMap[ed.employee_id]) empDeptMap[ed.employee_id] = [];
+        if (name) empDeptMap[ed.employee_id].push(name);
+      });
+      setEmployeeDepartmentNames(empDeptMap);
       setEmployees(
         (empResult.data || []).map((emp) => ({ ...emp, user_roles: roleMap.get(emp.id) || [] })) as Employee[]
       );
@@ -197,18 +206,16 @@ const Employees = () => {
   }, []);
 
   const fetchLookups = useCallback(async () => {
-    const [deptRes, posRes, esRes, wlRes, ccRes, shRes] = await Promise.all([
+    const [deptRes, posRes, esRes, ccRes, shRes] = await Promise.all([
       supabase.from('departments').select('id, name').order('name'),
       supabase.from('positions').select('id, name').order('name'),
       supabase.from('employment_statuses').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('work_locations').select('id, name').eq('is_active', true).order('name'),
       supabase.from('cost_centers').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('shifts').select('id, name, start_time, end_time, days').eq('is_active', true).order('name'),
+      supabase.from('shifts').select('id, name, start_time, end_time, days, work_location:work_locations(name)').eq('is_active', true).order('name'),
     ]);
     setDepartments(deptRes.data || []);
     setPositions(posRes.data || []);
     setEmploymentStatuses(esRes.data || []);
-    setWorkLocations(wlRes.data || []);
     setCostCenters(ccRes.data || []);
     setShifts((shRes.data as ShiftItem[]) || []);
   }, []);
@@ -217,21 +224,21 @@ const Employees = () => {
 
   useEffect(() => {
     if (!viewingEmployee?.id) {
-      setViewingWorkLocations([]);
+      setViewingDepartments([]);
       setViewingSupervisors([]);
       setViewingShifts([]);
       return;
     }
     const load = async () => {
-      const [wlRes, supRes, shRes] = await Promise.all([
-        supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', viewingEmployee.id),
+      const [edRes, supRes, shRes] = await Promise.all([
+        supabase.from('employee_departments').select('department_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', viewingEmployee.id),
         supabase.from('employee_shifts').select('shift_id').eq('employee_id', viewingEmployee.id),
       ]);
-      const wlIds = (wlRes.data || []).map((r: { work_location_id: string }) => r.work_location_id);
+      const deptIds = (edRes.data || []).map((r: { department_id: string }) => r.department_id);
+      setViewingDepartments(deptIds.map((id) => departments.find((d) => d.id === id)?.name).filter(Boolean) as string[]);
       const supIds = (supRes.data || []).map((r: { supervisor_id: string }) => r.supervisor_id);
       const shIds = (shRes.data || []).map((r: { shift_id: string }) => r.shift_id);
-      setViewingWorkLocations(wlIds.map((id) => workLocations.find((w) => w.id === id)?.name).filter(Boolean) as string[]);
       setViewingSupervisors(supIds.map((id) => {
         const emp = employees.find((e) => e.id === id);
         return emp ? `${emp.first_name} ${emp.last_name}` : null;
@@ -239,21 +246,26 @@ const Employees = () => {
       setViewingShifts(shIds.map((id) => shifts.find((s) => s.id === id)?.name).filter(Boolean) as string[]);
     };
     load();
-  }, [viewingEmployee?.id, workLocations, employees, shifts]);
+  }, [viewingEmployee?.id, departments, employees, shifts]);
 
   // ── Derived ──────────────────────────────────────────
 
-  const getRole = (emp: Employee): string => emp.user_roles?.[0]?.role || 'employee';
+  const getRoles = (emp: Employee): string[] => {
+    const roles = emp.user_roles?.map((r) => r.role)?.filter(Boolean) ?? [];
+    return roles.length > 0 ? roles : ['employee'];
+  };
+  const getRole = (emp: Employee): string => getRoles(emp)[0] || 'employee';
+  const hasAnyRole = (emp: Employee, roles: string[]) => getRoles(emp).some((r) => roles.includes(r));
 
   const supervisorCandidates = useMemo(
-    () => employees.filter((e) => ['supervisor', 'admin', 'super_admin', 'manager', 'executive'].includes(getRole(e))),
+    () => employees.filter((e) => hasAnyRole(e, ['supervisor', 'admin', 'super_admin', 'manager', 'executive'])),
     [employees]
   );
 
   const filtered = employees.filter((emp) => {
     const name = `${emp.first_name} ${emp.last_name} ${emp.email} ${emp.employee_code}`.toLowerCase();
     const matchesSearch = name.includes(search.toLowerCase());
-    const matchesRole = roleFilter === 'all' || getRole(emp) === roleFilter;
+    const matchesRole = roleFilter === 'all' || getRoles(emp).includes(roleFilter);
     return matchesSearch && matchesRole;
   });
 
@@ -272,7 +284,7 @@ const Employees = () => {
   const resetForm = () => {
     setPersonal(emptyPersonal);
     setEmployment(emptyEmployment);
-    setSelectedWorkLocations([]);
+    setSelectedDepartments([]);
     setSelectedSupervisors([]);
     setSelectedShifts([]);
     setFormStep(1);
@@ -291,11 +303,11 @@ const Employees = () => {
   // ── Junction Table Saves ─────────────────────────────
 
   const saveJunctions = async (employeeId: string) => {
-    // Work locations
-    await supabase.from('employee_work_locations').delete().eq('employee_id', employeeId);
-    if (selectedWorkLocations.length > 0) {
-      await supabase.from('employee_work_locations').insert(
-        selectedWorkLocations.map((wlId) => ({ employee_id: employeeId, work_location_id: wlId }))
+    // Departments (multi)
+    await supabase.from('employee_departments').delete().eq('employee_id', employeeId);
+    if (selectedDepartments.length > 0) {
+      await supabase.from('employee_departments').insert(
+        selectedDepartments.map((deptId) => ({ employee_id: employeeId, department_id: deptId }))
       );
     }
 
@@ -307,7 +319,7 @@ const Employees = () => {
       );
     }
 
-    // Shifts
+    // Shifts (work location is linked to the shift, not the employee)
     await supabase.from('employee_shifts').delete().eq('employee_id', employeeId);
     if (selectedShifts.length > 0) {
       await supabase.from('employee_shifts').insert(
@@ -316,22 +328,26 @@ const Employees = () => {
     }
   };
 
-  const buildEmployeeUpdate = () => ({
-    middle_name: personal.middle_name || null,
-    suffix: personal.suffix || null,
-    nickname: personal.nickname || null,
-    gender: personal.gender || null,
-    birthdate: personal.birthdate || null,
-    birthplace: personal.birthplace || null,
-    civil_status: personal.civil_status || null,
-    nationality: personal.nationality || null,
-    personal_email: personal.personal_email || null,
-    present_address: personal.present_address || null,
-    permanent_address: personal.permanent_address || null,
-    employment_status_id: employment.employment_status_id || null,
-    position_id: employment.position_id || null,
-    department_id: employment.department_id || null,
-    cost_center_id: employment.cost_center_id || null,
+  const buildEmployeeUpdate = () => {
+    const firstDeptId = selectedDepartments[0] || null;
+    const firstDeptName = firstDeptId ? departments.find((d) => d.id === firstDeptId)?.name ?? null : null;
+    return {
+      middle_name: personal.middle_name || null,
+      suffix: personal.suffix || null,
+      nickname: personal.nickname || null,
+      gender: personal.gender || null,
+      birthdate: personal.birthdate || null,
+      birthplace: personal.birthplace || null,
+      civil_status: personal.civil_status || null,
+      nationality: personal.nationality || null,
+      personal_email: personal.personal_email || null,
+      present_address: personal.present_address || null,
+      permanent_address: personal.permanent_address || null,
+      employment_status_id: employment.employment_status_id || null,
+      position_id: employment.position_id || null,
+      department_id: firstDeptId,
+      department: firstDeptName,
+      cost_center_id: employment.cost_center_id || null,
     company_email: employment.company_email || null,
     supervisor_id: selectedSupervisors[0] || null,
     overtime_exempted: employment.overtime_exempted,
@@ -339,7 +355,8 @@ const Employees = () => {
     undertime_exempted: employment.undertime_exempted,
     grace_period_exempted: employment.grace_period_exempted,
     login_exempted: employment.login_exempted,
-  });
+  };
+  };
 
   // ── ADD ──────────────────────────────────────────────
 
@@ -349,13 +366,17 @@ const Employees = () => {
       toast.error('Company email is required');
       return;
     }
+    if (selectedDepartments.length === 0) {
+      toast.error('At least one department is required');
+      return;
+    }
     if (!isValidPhonePH(personal.phone)) {
       toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
       return;
     }
     setSaving(true);
     try {
-      const deptName = departments.find((d) => d.id === employment.department_id)?.name;
+      const firstDeptName = selectedDepartments[0] ? departments.find((d) => d.id === selectedDepartments[0])?.name : undefined;
       const posName = positions.find((p) => p.id === employment.position_id)?.name;
 
       const result = await createUser({
@@ -364,9 +385,9 @@ const Employees = () => {
         first_name: personal.first_name,
         last_name: personal.last_name,
         phone: normalizePhonePH(personal.phone) || undefined,
-        department: deptName || undefined,
+        department: firstDeptName || undefined,
         position: posName || undefined,
-        role: employment.role as UserRole,
+        roles: (employment.roles || ['employee']).map((r) => r as UserRole),
         hired_date: employment.hired_date || undefined,
       });
 
@@ -412,8 +433,7 @@ const Employees = () => {
       hired_date: emp.hired_date || '',
       employment_status_id: emp.employment_status_id || '',
       position_id: emp.position_id || '',
-      department_id: emp.department_id || '',
-      role: getRole(emp),
+      roles: getRoles(emp),
       cost_center_id: emp.cost_center_id || '',
       company_email: emp.company_email || '',
       overtime_exempted: emp.overtime_exempted ?? false,
@@ -424,12 +444,13 @@ const Employees = () => {
     });
 
     // Fetch junction data
-    const [wlRes, supRes, shRes] = await Promise.all([
-      supabase.from('employee_work_locations').select('work_location_id').eq('employee_id', emp.id),
+    const [edRes, supRes, shRes] = await Promise.all([
+      supabase.from('employee_departments').select('department_id').eq('employee_id', emp.id),
       supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', emp.id),
       supabase.from('employee_shifts').select('shift_id').eq('employee_id', emp.id),
     ]);
-    setSelectedWorkLocations((wlRes.data || []).map((r) => r.work_location_id));
+    const deptIds = (edRes.data || []).map((r) => r.department_id);
+    setSelectedDepartments(deptIds.length > 0 ? deptIds : (emp.department_id ? [emp.department_id] : []));
     setSelectedSupervisors((supRes.data || []).map((r) => r.supervisor_id));
     setSelectedShifts((shRes.data || []).map((r) => r.shift_id));
 
@@ -440,13 +461,17 @@ const Employees = () => {
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingEmployee) return;
+    if (selectedDepartments.length === 0) {
+      toast.error('At least one department is required');
+      return;
+    }
     if (personal.phone.trim() && !isValidPhonePH(personal.phone)) {
       toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
       return;
     }
     setSaving(true);
     try {
-      const deptName = departments.find((d) => d.id === employment.department_id)?.name;
+      const firstDeptName = selectedDepartments[0] ? departments.find((d) => d.id === selectedDepartments[0])?.name : undefined;
       const posName = positions.find((p) => p.id === employment.position_id)?.name;
 
       await updateUserProfile(
@@ -456,9 +481,9 @@ const Employees = () => {
           first_name: personal.first_name,
           last_name: personal.last_name,
           phone: normalizePhonePH(personal.phone) || undefined,
-          department: deptName || undefined,
+          department: firstDeptName || undefined,
           position: posName || undefined,
-          role: employment.role as UserRole,
+          roles: (employment.roles || ['employee']).map((r) => r as UserRole),
           hired_date: employment.hired_date || undefined,
           is_active: editingEmployee.is_active,
         }
@@ -575,6 +600,11 @@ const Employees = () => {
           <Label>Phone Number <span className="text-red-500">*</span></Label>
           <Input type="tel" value={personal.phone} onChange={(e) => setP('phone', formatPhonePH(e.target.value))} placeholder="09XX XXX XXXX" required />
         </div>
+        <div className="space-y-2">
+          <Label>Personal Email Address</Label>
+          <Input type="email" value={personal.personal_email} onChange={(e) => setP('personal_email', e.target.value)} placeholder="john.doe@gmail.com" />
+          <p className="text-xs text-muted-foreground">Optional. Password is sent to company email only.</p>
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
@@ -626,51 +656,53 @@ const Employees = () => {
           </Select>
         </div>
       </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-2">
-          <Label>Department <span className="text-red-500">*</span></Label>
-          <Select value={employment.department_id} onValueChange={(v) => setE('department_id', v === '_none' ? '' : v)}>
-            <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="_none">—</SelectItem>
-              {departments.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-2">
-          <Label>Level / Role <span className="text-red-500">*</span></Label>
-          <Select value={employment.role} onValueChange={(v) => setE('role', v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {Object.entries(ROLE_LABELS).map(([value, label]) => (
-                <SelectItem key={value} value={value}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
-
-      {/* Work Locations multi-select */}
+      {/* Departments multi-select */}
       <div className="space-y-2">
-        <Label>Work Location <span className="text-red-500">*</span></Label>
+        <Label>Departments <span className="text-red-500">*</span> <span className="text-xs text-muted-foreground font-normal">(1 or more)</span></Label>
         <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
-          {workLocations.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No work locations available</p>
-          ) : workLocations.map((wl) => (
-            <label key={wl.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+          {departments.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No departments available</p>
+          ) : departments.map((d) => (
+            <label key={d.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
               <input
                 type="checkbox"
-                checked={selectedWorkLocations.includes(wl.id)}
-                onChange={() => toggleMulti(selectedWorkLocations, setSelectedWorkLocations, wl.id)}
+                checked={selectedDepartments.includes(d.id)}
+                onChange={() => toggleMulti(selectedDepartments, setSelectedDepartments, d.id)}
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
-              <span className="text-sm">{wl.name}</span>
+              <span className="text-sm">{d.name}</span>
             </label>
           ))}
         </div>
-        {selectedWorkLocations.length > 0 && (
-          <p className="text-xs text-muted-foreground">{selectedWorkLocations.length} selected</p>
+        {selectedDepartments.length > 0 && (
+          <p className="text-xs text-muted-foreground">{selectedDepartments.length} selected</p>
         )}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="space-y-2">
+          <Label>Roles <span className="text-red-500">*</span></Label>
+          <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+            {Object.entries(ROLE_LABELS).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+                <input
+                  type="checkbox"
+                  checked={(employment.roles || []).includes(value)}
+                  onChange={() => {
+                    const curr = employment.roles || ['employee'];
+                    const next = curr.includes(value)
+                      ? curr.filter((r) => r !== value)
+                      : [...curr, value];
+                    if (next.length === 0) return;
+                    setEmployment((prev) => ({ ...prev, roles: next }));
+                  }}
+                  className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+                />
+                <span className="text-sm">{label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">Select one or more roles (e.g. Rank and File + Supervisory)</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -720,7 +752,7 @@ const Employees = () => {
       {/* Assigned Shifts multi-select */}
       <div className="space-y-2">
         <Label>Assigned Shifts</Label>
-        <div className="border rounded-md p-3 max-h-32 overflow-y-auto space-y-1">
+        <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-1">
           {shifts.length === 0 ? (
             <p className="text-sm text-muted-foreground">No shifts available</p>
           ) : shifts.map((sh) => (
@@ -731,13 +763,19 @@ const Employees = () => {
                 onChange={() => toggleMulti(selectedShifts, setSelectedShifts, sh.id)}
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
-              <span className="text-sm">{sh.name}</span>
-              <span className="text-xs text-muted-foreground ml-auto">
+              <div className="flex-1 min-w-0">
+                <span className="text-sm">{sh.name}</span>
+                {sh.work_location?.name && (
+                  <span className="text-xs text-blue-600 ml-1.5">• {sh.work_location.name}</span>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground shrink-0">
                 {timeTo12Hour(sh.start_time || '')}–{timeTo12Hour(sh.end_time || '')} ({sh.days?.join(', ')})
               </span>
             </label>
           ))}
         </div>
+        <p className="text-xs text-muted-foreground">Work location is linked per shift. Manage in the Shifts page.</p>
       </div>
 
       {/* Exemptions — Login Exempted only (others hidden for now) */}
@@ -827,6 +865,19 @@ const Employees = () => {
     </Badge>
   );
 
+  const rolesBadges = (emp: Employee) => {
+    const roles = getRoles(emp);
+    return (
+      <div className="flex flex-wrap gap-1 min-w-[100px]">
+        {roles.map((r) => (
+          <Badge key={r} variant="outline" className={cn('text-[11px] font-medium px-1.5 py-0', ROLE_STYLES[r] || 'bg-muted text-muted-foreground')}>
+            {ROLE_LABELS[r] || r.replace('_', ' ')}
+          </Badge>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -875,7 +926,7 @@ const Employees = () => {
                 <TableHead>Code</TableHead>
                   <TableHead className="hidden md:table-cell">Department</TableHead>
                   <TableHead className="hidden md:table-cell">Position</TableHead>
-                <TableHead>Role</TableHead>
+                <TableHead className="min-w-[140px]">Role</TableHead>
                 <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -897,9 +948,9 @@ const Employees = () => {
                     </div>
                   </TableCell>
                   <TableCell className="font-mono text-sm">{emp.employee_code}</TableCell>
-                    <TableCell className="text-sm hidden md:table-cell">{emp.department || '—'}</TableCell>
+                    <TableCell className="text-sm hidden md:table-cell">{employeeDepartmentNames[emp.id]?.join(', ') || emp.department || '—'}</TableCell>
                     <TableCell className="text-sm hidden md:table-cell">{emp.position || '—'}</TableCell>
-                    <TableCell>{roleBadge(getRole(emp))}</TableCell>
+                    <TableCell>{rolesBadges(emp)}</TableCell>
                   <TableCell>
                       <Badge variant={emp.is_active ? 'outline' : 'secondary'} className={emp.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : ''}>
                       {emp.is_active ? 'Active' : 'Inactive'}
@@ -968,6 +1019,7 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Civil Status</span><p>{viewingEmployee.civil_status || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Nationality</span><p>{viewingEmployee.nationality || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Phone</span><p>{viewingEmployee.phone ? formatPhonePH(viewingEmployee.phone) : '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Personal Email</span><p>{viewingEmployee.personal_email || '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Present Address</span><p className="text-sm">{viewingEmployee.present_address || '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Permanent Address</span><p className="text-sm">{viewingEmployee.permanent_address || '—'}</p></div>
                 </div>
@@ -980,15 +1032,33 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Date Hired</span><p>{viewingEmployee.hired_date || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Employment Status</span><p>{employmentStatuses.find((s) => s.id === viewingEmployee.employment_status_id)?.name || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Position</span><p>{viewingEmployee.position || positions.find((p) => p.id === viewingEmployee.position_id)?.name || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Department</span><p>{viewingEmployee.department || departments.find((d) => d.id === viewingEmployee.department_id)?.name || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Role</span><p>{roleBadge(getRole(viewingEmployee))}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Departments</span><p>{viewingDepartments.length > 0 ? viewingDepartments.join(', ') : viewingEmployee.department || '—'}</p></div>
+                  <div><span className="text-muted-foreground text-sm">Roles</span><div className="flex flex-wrap gap-1 mt-1">{getRoles(viewingEmployee).map((r) => roleBadge(r))}</div></div>
                   <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
                   <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Cost Center</span><p>{costCenters.find((c) => c.id === viewingEmployee.cost_center_id)?.name || '—'}</p></div>
-                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Work Locations</span><p className="text-sm">{viewingWorkLocations.length > 0 ? viewingWorkLocations.join(', ') : '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Immediate Superior</span><p className="text-sm">{viewingSupervisors.length > 0 ? viewingSupervisors.join(', ') : '—'}</p></div>
-                  <div className="col-span-2"><span className="text-muted-foreground text-sm">Assigned Shifts</span><p className="text-sm">{viewingShifts.length > 0 ? viewingShifts.join(', ') : '—'}</p></div>
+                  <div className="col-span-2">
+                    <span className="text-muted-foreground text-sm">Assigned Shifts & Work Locations</span>
+                    {viewingShifts.length > 0 ? (
+                      <div className="mt-1 space-y-1">
+                        {viewingShifts.map((shName, i) => {
+                          const sh = shifts.find((s) => s.name === shName);
+                          return (
+                            <p key={i} className="text-sm">
+                              {shName}
+                              {sh?.work_location?.name && (
+                                <span className="text-blue-600 ml-1.5">• {sh.work_location.name}</span>
+                              )}
+                            </p>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-sm">—</p>
+                    )}
+                  </div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Exemptions</span><p className="text-sm">{viewingEmployee.login_exempted ? 'Login Exempted' : 'None'}</p></div>
                 </div>
               </div>

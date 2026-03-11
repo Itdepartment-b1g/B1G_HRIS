@@ -29,6 +29,8 @@ const TimeInOutPage = () => {
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [clockedIn, setClockedIn] = useState(false);
+  const [todayRecord, setTodayRecord] = useState<{ time_in: string | null; time_out: string | null } | null>(null);
+  const [scheduleError, setScheduleError] = useState<string | null>(null);
 
   const getLocation = useCallback((options?: { retries?: number }): Promise<{ lat: number; lng: number }> => {
     const maxRetries = options?.retries ?? 0;
@@ -123,27 +125,61 @@ const TimeInOutPage = () => {
   useEffect(() => {
     if (!currentUser?.id) return;
     const load = async () => {
-      const { data: ewData } = await supabase
-        .from('employee_work_locations')
-        .select('work_location_id')
+      setScheduleError(null);
+
+      // 1. Fetch employee's shifts (with linked work_location_id)
+      const weekday = getWeekdayForDate(new Date());
+      const { data: esData } = await supabase
+        .from('employee_shifts')
+        .select('shift:shifts(id, name, start_time, end_time, days, grace_period_minutes, work_location_id)')
         .eq('employee_id', currentUser.id);
-      const wlIds = (ewData || []).map((r) => r.work_location_id);
-      if (wlIds.length === 0) {
+
+      const shifts = (esData || []).map((s: any) => s.shift).filter(Boolean);
+
+      // 2. Find today's shift by matching weekday
+      const shiftForToday = shifts.find((s: any) => s.days?.includes(weekday));
+
+      if (shifts.length > 0 && !shiftForToday) {
+        // Employee has shifts but none scheduled today
+        setScheduleError('You are not scheduled to work today.');
         setWorkLocations([]);
-      } else {
+      } else if (shiftForToday?.work_location_id) {
+        // 3a. Shift has a linked work location → use ONLY that location
         const { data: wlData } = await supabase
           .from('work_locations')
           .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
-          .in('id', wlIds)
-          .eq('is_active', true);
-        setWorkLocations((wlData || []) as WorkLocation[]);
+          .eq('id', shiftForToday.work_location_id)
+          .eq('is_active', true)
+          .maybeSingle();
+        setWorkLocations(wlData ? [wlData as WorkLocation] : []);
+      } else {
+        // 3b. Fallback: no linked location → use all employee_work_locations (backward compatible)
+        const { data: ewData } = await supabase
+          .from('employee_work_locations')
+          .select('work_location_id')
+          .eq('employee_id', currentUser.id);
+        const wlIds = (ewData || []).map((r) => r.work_location_id);
+        if (wlIds.length === 0) {
+          setWorkLocations([]);
+        } else {
+          const { data: wlData } = await supabase
+            .from('work_locations')
+            .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
+            .in('id', wlIds)
+            .eq('is_active', true);
+          setWorkLocations((wlData || []) as WorkLocation[]);
+        }
       }
+
+      // 4. Fetch today's attendance record
+      const today = new Date().toISOString().split('T')[0];
       const { data: log } = await supabase
         .from('attendance_records')
         .select('time_in, time_out')
         .eq('employee_id', currentUser.id)
-        .eq('date', new Date().toISOString().split('T')[0])
+        .eq('date', today)
         .maybeSingle();
+      setTodayRecord(log ? { time_in: log.time_in, time_out: log.time_out } : { time_in: null, time_out: null });
       setClockedIn(!!log?.time_in && !log?.time_out);
     };
     load();
@@ -153,6 +189,21 @@ const TimeInOutPage = () => {
     startCamera();
     return () => stopCamera();
   }, [startCamera, stopCamera]);
+
+  // Prevent double time in/out when navigating directly
+  useEffect(() => {
+    if (!currentUser || !todayRecord) return;
+    if (mode === 'in' && todayRecord.time_in) {
+      toast.error('You have already timed in today.');
+      navigate('/dashboard');
+    } else if (mode === 'out' && todayRecord.time_out) {
+      toast.error('You have already timed out today.');
+      navigate('/dashboard');
+    } else if (mode === 'out' && !todayRecord.time_in) {
+      toast.error('You must time in first before timing out.');
+      navigate('/dashboard');
+    }
+  }, [currentUser, todayRecord, mode, navigate]);
 
   useEffect(() => {
     if (capturedPhoto && photoBlob && !location && !locationError && !locationLoading) {
@@ -176,9 +227,19 @@ const TimeInOutPage = () => {
 
   const handleConfirm = async () => {
     if (!currentUser || !photoBlob || !location || withinRadius !== true) return;
-    if (mode === 'out' && !clockedIn) {
-      toast.error('You must clock in first');
+    if (mode === 'in' && todayRecord?.time_in) {
+      toast.error('You have already timed in today.');
       return;
+    }
+    if (mode === 'out') {
+      if (!todayRecord?.time_in) {
+        toast.error('You must clock in first');
+        return;
+      }
+      if (todayRecord?.time_out) {
+        toast.error('You have already timed out today.');
+        return;
+      }
     }
     setSubmitting(true);
     try {
@@ -273,12 +334,36 @@ const TimeInOutPage = () => {
 
   const canProceed = !!photoBlob && !!location && withinRadius === true;
   const hasNoLocations = workLocations.length === 0;
+  const isAnywhereLocation = workLocations.some((l) => l.allow_anywhere);
   const hasWorkLocationsWithCoords = workLocations.some(
     (l) => !l.allow_anywhere && l.latitude != null && l.longitude != null && l.radius_meters != null
   );
-  const showMap = hasWorkLocationsWithCoords && (location || locationError);
+  // Show map whenever we have the user's GPS location (anywhere or specific),
+  // or when there are work-location circles to display and we hit a GPS error
+  const showMap = !!location || (hasWorkLocationsWithCoords && !!locationError);
 
   if (!currentUser) return null;
+
+  if (scheduleError) {
+    return (
+      <div className="min-h-screen flex flex-col bg-background pb-[env(safe-area-inset-bottom)]">
+        <header className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 border-b bg-background">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="shrink-0">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <h1 className="text-lg font-semibold flex-1">
+            Time {mode === 'in' ? 'In' : 'Out'}
+          </h1>
+        </header>
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-4">
+          <XCircle className="h-16 w-16 text-red-500" />
+          <h2 className="text-xl font-semibold text-foreground">Not Scheduled Today</h2>
+          <p className="text-muted-foreground max-w-sm">{scheduleError}</p>
+          <Button onClick={() => navigate(-1)}>Go Back</Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-background pb-[env(safe-area-inset-bottom)]">
@@ -389,6 +474,7 @@ const TimeInOutPage = () => {
                 userLocation={location}
                 workLocations={workLocations}
                 withinRadius={withinRadius}
+                isAnywhere={isAnywhereLocation}
                 className="mt-2"
               />
             )}

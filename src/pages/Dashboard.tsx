@@ -57,7 +57,7 @@ const Dashboard = () => {
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [leaveRequests, setLeaveRequests] = useState<Array<{ id: string; employee_id: string; employee_name: string; leave_type: string; start_date: string; end_date: string; status: string; reason?: string | null }>>([]);
   const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
-  const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string }>>([]);
+  const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string; roles: string[] }>>([]);
   const [companyProfile, setCompanyProfile] = useState<{ name: string; address?: string; work_start_time?: string; work_end_time?: string } | null>(null);
 
   const fetchAttendanceLog = useCallback(async () => {
@@ -108,10 +108,17 @@ const Dashboard = () => {
       supabase.from('user_roles').select('user_id, role'),
       supabase.from('company_profile').select('name, address, work_start_time, work_end_time').limit(1).maybeSingle(),
     ]);
-    const roleMap = new Map<string, string>();
-    (roleRes.data || []).forEach((r: { user_id: string; role: string }) => roleMap.set(r.user_id, r.role));
-    const merged = (empRes.data || []).map((e) => ({ ...e, role: roleMap.get(e.id) || 'employee' }));
-    setEmployeesWithRole(merged as Array<Employee & { role: string }>);
+    const roleMap = new Map<string, string[]>();
+    (roleRes.data || []).forEach((r: { user_id: string; role: string }) => {
+      const arr = roleMap.get(r.user_id) || [];
+      arr.push(r.role);
+      roleMap.set(r.user_id, arr);
+    });
+    const merged = (empRes.data || []).map((e) => {
+      const roles = roleMap.get(e.id) || ['employee'];
+      return { ...e, roles, role: roles[0] || 'employee' };
+    });
+    setEmployeesWithRole(merged as Array<Employee & { role: string; roles: string[] }>);
     setCompanyProfile(companyRes.data || null);
   }, []);
 
@@ -122,20 +129,42 @@ const Dashboard = () => {
 
   const fetchWorkLocations = useCallback(async () => {
     if (!currentUser?.id) return;
-    const { data: ewData } = await supabase
-      .from('employee_work_locations')
-      .select('work_location_id')
+
+    // Try to resolve from today's shift (if shift has a linked work_location_id)
+    const weekday = getWeekdayForDate(new Date());
+    const { data: esData } = await supabase
+      .from('employee_shifts')
+      .select('shift:shifts(work_location_id, days)')
       .eq('employee_id', currentUser.id);
-    const wlIds = (ewData || []).map((r) => r.work_location_id);
-    if (wlIds.length === 0) {
-      setWorkLocations([]);
-    } else {
+    const shifts = (esData || []).map((s: any) => s.shift).filter(Boolean);
+    const shiftForToday = shifts.find((s: any) => s.days?.includes(weekday));
+
+    if (shiftForToday?.work_location_id) {
+      // Shift has a linked location — use only that one
       const { data: wlData } = await supabase
         .from('work_locations')
         .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
-        .in('id', wlIds)
-        .eq('is_active', true);
-      setWorkLocations((wlData || []) as any);
+        .eq('id', shiftForToday.work_location_id)
+        .eq('is_active', true)
+        .maybeSingle();
+      setWorkLocations(wlData ? [wlData] : []);
+    } else {
+      // Fallback: all employee work locations
+      const { data: ewData } = await supabase
+        .from('employee_work_locations')
+        .select('work_location_id')
+        .eq('employee_id', currentUser.id);
+      const wlIds = (ewData || []).map((r) => r.work_location_id);
+      if (wlIds.length === 0) {
+        setWorkLocations([]);
+      } else {
+        const { data: wlData } = await supabase
+          .from('work_locations')
+          .select('id, name, latitude, longitude, radius_meters, allow_anywhere')
+          .in('id', wlIds)
+          .eq('is_active', true);
+        setWorkLocations((wlData || []) as any);
+      }
     }
   }, [currentUser?.id]);
 
@@ -181,8 +210,9 @@ const Dashboard = () => {
     }
   }, [attendanceLog]);
 
-  // Auto-create/update attendance for login-exempted users (no time in/out required)
-  // Always upsert so times match shift — fixes any existing records created with wrong timezone
+  // Login-exempted: primary handler is pg_cron (server-side, no login needed).
+  // This client-side fallback ensures the record appears immediately when the user opens the app,
+  // in case the cron hasn't fired yet. Uses DO NOTHING so it won't overwrite cron-created records.
   useEffect(() => {
     if (!currentUser?.login_exempted || !assignedShift) return;
     const today = new Date().toISOString().split('T')[0];
@@ -212,7 +242,7 @@ const Dashboard = () => {
         minutes_late: 0,
       }, { onConflict: 'employee_id,date' })
       .then(() => fetchAttendanceLog());
-  }, [currentUser?.id, currentUser?.login_exempted, assignedShift, attendanceLog, fetchAttendanceLog]);
+  }, [currentUser?.id, currentUser?.login_exempted, assignedShift]);
 
   const uploadPhoto = async (blob: Blob, employeeId: string, date: string, mode: 'in' | 'out'): Promise<string | null> => {
     const ext = 'jpg';
@@ -231,6 +261,12 @@ const Dashboard = () => {
 
   const handleTimeInConfirm = async (data: { photoBlob: Blob; lat: number; lng: number }) => {
     if (!currentUser) return;
+    const today = new Date().toISOString().split('T')[0];
+    const existing = attendanceLog.find((r) => r.date === today);
+    if (existing?.time_in) {
+      toast.error('You have already timed in today.');
+      return;
+    }
     setLoadingLocation(true);
     try {
       const now = new Date();
@@ -276,6 +312,12 @@ const Dashboard = () => {
 
   const handleTimeOutConfirm = async (data: { photoBlob: Blob; lat: number; lng: number }) => {
     if (!currentUser || !clockedIn) return;
+    const today = new Date().toISOString().split('T')[0];
+    const existing = attendanceLog.find((r) => r.date === today);
+    if (existing?.time_out) {
+      toast.error('You have already timed out today.');
+      return;
+    }
     setLoadingLocation(true);
     try {
       const now = new Date();
@@ -308,12 +350,17 @@ const Dashboard = () => {
 
   const supervisor = currentUser.supervisor_id
     ? employeesWithRole.find((e) => e.id === currentUser.supervisor_id)
-    : employeesWithRole.find((e) => e.role === 'supervisor' || e.role === 'admin');
+    : employeesWithRole.find((e) => (e as any).roles?.includes('supervisor') || (e as any).roles?.includes('admin'));
   const coworkers = employeesWithRole.filter(
-    (e) => (e.role === 'employee' || e.role === 'intern') && e.supervisor_id === currentUser.supervisor_id && e.id !== currentUser.id
+    (e) => ((e as any).roles?.includes('employee') || (e as any).roles?.includes('intern')) && e.supervisor_id === currentUser.supervisor_id && e.id !== currentUser.id
   );
 
   const today = currentTime.toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+  const todayDateStr = new Date().toISOString().split('T')[0];
+  const todayRecord = attendanceLog.find((r) => r.date === todayDateStr);
+  const hasTimeIn = !!todayRecord?.time_in;
+  const hasTimeOut = !!todayRecord?.time_out;
+
   const shiftLabel = assignedShift
     ? `${timeTo12Hour(assignedShift.start_time)} - ${timeTo12Hour(assignedShift.end_time)}`
     : companyProfile?.work_start_time && companyProfile?.work_end_time
@@ -387,16 +434,16 @@ const Dashboard = () => {
                   <Button
                     className="w-full sm:flex-1"
                     onClick={() => navigate('/dashboard/time-in-out?mode=in')}
-                    disabled={loadingLocation || clockedIn}
-                    variant={clockedIn ? 'outline' : 'default'}
+                    disabled={loadingLocation || hasTimeIn}
+                    variant={hasTimeIn ? 'outline' : 'default'}
                   >
                     {loadingLocation ? '...' : 'Time In'}
                   </Button>
                   <Button
                     className="w-full sm:flex-1"
                     onClick={() => navigate('/dashboard/time-in-out?mode=out')}
-                    disabled={loadingLocation || !clockedIn}
-                    variant={!clockedIn ? 'outline' : 'default'}
+                    disabled={loadingLocation || hasTimeOut || !hasTimeIn}
+                    variant={hasTimeOut || !hasTimeIn ? 'outline' : 'default'}
                   >
                     {loadingLocation ? '...' : 'Time Out'}
                   </Button>

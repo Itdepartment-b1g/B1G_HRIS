@@ -19,6 +19,7 @@ interface EmpRow {
   position: string | null;
   is_active: boolean;
   role: string;
+  roles?: string[];
 }
 
 const AdminEmployees = () => {
@@ -32,9 +33,16 @@ const AdminEmployees = () => {
       supabase.from('employees').select('*').order('created_at', { ascending: true }),
       supabase.from('user_roles').select('user_id, role'),
     ]);
-    const roleMap = new Map<string, string>();
-    (roleRes.data || []).forEach((r: { user_id: string; role: string }) => roleMap.set(r.user_id, r.role));
-    const merged = (empRes.data || []).map((e) => ({ ...e, role: roleMap.get(e.id) || 'employee' }));
+    const roleMap = new Map<string, string[]>();
+    (roleRes.data || []).forEach((r: { user_id: string; role: string }) => {
+      const arr = roleMap.get(r.user_id) || [];
+      arr.push(r.role);
+      roleMap.set(r.user_id, arr);
+    });
+    const merged = (empRes.data || []).map((e) => {
+      const roles = roleMap.get(e.id) || ['employee'];
+      return { ...e, roles, role: roles[0] || 'employee' };
+    });
     setEmployees(merged as EmpRow[]);
     setLoading(false);
   }, []);
@@ -59,7 +67,16 @@ const AdminEmployees = () => {
       employee: 'bg-gray-100 text-gray-700 border-gray-300',
       intern: 'bg-gray-100 text-gray-700 border-gray-300',
     };
-    return <Badge variant="outline" className={styles[role] || ''}>{role.replace('_', ' ')}</Badge>;
+    return <Badge key={role} variant="outline" className={styles[role] || ''}>{role.replace('_', ' ')}</Badge>;
+  };
+
+  const rolesBadges = (emp: EmpRow) => {
+    const roles = (emp.roles?.filter(Boolean) ?? []).length > 0 ? (emp.roles ?? []) : [emp.role || 'employee'];
+    return (
+      <div className="flex flex-wrap gap-1 min-w-[100px]">
+        {roles.map((r) => roleBadge(r))}
+      </div>
+    );
   };
 
   return (
@@ -101,7 +118,7 @@ const AdminEmployees = () => {
                   <TableHead>Code</TableHead>
                   <TableHead>Department</TableHead>
                   <TableHead>Position</TableHead>
-                  <TableHead>Role</TableHead>
+                  <TableHead className="min-w-[140px]">Role</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -125,7 +142,7 @@ const AdminEmployees = () => {
                     <TableCell className="font-mono text-sm text-black">{emp.employee_code}</TableCell>
                     <TableCell className="text-sm text-black">{emp.department || '—'}</TableCell>
                     <TableCell className="text-sm text-black">{emp.position || '—'}</TableCell>
-                    <TableCell>{roleBadge(emp.role)}</TableCell>
+                    <TableCell>{rolesBadges(emp)}</TableCell>
                     <TableCell>
                       <Badge variant={emp.is_active ? 'outline' : 'secondary'} className={emp.is_active ? 'bg-green-100 text-green-700 border-green-300' : 'bg-gray-100 text-gray-600'}>
                         {emp.is_active ? 'Active' : 'Inactive'}

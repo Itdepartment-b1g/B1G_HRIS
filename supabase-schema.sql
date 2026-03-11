@@ -267,11 +267,14 @@ CREATE POLICY "Admins can update employees"
   TO authenticated
   USING (public.is_admin(auth.uid()));
 
--- USER ROLES: Only super_admin can manage roles
-CREATE POLICY "Users can read own role"
+-- USER ROLES: Users read own, admins read all (for employee management)
+CREATE POLICY "Users can read own role or admins read all"
   ON public.user_roles FOR SELECT
   TO authenticated
-  USING (user_id = auth.uid() OR public.has_role(auth.uid(), 'super_admin'));
+  USING (
+    user_id = auth.uid()
+    OR public.is_admin(auth.uid())
+  );
 
 CREATE POLICY "Super admin can manage roles"
   ON public.user_roles FOR ALL

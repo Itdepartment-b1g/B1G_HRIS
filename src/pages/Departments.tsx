@@ -74,9 +74,11 @@ const Departments = () => {
   }, []);
 
   const fetchEmployees = useCallback(async () => {
-    const [empRes, roleRes] = await Promise.all([
+    const [empRes, roleRes, edRes, deptRes] = await Promise.all([
       supabase.from('employees').select('id, first_name, last_name, department').eq('is_active', true).order('first_name'),
       supabase.from('user_roles').select('user_id, role'),
+      supabase.from('employee_departments').select('employee_id, department_id'),
+      supabase.from('departments').select('id, name'),
     ]);
 
     const roleMap = new Map<string, { role: string }[]>();
@@ -92,10 +94,12 @@ const Departments = () => {
     }));
     setEmployees(merged as Employee[]);
 
+    const deptMap = new Map<string, string>((deptRes.data || []).map((d) => [d.id, d.name]));
     const counts: Record<string, number> = {};
-    merged.forEach((emp) => {
-      if (emp.department) {
-        counts[emp.department] = (counts[emp.department] || 0) + 1;
+    (edRes.data || []).forEach((ed: { employee_id: string; department_id: string }) => {
+      const deptName = deptMap.get(ed.department_id);
+      if (deptName) {
+        counts[deptName] = (counts[deptName] || 0) + 1;
       }
     });
     setEmployeeCounts(counts);
