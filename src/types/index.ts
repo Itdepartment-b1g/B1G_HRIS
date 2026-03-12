@@ -55,6 +55,9 @@ export interface LeaveRequest {
   status: 'pending' | 'approved' | 'rejected';
   reason?: string | null;
   attachment_url?: string | null;
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approver_name?: string | null;
 }
 
 export interface LeaveBalance {
@@ -64,6 +67,15 @@ export interface LeaveBalance {
   sl_balance: number;
   pto_balance: number;
   lwop_days_used: number;
+  balances?: Record<string, number>;
+}
+
+export interface LeaveTypeConfigForBalance {
+  code: string;
+  name: string;
+  annual_entitlement: number;
+  cap: number | null;
+  is_system: boolean;
 }
 
 export interface Announcement {

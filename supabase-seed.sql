@@ -39,6 +39,10 @@ INSERT INTO public.employment_statuses (name, duration_months, is_regular, descr
 SELECT 'Regular', NULL, true, 'Full leave eligibility: VL 15, SL 15, PTO 7'
 WHERE NOT EXISTS (SELECT 1 FROM public.employment_statuses WHERE name = 'Regular');
 
+INSERT INTO public.employment_statuses (name, duration_months, is_regular, description)
+SELECT 'Internship', 3, false, 'Intern; LWOP only until regularization'
+WHERE NOT EXISTS (SELECT 1 FROM public.employment_statuses WHERE name = 'Internship');
+
 -- 3. CREATE USERS IN AUTH (You'll need to do this via Supabase Auth UI or API)
 -- ============================================================
 -- Note: Users must be created in auth.users first before we can add to employees table
