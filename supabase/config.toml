@@ -1,0 +1,26 @@
+# Supabase project config
+# See: https://supabase.com/docs/guides/functions/function-configuration
+#
+# After adding/editing this file, redeploy: supabase functions deploy update-user-profile
+
+# Disable gateway JWT verification for admin Edge Functions.
+# These functions perform their own JWT validation via verifyUserJwt + requireAdmin.
+# This bypasses Supabase gateway validation which can cause 401 with valid tokens
+# (e.g. JWT key rotation, audience/issuer quirks).
+[functions.update-user-profile]
+verify_jwt = false
+
+[functions.create-user]
+verify_jwt = false
+
+[functions.delete-user]
+verify_jwt = false
+
+[functions.reset-password]
+verify_jwt = false
+
+[functions.seed-database]
+verify_jwt = false
+
+[functions.seed-attendance]
+verify_jwt = false

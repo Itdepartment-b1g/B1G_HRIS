@@ -14,6 +14,8 @@ export interface Employee {
   avatar_url?: string | null;
   supervisor_id?: string | null;
   shift_id?: string | null;
+  employment_status_id?: string | null;
+  employment_status?: { name: string; is_regular: boolean };
   is_active: boolean;
   hired_date?: string | null;
   login_exempted?: boolean;
@@ -38,15 +40,30 @@ export interface AttendanceRecord {
   notes?: string | null;
 }
 
+export type LeaveType = 'vl' | 'sl' | 'pto' | 'lwop' | 'vacation' | 'sick' | 'personal' | 'maternity' | 'paternity';
+export type LeaveDurationType = 'fullday' | 'first_half' | 'second_half';
+
 export interface LeaveRequest {
   id: string;
   employee_id: string;
   employee_name?: string;
-  leave_type: 'vacation' | 'sick' | 'personal' | 'maternity' | 'paternity';
+  leave_type: LeaveType;
   start_date: string;
   end_date: string;
+  leave_duration_type?: LeaveDurationType;
+  number_of_days?: number | null;
   status: 'pending' | 'approved' | 'rejected';
   reason?: string | null;
+  attachment_url?: string | null;
+}
+
+export interface LeaveBalance {
+  employee_id: string;
+  year: number;
+  vl_balance: number;
+  sl_balance: number;
+  pto_balance: number;
+  lwop_days_used: number;
 }
 
 export interface Announcement {
