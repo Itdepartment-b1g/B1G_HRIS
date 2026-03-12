@@ -31,6 +31,7 @@ interface RecordRow {
   employee_name: string;
   assigned_shift: string;
   assigned_shift_formatted: string; // e.g. "REG 10am to 7pm"
+  net_hours: number | null; // net hours from assigned shift (start - end - break)
   time_in: string | null;
   time_out: string | null;
   time_in_photo_url: string | null;
@@ -47,6 +48,19 @@ interface RecordRow {
   minutes_late: number | null;
 }
 
+function parseTimeToMinutes(time: string): number {
+  const [h, m] = time.split(':').map(Number);
+  return (h ?? 0) * 60 + (m ?? 0);
+}
+
+function computeNetWorkingHours(shiftStart: string, shiftEnd: string, breakHours: number): number {
+  const startM = parseTimeToMinutes(shiftStart);
+  const endM = parseTimeToMinutes(shiftEnd);
+  const gross = endM >= startM ? (endM - startM) / 60 : (24 * 60 - startM + endM) / 60;
+  const net = Math.max(0, gross - breakHours);
+  return Math.round(net * 100) / 100;
+}
+
 const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave'] as const;
 
 function formatDate(dateStr: string) {
@@ -57,22 +71,25 @@ function formatDateLong(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-function statusShort(status: string): string {
-  const map: Record<string, string> = {
-    present: 'PRES',
-    late: 'LATE',
-    lti: 'LATE',
-    eti: 'PRES',
-    absent: 'ABS',
-    half_day: 'HD',
-    on_leave: 'LV',
-  };
-  return map[status] || status.toUpperCase().slice(0, 4);
-}
-
 function formatTime(iso: string | null): string | null {
   if (!iso) return null;
   return new Date(iso).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+/** Format minutes late as decimal hours (total minutes ÷ 60) for the Mins Late column. e.g. 30m → 0.5 */
+function formatMinutesLate(minutes: number | null): string {
+  if (minutes == null || minutes <= 0) return '—';
+  const decimalHours = minutes / 60;
+  return decimalHours % 1 === 0 ? decimalHours.toFixed(1) : decimalHours.toFixed(2);
+}
+
+/** Format minutes late as readable time under status (no division). e.g. 30m, 9h 15m */
+function formatMinutesLateVisual(minutes: number | null): string {
+  if (minutes == null || minutes <= 0) return '—';
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h}h ${m}m` : `${h}h`;
 }
 
 function toDateTimeLocal(iso: string | null, dateFallback: string): string {
@@ -180,11 +197,13 @@ const Attendance = () => {
     const empIds = [...new Set((data as any[]).map((r) => r.employee_id).filter(Boolean))];
     const { data: shiftData } = await supabase
       .from('employee_shifts')
-      .select('employee_id, shift:shifts(name, start_time, end_time)')
+      .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days)')
       .in('employee_id', empIds);
 
     const shiftMap = new Map<string, string[]>();
     const shiftFormattedMap = new Map<string, string>();
+    const shiftNetHoursMap = new Map<string, number>();
+    const shiftListByEmployee = new Map<string, Array<{ start_time: string; days?: string[] }>>();
     (shiftData || []).forEach((s: any) => {
       const sh = s.shift;
       const name = sh?.name || 'REG';
@@ -194,12 +213,44 @@ const Attendance = () => {
       if (!shiftFormattedMap.has(s.employee_id) && sh?.start_time && sh?.end_time) {
         shiftFormattedMap.set(s.employee_id, `${name} ${timeTo12Hour(sh.start_time)} to ${timeTo12Hour(sh.end_time)}`);
       }
+      if (!shiftNetHoursMap.has(s.employee_id) && sh?.start_time && sh?.end_time) {
+        const net = computeNetWorkingHours(
+          sh.start_time.substring(0, 5),
+          sh.end_time.substring(0, 5),
+          sh.break_total_hours ?? 0
+        );
+        shiftNetHoursMap.set(s.employee_id, net);
+      }
+      if (sh?.start_time) {
+        const arr = shiftListByEmployee.get(s.employee_id) || [];
+        arr.push({ start_time: sh.start_time, days: sh.days });
+        shiftListByEmployee.set(s.employee_id, arr);
+      }
     });
 
     const rows: RecordRow[] = (data as any[]).map((r) => {
       const shifts = shiftMap.get(r.employee_id) || [];
       const formatted = shiftFormattedMap.get(r.employee_id) || shifts.join(', ') || '—';
+      const netHours = shiftNetHoursMap.get(r.employee_id) ?? null;
       const employeeName = [r.employee_first_name, r.employee_last_name].filter(Boolean).join(' ') || 'Unknown';
+
+      // Recompute minutes_late from shift start when missing/wrong (null or 0) but time_in exists
+      // Use the shift that applies to this record's weekday
+      let minutesLate = r.minutes_late ?? null;
+      if ((minutesLate == null || minutesLate === 0) && r.time_in) {
+        const shiftList = shiftListByEmployee.get(r.employee_id) || [];
+        const weekday = getWeekdayForDate(r.date);
+        const shiftForDay = shiftList.find((s) => !s.days?.length || s.days.includes(weekday)) || shiftList[0];
+        if (shiftForDay?.start_time) {
+          const { minutesLate: computed } = computeAttendanceStatusFromTimeIn({
+            timeInIso: r.time_in,
+            date: r.date,
+            shift: { start_time: shiftForDay.start_time, grace_period_minutes: 0 },
+          });
+          minutesLate = computed > 0 ? computed : null;
+        }
+      }
+
       return {
         id: r.id,
         date: r.date,
@@ -208,6 +259,7 @@ const Attendance = () => {
         employee_name: employeeName,
         assigned_shift: shifts.join(', ') || '—',
         assigned_shift_formatted: formatted,
+        net_hours: netHours,
         time_in: r.time_in,
         time_out: r.time_out,
         time_in_photo_url: r.time_in_photo_url,
@@ -221,7 +273,7 @@ const Attendance = () => {
         notes: r.notes,
         remarks: r.remarks,
         status: r.status,
-        minutes_late: r.minutes_late ?? null,
+        minutes_late: minutesLate,
       };
     });
     setRecords(rows);
@@ -379,7 +431,7 @@ const Attendance = () => {
     }
   };
 
-  const statusBadge = (status: string) => {
+  const statusBadge = (status: string, minutesLate?: number | null) => {
     const displayStatus = status === 'eti' ? 'present' : status === 'lti' ? 'late' : status; // legacy mapping
     const styles: Record<string, string> = {
       present: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -388,13 +440,23 @@ const Attendance = () => {
       half_day: 'bg-blue-50 text-blue-700 border-blue-200',
       on_leave: 'bg-slate-100 text-slate-700 border-slate-200',
     };
-    return <Badge variant="outline" className={styles[displayStatus] || ''}>{displayStatus.replace('_', ' ')}</Badge>;
+    const lateLabel = minutesLate != null && minutesLate > 0 && (displayStatus === 'present' || displayStatus === 'late')
+      ? formatMinutesLateVisual(minutesLate)
+      : null;
+    return (
+      <div className="flex flex-col gap-0.5">
+        <Badge variant="outline" className={styles[displayStatus] || ''}>{displayStatus.replace('_', ' ')}</Badge>
+        {lateLabel && lateLabel !== '—' && (
+          <span className="text-xs text-muted-foreground">{lateLabel} past shift start</span>
+        )}
+      </div>
+    );
   };
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Attendance Records</h1>
+        <h1 className="text-2xl font-bold text-foreground"> </h1>
         <p className="text-muted-foreground text-sm mt-1">View daily attendance with geolocation and photo capture</p>
       </div>
 
@@ -481,6 +543,7 @@ const Attendance = () => {
                     <div className="space-y-2 text-sm text-muted-foreground mb-4">
                       <div><span className="font-medium text-foreground">Date</span> — {formatDateLong(r.date)}</div>
                       <div><span className="font-medium text-foreground">Shift</span> — {r.assigned_shift_formatted}</div>
+                      {r.net_hours != null && <div><span className="font-medium text-foreground">Net Hours</span> — {r.net_hours}h</div>}
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
@@ -523,18 +586,7 @@ const Attendance = () => {
                     </div>
 
                     <div className="mt-3">
-                      <Badge
-                        variant="outline"
-                        className={
-                          r.status === 'absent'
-                            ? 'bg-red-100 text-red-700 border-red-200'
-                            : r.status === 'late' || r.status === 'lti'
-                            ? 'bg-amber-100 text-amber-700 border-amber-200'
-                            : 'bg-emerald-100 text-emerald-700 border-emerald-200'
-                        }
-                      >
-                        {statusShort(r.status)}
-                      </Badge>
+                      {statusBadge(r.status, r.minutes_late)}
                     </div>
                   </CardContent>
                 </Card>
@@ -601,8 +653,10 @@ const Attendance = () => {
                     <TableHead>Emp. Code</TableHead>
                     <TableHead>Employee</TableHead>
                     <TableHead>Assigned Shift</TableHead>
+                    <TableHead>Net Hrs</TableHead>
                     <TableHead>Actual Time In</TableHead>
                     <TableHead>Actual Time Out</TableHead>
+                    <TableHead>Mins Late</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right w-[100px]">Actions</TableHead>
                   </TableRow>
@@ -626,15 +680,12 @@ const Attendance = () => {
                             <TableCell className="font-mono text-sm">{r.employee_code}</TableCell>
                             <TableCell className="font-medium">{r.employee_name}</TableCell>
                             <TableCell className="text-sm">{r.assigned_shift}</TableCell>
+                            <TableCell className="font-mono text-sm">{r.net_hours != null ? `${r.net_hours}h` : '—'}</TableCell>
                             <TableCell className="font-mono text-sm">{formatTime(r.time_in) || '—'}</TableCell>
                             <TableCell className="font-mono text-sm">{formatTime(r.time_out) || '—'}</TableCell>
+                            <TableCell className="font-mono text-sm">{formatMinutesLate(r.minutes_late)}</TableCell>
                             <TableCell>
-                              <div className="flex flex-col gap-0.5">
-                                {statusBadge(r.status)}
-                                {(r.status === 'late' || r.status === 'lti') && r.minutes_late != null && r.minutes_late > 0 && (
-                                  <span className="text-xs text-muted-foreground">{(r.minutes_late / 60).toFixed(2)} hrs past start</span>
-                                )}
-                              </div>
+                              {statusBadge(r.status, r.minutes_late)}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
@@ -653,7 +704,7 @@ const Attendance = () => {
                           </TableRow>
                           {isExpanded && (
                             <TableRow key={`${r.id}-detail`} className="bg-muted/30 hover:bg-muted/40">
-                              <TableCell colSpan={9} className="py-4">
+                              <TableCell colSpan={11} className="py-4">
                                 <div className="space-y-3 pl-4 border-l-2 border-primary/20">
                                   <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-4">
@@ -709,7 +760,7 @@ const Attendance = () => {
                   })}
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={9} className="text-center text-muted-foreground py-8">
+                      <TableCell colSpan={11} className="text-center text-muted-foreground py-8">
                         No attendance records found
                       </TableCell>
                     </TableRow>
@@ -742,6 +793,7 @@ const Attendance = () => {
                 <div><span className="text-muted-foreground text-sm">Employee Code</span><p className="font-mono">{viewingRecord.employee_code}</p></div>
                 <div><span className="text-muted-foreground text-sm">Employee</span><p className="font-medium">{viewingRecord.employee_name}</p></div>
                 <div><span className="text-muted-foreground text-sm">Assigned Shift</span><p>{viewingRecord.assigned_shift}</p></div>
+                <div><span className="text-muted-foreground text-sm">Net Hours (from shift)</span><p className="font-mono">{viewingRecord.net_hours != null ? `${viewingRecord.net_hours}h` : '—'}</p></div>
               </div>
               <div>
                 <h4 className="font-semibold text-sm mb-2 flex items-center justify-between">
@@ -780,10 +832,7 @@ const Attendance = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-sm">Attendance Status</span>
-                <p className="mt-1">{statusBadge(viewingRecord.status)}</p>
-                {(viewingRecord.status === 'late' || viewingRecord.status === 'lti') && viewingRecord.minutes_late != null && viewingRecord.minutes_late > 0 && (
-                  <p className="text-sm text-muted-foreground mt-1">{(viewingRecord.minutes_late / 60).toFixed(2)} hours past shift start</p>
-                )}
+                <p className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late)}</p>
                 {isAdmin && <Button variant="outline" size="sm" className="mt-2" onClick={() => { setViewingRecord(null); openEditStatus(viewingRecord); }}><Pencil className="h-3 w-3 mr-1" /> Edit status</Button>}
               </div>
               {(viewingRecord.remarks || isAdmin) && (
