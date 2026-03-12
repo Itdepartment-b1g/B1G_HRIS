@@ -294,7 +294,7 @@ CREATE POLICY "Employees read own attendance"
 CREATE POLICY "Employees insert own attendance"
   ON public.attendance_records FOR INSERT
   TO authenticated
-  WITH CHECK (employee_id = auth.uid());
+  WITH CHECK (employee_id = auth.uid() OR public.is_admin(auth.uid()));
 
 CREATE POLICY "Employees update own attendance"
   ON public.attendance_records FOR UPDATE

@@ -171,13 +171,8 @@ const Attendance = () => {
       if (mobileFilter === 'absent') query = query.eq('status', 'absent');
       const { data: directData } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
 
-      if (!directData?.length) {
-        setRecords([]);
-        setLoading(false);
-        return;
-      }
       // Transform direct query format to match RPC format for unified handling below
-      data = (directData as any[]).map((r) => ({
+      data = (directData || []).map((r: any) => ({
         ...r,
         employee_id: r.employee?.id,
         employee_code: r.employee?.employee_code,
@@ -185,26 +180,25 @@ const Attendance = () => {
         employee_last_name: r.employee?.last_name,
       }));
     } else {
-      data = rpcData;
+      data = rpcData || [];
     }
 
-    if (!data?.length) {
-      setRecords([]);
-      setLoading(false);
-      return;
-    }
-
+    // Build shift maps for employees that have records
     const empIds = [...new Set((data as any[]).map((r) => r.employee_id).filter(Boolean))];
-    const { data: shiftData } = await supabase
-      .from('employee_shifts')
-      .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days)')
-      .in('employee_id', empIds);
+    let shiftData: any[] = [];
+    if (empIds.length > 0) {
+      const { data: sd } = await supabase
+        .from('employee_shifts')
+        .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days)')
+        .in('employee_id', empIds);
+      shiftData = sd || [];
+    }
 
     const shiftMap = new Map<string, string[]>();
     const shiftFormattedMap = new Map<string, string>();
     const shiftNetHoursMap = new Map<string, number>();
     const shiftListByEmployee = new Map<string, Array<{ start_time: string; days?: string[] }>>();
-    (shiftData || []).forEach((s: any) => {
+    shiftData.forEach((s: any) => {
       const sh = s.shift;
       const name = sh?.name || 'REG';
       const list = shiftMap.get(s.employee_id) || [];
@@ -276,6 +270,94 @@ const Attendance = () => {
         minutes_late: minutesLate,
       };
     });
+
+    // --- For TODAY only: generate absent rows for employees who haven't clocked in yet ---
+    // The pg_cron job handles past dates (runs at end of day for yesterday).
+    // Today is still in progress, so we fill the gap on the frontend — lightweight (1 day only).
+    const today = new Date().toISOString().slice(0, 10);
+    if (isAdmin && dateFrom <= today && dateTo >= today) {
+      const todayWeekday = getWeekdayForDate(today);
+
+      // Fetch all active employees
+      const { data: allEmployees } = await supabase
+        .from('employees')
+        .select('id, employee_code, first_name, last_name, login_exempted')
+        .eq('is_active', true);
+
+      // Fetch all employee_shifts with shift info
+      const { data: allShiftData } = await supabase
+        .from('employee_shifts')
+        .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days)');
+
+      // Build shift info per employee
+      const allShiftsByEmp = new Map<string, Array<{ name: string; start_time: string; end_time: string; break_total_hours: number; days?: string[] }>>();
+      (allShiftData || []).forEach((s: any) => {
+        const sh = s.shift;
+        if (!sh) return;
+        const arr = allShiftsByEmp.get(s.employee_id) || [];
+        arr.push(sh);
+        allShiftsByEmp.set(s.employee_id, arr);
+      });
+
+      // Build set of employees who already have a record today
+      const existingTodayEmpIds = new Set(
+        rows.filter((r) => r.date === today).map((r) => r.employee_id)
+      );
+
+      for (const emp of allEmployees || []) {
+        if (existingTodayEmpIds.has(emp.id)) continue; // already has a record
+        if (emp.login_exempted) continue; // handled by separate cron
+
+        const empShifts = allShiftsByEmp.get(emp.id) || [];
+        if (empShifts.length === 0) continue; // no shifts assigned
+
+        const shiftForDay = empShifts.find((s) => !s.days?.length || s.days.includes(todayWeekday));
+        if (!shiftForDay) continue; // not scheduled today
+
+        const status = 'absent';
+
+        const shiftNames = [...new Set(empShifts.map((s) => s.name || 'REG'))];
+        const formatted = `${shiftForDay.name || 'REG'} ${timeTo12Hour(shiftForDay.start_time)} to ${timeTo12Hour(shiftForDay.end_time)}`;
+        const net = computeNetWorkingHours(
+          shiftForDay.start_time.substring(0, 5),
+          shiftForDay.end_time.substring(0, 5),
+          shiftForDay.break_total_hours ?? 0
+        );
+
+        rows.push({
+          id: `today-absent-${emp.id}`,
+          date: today,
+          employee_id: emp.id,
+          employee_code: emp.employee_code || '—',
+          employee_name: [emp.first_name, emp.last_name].filter(Boolean).join(' ') || 'Unknown',
+          assigned_shift: shiftNames.join(', '),
+          assigned_shift_formatted: formatted,
+          net_hours: net,
+          time_in: null,
+          time_out: null,
+          time_in_photo_url: null,
+          time_out_photo_url: null,
+          lat_in: null,
+          lng_in: null,
+          lat_out: null,
+          lng_out: null,
+          address_in: null,
+          address_out: null,
+          notes: null,
+          remarks: null,
+          status,
+          minutes_late: null,
+        });
+      }
+
+      // Re-sort after adding today's absent rows
+      rows.sort((a, b) => {
+        const dateComp = b.date.localeCompare(a.date);
+        if (dateComp !== 0) return dateComp;
+        return a.employee_name.localeCompare(b.employee_name);
+      });
+    }
+
     setRecords(rows);
     setLoading(false);
   }, [dateFrom, dateTo, mobileFilter, userLoading, isAdmin, user?.id]);
@@ -333,13 +415,21 @@ const Attendance = () => {
     setEditTimeOutOpen(true);
   };
 
+  // Today's absent records have no DB row yet — use upsert to create one on first edit
+  const isTodayAbsent = (r: RecordRow) => r.id.startsWith('today-absent-');
+
+  const upsertForTodayAbsent = (record: RecordRow, fields: Record<string, any>) =>
+    supabase.from('attendance_records').upsert(
+      { employee_id: record.employee_id, date: record.date, status: 'absent', ...fields },
+      { onConflict: 'employee_id,date' }
+    );
+
   const saveStatus = async () => {
     if (!editingRecord || !isAdmin) return;
     setSaving(true);
-    const { error } = await supabase
-      .from('attendance_records')
-      .update({ status: editStatus })
-      .eq('id', editingRecord.id);
+    const { error } = isTodayAbsent(editingRecord)
+      ? await upsertForTodayAbsent(editingRecord, { status: editStatus })
+      : await supabase.from('attendance_records').update({ status: editStatus }).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -353,10 +443,9 @@ const Attendance = () => {
   const saveRemarks = async () => {
     if (!editingRecord || !isAdmin) return;
     setSaving(true);
-    const { error } = await supabase
-      .from('attendance_records')
-      .update({ remarks: editRemarks || null })
-      .eq('id', editingRecord.id);
+    const { error } = isTodayAbsent(editingRecord)
+      ? await upsertForTodayAbsent(editingRecord, { remarks: editRemarks || null })
+      : await supabase.from('attendance_records').update({ remarks: editRemarks || null }).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -387,10 +476,9 @@ const Attendance = () => {
     const exemptions = empRes.data ? { late_exempted: empRes.data.late_exempted, grace_period_exempted: empRes.data.grace_period_exempted } : undefined;
     const { status, minutesLate } = computeAttendanceStatusFromTimeIn({ timeInIso: ts, date, shift: shiftInfo, exemptions, currentStoredStatus: editingRecord.status as any });
 
-    const { error } = await supabase
-      .from('attendance_records')
-      .update({ time_in: ts, status, minutes_late: minutesLate })
-      .eq('id', editingRecord.id);
+    const { error } = isTodayAbsent(editingRecord)
+      ? await upsertForTodayAbsent(editingRecord, { time_in: ts, status, minutes_late: minutesLate })
+      : await supabase.from('attendance_records').update({ time_in: ts, status, minutes_late: minutesLate }).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -405,14 +493,19 @@ const Attendance = () => {
     if (!editingRecord || !isAdmin) return;
     setSaving(true);
     const ts = editTimeOut ? new Date(editTimeOut).toISOString() : null;
-    const { error } = await supabase
-      .from('attendance_records')
-      .update({ time_out: ts })
-      .eq('id', editingRecord.id);
+
+    // If the employee was absent and we're setting a time_out, update status to present
+    const shouldUpdateStatus = ts && (editingRecord.status === 'absent' || isTodayAbsent(editingRecord));
+    const updateFields: Record<string, any> = { time_out: ts };
+    if (shouldUpdateStatus) updateFields.status = 'present';
+
+    const { error } = isTodayAbsent(editingRecord)
+      ? await upsertForTodayAbsent(editingRecord, updateFields)
+      : await supabase.from('attendance_records').update(updateFields).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
-      toast.success('Time out updated');
+      toast.success(`Time out updated${shouldUpdateStatus ? ' (status set to Present)' : ''}`);
       setEditTimeOutOpen(false);
       setEditingRecord(null);
       fetchRecords();
@@ -431,7 +524,7 @@ const Attendance = () => {
     }
   };
 
-  const statusBadge = (status: string, minutesLate?: number | null) => {
+  const statusBadge = (status: string, minutesLate?: number | null, opts?: { timeIn?: string | null; timeOut?: string | null }) => {
     const displayStatus = status === 'eti' ? 'present' : status === 'lti' ? 'late' : status; // legacy mapping
     const styles: Record<string, string> = {
       present: 'bg-emerald-50 text-emerald-700 border-emerald-200',
@@ -443,11 +536,17 @@ const Attendance = () => {
     const lateLabel = minutesLate != null && minutesLate > 0 && (displayStatus === 'present' || displayStatus === 'late')
       ? formatMinutesLateVisual(minutesLate)
       : null;
+    const missingTimeOut = opts?.timeIn && !opts?.timeOut;
     return (
       <div className="flex flex-col gap-0.5">
         <Badge variant="outline" className={styles[displayStatus] || ''}>{displayStatus.replace('_', ' ')}</Badge>
         {lateLabel && lateLabel !== '—' && (
           <span className="text-xs text-muted-foreground">{lateLabel} past shift start</span>
+        )}
+        {missingTimeOut && (
+          <span className="text-xs text-orange-600 flex items-center gap-0.5">
+            <AlertCircle className="h-3 w-3" /> No time out
+          </span>
         )}
       </div>
     );
@@ -586,7 +685,7 @@ const Attendance = () => {
                     </div>
 
                     <div className="mt-3">
-                      {statusBadge(r.status, r.minutes_late)}
+                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out })}
                     </div>
                   </CardContent>
                 </Card>
@@ -685,7 +784,7 @@ const Attendance = () => {
                             <TableCell className="font-mono text-sm">{formatTime(r.time_out) || '—'}</TableCell>
                             <TableCell className="font-mono text-sm">{formatMinutesLate(r.minutes_late)}</TableCell>
                             <TableCell>
-                              {statusBadge(r.status, r.minutes_late)}
+                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out })}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
@@ -832,7 +931,7 @@ const Attendance = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-sm">Attendance Status</span>
-                <p className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late)}</p>
+                <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out })}</div>
                 {isAdmin && <Button variant="outline" size="sm" className="mt-2" onClick={() => { setViewingRecord(null); openEditStatus(viewingRecord); }}><Pencil className="h-3 w-3 mr-1" /> Edit status</Button>}
               </div>
               {(viewingRecord.remarks || isAdmin) && (
