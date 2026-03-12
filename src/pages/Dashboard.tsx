@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
@@ -55,7 +55,6 @@ const Dashboard = () => {
 
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [leaveRequests, setLeaveRequests] = useState<Array<{ id: string; employee_id: string; employee_name: string; leave_type: string; start_date: string; end_date: string; status: string; reason?: string | null }>>([]);
   const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
   const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string; roles: string[] }>>([]);
   const [companyProfile, setCompanyProfile] = useState<{ name: string; address?: string; work_start_time?: string; work_end_time?: string } | null>(null);
@@ -78,22 +77,13 @@ const Dashboard = () => {
     setAttendanceLog(withName as AttendanceRecord[]);
   }, [currentUser?.id, currentUser?.first_name, currentUser?.last_name]);
 
-  const fetchLeaveAndAnnouncements = useCallback(async () => {
-    const [leaveRes, annRes] = await Promise.all([
-      supabase.from('leave_requests').select('*, employee:employees!employee_id(first_name, last_name)').order('created_at', { ascending: false }).limit(20),
-      supabase.from('announcements').select('*, author:employees!author_id(first_name, last_name)').order('created_at', { ascending: false }).limit(10),
-    ]);
-    setLeaveRequests((leaveRes.data || []).map((l: any) => ({
-      id: l.id,
-      employee_id: l.employee_id,
-      employee_name: l.employee ? `${l.employee.first_name} ${l.employee.last_name}` : 'Unknown',
-      leave_type: l.leave_type,
-      start_date: l.start_date,
-      end_date: l.end_date,
-      status: l.status,
-      reason: l.reason,
-    })));
-    setAnnouncements((annRes.data || []).map((a: any) => ({
+  const fetchAnnouncements = useCallback(async () => {
+    const { data } = await supabase
+      .from('announcements')
+      .select('*, author:employees!author_id(first_name, last_name)')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    setAnnouncements((data || []).map((a: any) => ({
       id: a.id,
       title: a.title,
       content: a.content,
@@ -189,11 +179,11 @@ const Dashboard = () => {
   useEffect(() => {
     if (!currentUser) return;
     fetchAttendanceLog();
-    fetchLeaveAndAnnouncements();
+    fetchAnnouncements();
     fetchEmployeesAndCompany();
     fetchWorkLocations();
     fetchAssignedShift();
-  }, [currentUser, fetchAttendanceLog, fetchLeaveAndAnnouncements, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
+  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -481,6 +471,28 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
+        <Card
+          className="cursor-pointer hover:border-primary/50 transition-colors"
+          onClick={() => navigate('/dashboard/leave')}
+        >
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-base font-semibold">Leave</CardTitle>
+              <Calendar className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <CardDescription>File and manage leave requests</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/5 border border-primary/10">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+              </span>
+              <span className="text-xs font-medium text-primary">Coming Soon</span>
+            </div>
+          </CardContent>
+        </Card>
+
         <Card>
           <CardContent className="pt-5 space-y-4">
             <div>
@@ -526,41 +538,6 @@ const Dashboard = () => {
         <div>
           <h3 className="font-semibold text-lg text-foreground mb-3">All Feeds</h3>
           <div className="space-y-3">
-            {leaveRequests.map((leave) => (
-              <Card key={leave.id}>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                          {leave.employee_name.split(' ').map((n) => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{leave.employee_name.toUpperCase()}</p>
-                        <p className="text-xs text-muted-foreground">{leave.start_date}</p>
-                      </div>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={
-                        leave.status === 'approved'
-                          ? 'bg-success text-success-foreground border-success'
-                          : leave.status === 'pending'
-                          ? 'bg-warning text-warning-foreground border-warning'
-                          : 'bg-destructive text-destructive-foreground border-destructive'
-                      }
-                    >
-                      {leave.status === 'approved' ? 'Fully Approved' : leave.status === 'pending' ? 'Pending' : 'Rejected'}
-                    </Badge>
-                  </div>
-                  <div className="ml-[52px] mt-1">
-                    <p className="text-sm text-foreground capitalize">{leave.leave_type} Leave Request</p>
-                    <p className="text-xs text-muted-foreground font-mono">LR-{leave.id.slice(0, 8)}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
             {announcements.map((a) => (
               <Card key={a.id}>
                 <CardContent className="pt-4 pb-4">
@@ -630,20 +607,22 @@ const Dashboard = () => {
                 const todayDate = new Date();
                 const isToday = (d: number) =>
                   todayDate.getFullYear() === year && todayDate.getMonth() === month && todayDate.getDate() === d;
+                const pad = (n: number) => String(n).padStart(2, '0');
                 const cells: React.ReactNode[] = [];
                 for (let i = 0; i < startPad; i++) cells.push(<div key={`pad-${i}`} className="aspect-square" />);
                 for (let d = 1; d <= daysInMonth; d++) {
+                  const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
                   cells.push(
                     <div
                       key={d}
                       className={cn(
-                        'aspect-square flex items-center justify-center text-sm rounded-md',
+                        'aspect-square flex flex-col items-center justify-center text-sm rounded-md',
                         isToday(d)
                           ? 'bg-primary text-primary-foreground font-semibold'
                           : 'text-foreground hover:bg-muted'
                       )}
                     >
-                      {d}
+                      <span>{d}</span>
                     </div>
                   );
                 }

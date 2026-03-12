@@ -19,6 +19,7 @@ interface Status {
   duration_months: number | null;
   description: string | null;
   is_active: boolean;
+  is_regular?: boolean;
   created_at: string;
 }
 
@@ -34,6 +35,7 @@ const EmploymentStatus = () => {
   const [formMonths, setFormMonths] = useState('');
   const [formDescription, setFormDescription] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
+  const [formIsRegular, setFormIsRegular] = useState(true);
   const [editing, setEditing] = useState<Status | null>(null);
   const [deleting, setDeleting] = useState<Status | null>(null);
   const [viewing, setViewing] = useState<Status | null>(null);
@@ -52,7 +54,7 @@ const EmploymentStatus = () => {
   const filtered = statuses;
   const paginated = useMemo(() => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE), [filtered, page]);
 
-  const reset = () => { setFormName(''); setFormMonths(''); setFormDescription(''); setFormIsActive(true); };
+  const reset = () => { setFormName(''); setFormMonths(''); setFormDescription(''); setFormIsActive(true); setFormIsRegular(true); };
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -63,6 +65,7 @@ const EmploymentStatus = () => {
       duration_months: formMonths ? parseInt(formMonths) : null,
       description: formDescription.trim() || null,
       is_active: formIsActive,
+      is_regular: formIsRegular,
     });
     if (error) toast.error(error.message);
     else { toast.success(`"${formName}" created`); setAddOpen(false); reset(); fetch(); }
@@ -75,6 +78,7 @@ const EmploymentStatus = () => {
     setFormMonths(s.duration_months?.toString() || '');
     setFormDescription(s.description || '');
     setFormIsActive(s.is_active);
+    setFormIsRegular(s.is_regular ?? true);
     setEditOpen(true);
   };
 
@@ -87,6 +91,7 @@ const EmploymentStatus = () => {
       duration_months: formMonths ? parseInt(formMonths) : null,
       description: formDescription.trim() || null,
       is_active: formIsActive,
+      is_regular: formIsRegular,
     }).eq('id', editing.id);
     if (error) toast.error(error.message);
     else { toast.success(`"${formName}" updated`); setEditOpen(false); setEditing(null); reset(); fetch(); }
@@ -121,6 +126,11 @@ const EmploymentStatus = () => {
         <input type="checkbox" id="es-active" checked={formIsActive} onChange={(e) => setFormIsActive(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
         <Label htmlFor="es-active" className="cursor-pointer">Active</Label>
       </div>
+      <div className="flex items-center gap-2">
+        <input type="checkbox" id="es-regular" checked={formIsRegular} onChange={(e) => setFormIsRegular(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary" />
+        <Label htmlFor="es-regular" className="cursor-pointer">Regular (eligible for VL, SL, PTO)</Label>
+      </div>
+      <p className="text-xs text-muted-foreground">Uncheck for Probationary and other statuses that can only use LWOP.</p>
     </div>
   );
 
@@ -154,6 +164,7 @@ const EmploymentStatus = () => {
                   <TableHead>Name</TableHead>
                   <TableHead>Duration</TableHead>
                   <TableHead className="hidden md:table-cell">Description</TableHead>
+                  <TableHead>Leave Eligible</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -164,6 +175,11 @@ const EmploymentStatus = () => {
                     <TableCell className="font-medium text-sm">{s.name}</TableCell>
                     <TableCell className="text-sm">{s.duration_months ? `${s.duration_months} month${s.duration_months !== 1 ? 's' : ''}` : 'Indefinite'}</TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden md:table-cell max-w-[200px] truncate">{s.description || '—'}</TableCell>
+                    <TableCell>
+                      <Badge variant="outline" className={(s.is_regular ?? true) ? 'bg-blue-50 text-blue-700 border-blue-200' : 'bg-amber-50 text-amber-700 border-amber-200'}>
+                        {(s.is_regular ?? true) ? 'VL, SL, PTO' : 'LWOP only'}
+                      </Badge>
+                    </TableCell>
                     <TableCell>
                       <Badge variant="outline" className={s.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-gray-50 text-gray-500 border-gray-200'}>
                         {s.is_active ? 'Active' : 'Inactive'}
@@ -178,7 +194,7 @@ const EmploymentStatus = () => {
                   </TableRow>
                 ))}
                 {filtered.length === 0 && (
-                  <TableRow><TableCell colSpan={5} className="text-center py-8 text-muted-foreground">No employment statuses found</TableCell></TableRow>
+                  <TableRow><TableCell colSpan={6} className="text-center py-8 text-muted-foreground">No employment statuses found</TableCell></TableRow>
                 )}
               </TableBody>
             </Table>
@@ -204,7 +220,8 @@ const EmploymentStatus = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div><span className="text-muted-foreground text-sm">Name</span><p className="font-medium">{viewing.name}</p></div>
                 <div><span className="text-muted-foreground text-sm">Duration</span><p>{viewing.duration_months ? `${viewing.duration_months} month${viewing.duration_months !== 1 ? 's' : ''}` : 'Indefinite'}</p></div>
-                <div className="col-span-2"><span className="text-muted-foreground text-sm">Status</span><p><Badge variant="outline" className={viewing.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{viewing.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
+                <div><span className="text-muted-foreground text-sm">Leave Eligible</span><p><Badge variant="outline" className={(viewing.is_regular ?? true) ? 'bg-blue-50 text-blue-700' : 'bg-amber-50 text-amber-700'}>{(viewing.is_regular ?? true) ? 'VL, SL, PTO' : 'LWOP only'}</Badge></p></div>
+                <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant="outline" className={viewing.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{viewing.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
                 {viewing.description && <div className="col-span-2"><span className="text-muted-foreground text-sm">Description</span><p className="text-sm mt-1">{viewing.description}</p></div>}
               </div>
             </div>

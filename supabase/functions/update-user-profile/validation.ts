@@ -26,6 +26,11 @@ export const updateUserProfileSchema = z.object({
   department: z.string().max(100).optional().nullable(),
   position: z.string().max(100).optional().nullable(),
   supervisor_id: uuidSchema.optional().nullable(),
+  // Preprocess: trim strings; empty string → undefined. Validates UUID when provided.
+  employment_status_id: z.preprocess(
+    (val) => (typeof val === 'string' ? val.trim() || undefined : val),
+    uuidSchema.optional().nullable()
+  ),
   is_active: z.boolean().optional(),
   hired_date: dateSchema,
   avatar_url: z.string().max(500).optional().nullable(),

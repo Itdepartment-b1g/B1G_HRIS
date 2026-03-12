@@ -209,7 +209,7 @@ const Employees = () => {
     const [deptRes, posRes, esRes, ccRes, shRes] = await Promise.all([
       supabase.from('departments').select('id, name').order('name'),
       supabase.from('positions').select('id, name').order('name'),
-      supabase.from('employment_statuses').select('id, name').eq('is_active', true).order('name'),
+      supabase.from('employment_statuses').select('id, name, is_active').order('name'),
       supabase.from('cost_centers').select('id, name').eq('is_active', true).order('name'),
       supabase.from('shifts').select('id, name, start_time, end_time, days, work_location:work_locations(name)').eq('is_active', true).order('name'),
     ]);
@@ -328,9 +328,10 @@ const Employees = () => {
     }
   };
 
-  const buildEmployeeUpdate = () => {
+  const buildEmployeeUpdate = (opts?: { includeEmploymentStatus?: boolean }) => {
     const firstDeptId = selectedDepartments[0] || null;
     const firstDeptName = firstDeptId ? departments.find((d) => d.id === firstDeptId)?.name ?? null : null;
+    const statusId = employment.employment_status_id?.trim();
     return {
       middle_name: personal.middle_name || null,
       suffix: personal.suffix || null,
@@ -343,7 +344,8 @@ const Employees = () => {
       personal_email: personal.personal_email || null,
       present_address: personal.present_address || null,
       permanent_address: personal.permanent_address || null,
-      employment_status_id: employment.employment_status_id || null,
+      // Edit: employment_status_id via edge function only (avoids overwrite). Add: include in direct update.
+      ...(opts?.includeEmploymentStatus && statusId ? { employment_status_id: statusId } : {}),
       position_id: employment.position_id || null,
       department_id: firstDeptId,
       department: firstDeptName,
@@ -393,7 +395,7 @@ const Employees = () => {
 
       const userId = result.user.id;
 
-      await supabase.from('employees').update(buildEmployeeUpdate()).eq('id', userId);
+      await supabase.from('employees').update(buildEmployeeUpdate({ includeEmploymentStatus: true })).eq('id', userId);
       await saveJunctions(userId);
 
       toast.success('Employee created successfully. Login credentials have been sent to their company email.');
@@ -411,46 +413,58 @@ const Employees = () => {
 
   const openEdit = async (emp: Employee) => {
     setEditingEmployee(emp);
+    setEditOpen(true);
+
+    // Fetch fresh employee data to ensure we have current employment_status_id
+    const { data: freshEmp, error: empError } = await supabase
+      .from('employees')
+      .select('id, employee_code, first_name, middle_name, last_name, suffix, nickname, gender, birthdate, birthplace, civil_status, nationality, phone, personal_email, present_address, permanent_address, email, hired_date, employment_status_id, position_id, department_id, cost_center_id, company_email, overtime_exempted, late_exempted, undertime_exempted, grace_period_exempted, login_exempted')
+      .eq('id', emp.id)
+      .single();
+
+    const empToUse = freshEmp && !empError ? { ...emp, ...freshEmp } : emp;
+
+    setEditingEmployee(empToUse);
     setPersonal({
-      first_name: emp.first_name,
-      middle_name: emp.middle_name || '',
-      last_name: emp.last_name,
-      suffix: emp.suffix || '',
-      nickname: emp.nickname || '',
-      gender: emp.gender || '',
-      birthdate: emp.birthdate || '',
-      birthplace: emp.birthplace || '',
-      civil_status: emp.civil_status || '',
-      nationality: emp.nationality || '',
-      phone: formatPhonePH(emp.phone || '') || '',
-      personal_email: emp.personal_email || '',
-      present_address: emp.present_address || '',
-      permanent_address: emp.permanent_address || '',
+      first_name: empToUse.first_name,
+      middle_name: empToUse.middle_name || '',
+      last_name: empToUse.last_name,
+      suffix: empToUse.suffix || '',
+      nickname: empToUse.nickname || '',
+      gender: empToUse.gender || '',
+      birthdate: empToUse.birthdate || '',
+      birthplace: empToUse.birthplace || '',
+      civil_status: empToUse.civil_status || '',
+      nationality: empToUse.nationality || '',
+      phone: formatPhonePH(empToUse.phone || '') || '',
+      personal_email: empToUse.personal_email || '',
+      present_address: empToUse.present_address || '',
+      permanent_address: empToUse.permanent_address || '',
     });
     setEmployment({
-      employee_code: emp.employee_code,
-      email: emp.email,
-      hired_date: emp.hired_date || '',
-      employment_status_id: emp.employment_status_id || '',
-      position_id: emp.position_id || '',
-      roles: getRoles(emp),
-      cost_center_id: emp.cost_center_id || '',
-      company_email: emp.company_email || '',
-      overtime_exempted: emp.overtime_exempted ?? false,
-      late_exempted: emp.late_exempted ?? false,
-      undertime_exempted: emp.undertime_exempted ?? false,
-      grace_period_exempted: emp.grace_period_exempted ?? false,
-      login_exempted: emp.login_exempted ?? false,
+      employee_code: empToUse.employee_code,
+      email: empToUse.email,
+      hired_date: empToUse.hired_date || '',
+      employment_status_id: empToUse.employment_status_id ?? '',
+      position_id: empToUse.position_id || '',
+      roles: getRoles(empToUse),
+      cost_center_id: empToUse.cost_center_id || '',
+      company_email: empToUse.company_email || '',
+      overtime_exempted: empToUse.overtime_exempted ?? false,
+      late_exempted: empToUse.late_exempted ?? false,
+      undertime_exempted: empToUse.undertime_exempted ?? false,
+      grace_period_exempted: empToUse.grace_period_exempted ?? false,
+      login_exempted: empToUse.login_exempted ?? false,
     });
 
     // Fetch junction data
     const [edRes, supRes, shRes] = await Promise.all([
-      supabase.from('employee_departments').select('department_id').eq('employee_id', emp.id),
-      supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', emp.id),
-      supabase.from('employee_shifts').select('shift_id').eq('employee_id', emp.id),
+      supabase.from('employee_departments').select('department_id').eq('employee_id', empToUse.id),
+      supabase.from('employee_supervisors').select('supervisor_id').eq('employee_id', empToUse.id),
+      supabase.from('employee_shifts').select('shift_id').eq('employee_id', empToUse.id),
     ]);
     const deptIds = (edRes.data || []).map((r) => r.department_id);
-    setSelectedDepartments(deptIds.length > 0 ? deptIds : (emp.department_id ? [emp.department_id] : []));
+    setSelectedDepartments(deptIds.length > 0 ? deptIds : (empToUse.department_id ? [empToUse.department_id] : []));
     setSelectedSupervisors((supRes.data || []).map((r) => r.supervisor_id));
     setSelectedShifts((shRes.data || []).map((r) => r.shift_id));
 
@@ -465,6 +479,10 @@ const Employees = () => {
       toast.error('At least one department is required');
       return;
     }
+    if (!employment.employment_status_id?.trim()) {
+      toast.error('Employment status is required');
+      return;
+    }
     if (personal.phone.trim() && !isValidPhonePH(personal.phone)) {
       toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
       return;
@@ -473,7 +491,9 @@ const Employees = () => {
     try {
       const firstDeptName = selectedDepartments[0] ? departments.find((d) => d.id === selectedDepartments[0])?.name : undefined;
       const posName = positions.find((p) => p.id === employment.position_id)?.name;
+      const statusId = employment.employment_status_id?.trim();
 
+      // 1. Edge function FIRST (uses SERVICE_ROLE, bypasses RLS – reliable for employment_status_id and roles)
       await updateUserProfile(
         { user_id: editingEmployee.id },
         {
@@ -483,13 +503,24 @@ const Employees = () => {
           phone: normalizePhonePH(personal.phone) || undefined,
           department: firstDeptName || undefined,
           position: posName || undefined,
+          employment_status_id: statusId || undefined,
           roles: (employment.roles || ['employee']).map((r) => r as UserRole),
           hired_date: employment.hired_date || undefined,
           is_active: editingEmployee.is_active,
         }
       );
 
-      await supabase.from('employees').update(buildEmployeeUpdate()).eq('id', editingEmployee.id);
+      // 2. Direct DB update (personal/employment fields the edge function doesn't handle)
+      const dbPayload = buildEmployeeUpdate();
+      const { error: updateError } = await supabase
+        .from('employees')
+        .update(dbPayload)
+        .eq('id', editingEmployee.id);
+      if (updateError) {
+        throw new Error(`Database update failed: ${updateError.message}. If you're an admin, ensure your role is in user_roles.`);
+      }
+
+      // 3. Junction tables
       await saveJunctions(editingEmployee.id);
 
       toast.success('Employee updated successfully');
@@ -637,11 +668,22 @@ const Employees = () => {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Employment Status <span className="text-red-500">*</span></Label>
-          <Select value={employment.employment_status_id} onValueChange={(v) => setE('employment_status_id', v === '_none' ? '' : v)}>
+          <Select
+            key={isEdit ? editingEmployee?.id ?? 'edit' : 'add'}
+            value={employment.employment_status_id || ''}
+            onValueChange={(v) => setE('employment_status_id', v)}
+          >
             <SelectTrigger><SelectValue placeholder="Select status" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="_none">—</SelectItem>
-              {employmentStatuses.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              {[...employmentStatuses]
+                .sort((a, b) => {
+                  const currentId = isEdit ? editingEmployee?.employment_status_id : null;
+                  if (!currentId) return 0;
+                  if (a.id === currentId) return -1;
+                  if (b.id === currentId) return 1;
+                  return 0;
+                })
+                .map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>
@@ -1033,8 +1075,10 @@ const Employees = () => {
                   <div><span className="text-muted-foreground text-sm">Employment Status</span><p>{employmentStatuses.find((s) => s.id === viewingEmployee.employment_status_id)?.name || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Position</span><p>{viewingEmployee.position || positions.find((p) => p.id === viewingEmployee.position_id)?.name || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Departments</span><p>{viewingDepartments.length > 0 ? viewingDepartments.join(', ') : viewingEmployee.department || '—'}</p></div>
-                  <div><span className="text-muted-foreground text-sm">Roles</span><div className="flex flex-wrap gap-1 mt-1">{getRoles(viewingEmployee).map((r) => roleBadge(r))}</div></div>
-                  <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
+                  <div><span className="text-muted-foreground text-sm">Roles</span><div className="flex flex-wrap gap-1 mt-1">{getRoles(viewingEmployee).map((r) => (
+                    <Badge key={r} variant="outline" className={ROLE_STYLES[r] || ''}>{ROLE_LABELS[r] || r.replace('_', ' ')}</Badge>
+                  ))}</div></div>
+                  <div><span className="text-muted-foreground text-sm">Status</span><div><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></div></div>
                   <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Cost Center</span><p>{costCenters.find((c) => c.id === viewingEmployee.cost_center_id)?.name || '—'}</p></div>

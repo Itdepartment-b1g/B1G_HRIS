@@ -10,9 +10,9 @@ import MasterDataLayout from "./components/MasterDataLayout";
 import { RequireRole } from "./components/RequireRole";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
-import Leave from "./pages/Leave";
 import Employees from "./pages/Employees";
 import {
+  Leave,
   Overtime,
   BusinessTrip,
   Correction,

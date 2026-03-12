@@ -40,7 +40,11 @@ export async function verifyUserJwt(req: Request): Promise<AuthResult | null> {
   })
 
   const { data: { user }, error } = await userClient.auth.getUser()
-  if (error || !user) return null
+  if (error) {
+    console.error('[verifyUserJwt] getUser error:', error.message)
+    return null
+  }
+  if (!user) return null
 
   const { data: rolesData } = await userClient.from('user_roles').select('role').eq('user_id', user.id)
   const roles = (rolesData ?? []).map((r) => r.role)
