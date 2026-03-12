@@ -1,7 +1,7 @@
 /**
- * Compute attendance status (present vs late) based on time_in vs shift.
- * - Below start or within grace period → present
- * - Above grace period → late
+ * Compute attendance status and minutes late based on time_in vs shift start.
+ * - Minutes late = actual time_in − shift start_time (counted whenever past start)
+ * - Status = present (when clocked in)
  */
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -54,8 +54,8 @@ export interface AttendanceStatusResult {
 }
 
 /**
- * Compute attendance status from time_in vs shift.
- * Below start or within grace → present; above grace → late.
+ * Compute attendance status and minutes late from time_in vs shift start.
+ * Minutes late = time_in − shift.start_time whenever past start (for counting/display).
  */
 export function computeAttendanceStatusFromTimeIn(params: {
   timeInIso: string | null;
@@ -80,12 +80,9 @@ export function computeAttendanceStatusFromTimeIn(params: {
 
   const timeInMinutes = getMinutesFromMidnight(timeInIso);
   const shiftStartMinutes = parseTimeToMinutes(shift.start_time);
-  const graceMinutes = shift.grace_period_minutes ?? 0;
-  const cutoffMinutes = shiftStartMinutes + graceMinutes;
 
-  if (timeInMinutes <= cutoffMinutes) {
-    return { status: 'present', minutesLate: 0 };
-  }
-  const minutesLate = Math.round(timeInMinutes - shiftStartMinutes);
-  return { status: 'late', minutesLate };
+  // Always present when clocked in. Minutes late = time past shift start (for counting)
+  const minutesLate =
+    timeInMinutes > shiftStartMinutes ? Math.round(timeInMinutes - shiftStartMinutes) : 0;
+  return { status: 'present', minutesLate };
 }
