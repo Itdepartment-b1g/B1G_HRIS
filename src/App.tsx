@@ -11,8 +11,10 @@ import { RequireRole } from "./components/RequireRole";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
 import Employees from "./pages/Employees";
+import Leave from "./pages/Leave";
+import LeaveApprovals from "./pages/LeaveApprovals";
+import MyLeaveBalance from "./pages/MyLeaveBalance";
 import {
-  Leave,
   Overtime,
   BusinessTrip,
   Correction,
@@ -33,6 +35,7 @@ import WorkLocations from "./pages/WorkLocations";
 import Holidays from "./pages/Holidays";
 import Positions from "./pages/Positions";
 import CostCenters from "./pages/CostCenters";
+import LeaveBalances from "./pages/LeaveBalances";
 import PersonalData from "./pages/employee/PersonalData";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import FeaturesPage from "./pages/mobile/FeaturesPage";
@@ -59,6 +62,8 @@ const App = () => (
             <Route index element={<Dashboard />} />
             <Route path="attendance" element={<Attendance />} />
             <Route path="leave" element={<Leave />} />
+            <Route path="leave-balance" element={<MyLeaveBalance />} />
+            <Route path="leave-approvals" element={<LeaveApprovals />} />
             <Route path="overtime" element={<Overtime />} />
             <Route path="business-trip" element={<BusinessTrip />} />
             <Route path="correction" element={<Correction />} />
@@ -82,6 +87,7 @@ const App = () => (
               <Route path="shifts" element={<Shifts />} />
               <Route path="work-locations" element={<WorkLocations />} />
               <Route path="holidays" element={<Holidays />} />
+              <Route path="leave-balances" element={<LeaveBalances />} />
               <Route path="cost-centers" element={<CostCenters />} />
             </Route>
             <Route path="employee" element={<EmployeeLayout />}>

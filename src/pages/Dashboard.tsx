@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,6 +13,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
@@ -40,6 +41,22 @@ function formatTime(t: string | null): string {
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Expand a date range into working-day YYYY-MM-DD strings (excludes Sundays, non-working day). */
+function getWorkingDatesInRange(startStr: string, endStr: string): string[] {
+  const start = new Date(startStr + 'T12:00:00');
+  const end = new Date(endStr + 'T12:00:00');
+  const dates: string[] = [];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const d = new Date(start);
+  while (d <= end) {
+    if (d.getDay() !== 0) {
+      dates.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return dates;
+}
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useCurrentUser();
@@ -56,6 +73,23 @@ const Dashboard = () => {
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
+  const [calendarLeaveData, setCalendarLeaveData] = useState<{
+    myLeaveDates: Set<string>;
+    teamLeaveByDate: Map<string, string[]>;
+  }>({ myLeaveDates: new Set(), teamLeaveByDate: new Map() });
+  const [leaveFeedItems, setLeaveFeedItems] = useState<Array<{
+    id: string;
+    type: 'leave_request';
+    employee_name: string;
+    leave_type: string;
+    start_date: string;
+    end_date: string;
+    number_of_days?: number;
+    status: string;
+    reason?: string;
+    created_at: string;
+    approver_name?: string | null;
+  }>>([]);
   const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string; roles: string[] }>>([]);
   const [companyProfile, setCompanyProfile] = useState<{ name: string; address?: string; work_start_time?: string; work_end_time?: string } | null>(null);
 
@@ -91,6 +125,98 @@ const Dashboard = () => {
       created_at: a.created_at,
     })));
   }, []);
+
+  const fetchLeaveFeed = useCallback(async () => {
+    if (!currentUser?.id) return;
+    let query = supabase
+      .from('leave_requests')
+      .select('*, employee:employees!employee_id(first_name, last_name), approver:employees!approved_by(first_name, last_name)')
+      .order('created_at', { ascending: false })
+      .limit(15);
+    const isSuperAdmin = currentUser.roles?.includes('super_admin');
+    const isAdminOrSupervisor = currentUser.roles?.includes('admin') || currentUser.roles?.includes('supervisor') || currentUser.roles?.includes('manager');
+    if (isSuperAdmin) {
+    } else if (isAdminOrSupervisor) {
+      const { data: esData } = await supabase.from('employee_supervisors').select('employee_id').eq('supervisor_id', currentUser.id);
+      const supervisedIds = new Set((esData || []).map((r) => r.employee_id));
+      const { data: empData } = await supabase.from('employees').select('id').eq('supervisor_id', currentUser.id).eq('is_active', true);
+      (empData || []).forEach((r) => supervisedIds.add(r.id));
+      if (currentUser.roles?.includes('admin')) {
+        const { data: allEmps } = await supabase.from('employees').select('id').eq('is_active', true);
+        (allEmps || []).forEach((r) => supervisedIds.add(r.id));
+      }
+      const ids = Array.from(supervisedIds);
+      if (ids.length === 0) {
+        setLeaveFeedItems([]);
+        return;
+      }
+      query = query.in('employee_id', ids);
+    } else {
+      query = query.eq('employee_id', currentUser.id);
+    }
+    const { data } = await query;
+    setLeaveFeedItems((data || []).map((r: any) => ({
+      id: r.id,
+      type: 'leave_request' as const,
+      employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
+      leave_type: r.leave_type || '',
+      start_date: r.start_date,
+      end_date: r.end_date,
+      number_of_days: r.number_of_days,
+      status: r.status || 'pending',
+      reason: r.reason,
+      created_at: r.created_at,
+      approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
+    })));
+  }, [currentUser?.id, currentUser?.roles]);
+
+  const fetchApprovedLeavesForCalendar = useCallback(async () => {
+    if (!currentUser?.id) return;
+    const year = new Date().getFullYear();
+    const rangeStart = `${year}-01-01`;
+    const rangeEnd = `${year}-12-31`;
+
+    let employeeIds: string[] = [currentUser.id];
+    const isSuperAdmin = currentUser.roles?.includes('super_admin');
+    const isAdminOrSupervisor = currentUser.roles?.includes('admin') || currentUser.roles?.includes('supervisor') || currentUser.roles?.includes('manager');
+    if (isSuperAdmin || isAdminOrSupervisor) {
+      const { data: esData } = await supabase.from('employee_supervisors').select('employee_id').eq('supervisor_id', currentUser.id);
+      const supervisedIds = new Set((esData || []).map((r) => r.employee_id));
+      const { data: empData } = await supabase.from('employees').select('id').eq('supervisor_id', currentUser.id).eq('is_active', true);
+      (empData || []).forEach((r) => supervisedIds.add(r.id));
+      if (isSuperAdmin || currentUser.roles?.includes('admin')) {
+        const { data: allEmps } = await supabase.from('employees').select('id').eq('is_active', true);
+        (allEmps || []).forEach((r) => supervisedIds.add(r.id));
+      }
+      employeeIds = Array.from(supervisedIds);
+    }
+
+    const { data } = await supabase
+      .from('leave_requests')
+      .select('employee_id, start_date, end_date, employee:employees!employee_id(first_name, last_name)')
+      .in('employee_id', employeeIds)
+      .eq('status', 'approved')
+      .gte('end_date', rangeStart)
+      .lte('start_date', rangeEnd);
+
+    const myLeaveDates = new Set<string>();
+    const teamLeaveByDate = new Map<string, string[]>();
+    (data || []).forEach((r: any) => {
+      const dates = getWorkingDatesInRange(r.start_date, r.end_date);
+      const name = r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown';
+      const isMe = r.employee_id === currentUser.id;
+      dates.forEach((dateStr) => {
+        if (isMe) {
+          myLeaveDates.add(dateStr);
+        } else {
+          const arr = teamLeaveByDate.get(dateStr) || [];
+          if (!arr.includes(name)) arr.push(name);
+          teamLeaveByDate.set(dateStr, arr);
+        }
+      });
+    });
+    setCalendarLeaveData({ myLeaveDates, teamLeaveByDate });
+  }, [currentUser?.id, currentUser?.roles]);
 
   const fetchEmployeesAndCompany = useCallback(async () => {
     const [empRes, roleRes, companyRes] = await Promise.all([
@@ -180,10 +306,12 @@ const Dashboard = () => {
     if (!currentUser) return;
     fetchAttendanceLog();
     fetchAnnouncements();
+    fetchLeaveFeed();
+    fetchApprovedLeavesForCalendar();
     fetchEmployeesAndCompany();
     fetchWorkLocations();
     fetchAssignedShift();
-  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
+  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -471,27 +599,7 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
-        <Card
-          className="cursor-pointer hover:border-primary/50 transition-colors"
-          onClick={() => navigate('/dashboard/leave')}
-        >
-          <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-base font-semibold">Leave</CardTitle>
-              <Calendar className="h-4 w-4 text-muted-foreground" />
-            </div>
-            <CardDescription>File and manage leave requests</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/5 border border-primary/10">
-              <span className="relative flex h-2 w-2">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-              </span>
-              <span className="text-xs font-medium text-primary">Coming Soon</span>
-            </div>
-          </CardContent>
-        </Card>
+  
 
         <Card>
           <CardContent className="pt-5 space-y-4">
@@ -538,26 +646,80 @@ const Dashboard = () => {
         <div>
           <h3 className="font-semibold text-lg text-foreground mb-3">All Feeds</h3>
           <div className="space-y-3">
-            {announcements.map((a) => (
-              <Card key={a.id}>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                          {a.author.split(' ').map((n) => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{a.title}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(a.created_at).toLocaleDateString()}</p>
+            {[
+              ...announcements.map((a) => ({ ...a, type: 'announcement' as const })),
+              ...leaveFeedItems.map((l) => ({ ...l, type: 'leave_request' as const })),
+            ]
+              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+              .slice(0, 20)
+              .map((item) =>
+                item.type === 'announcement' ? (
+                  <Card key={`ann-${item.id}`}>
+                    <CardContent className="pt-4 pb-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                              {item.author.split(' ').map((n) => n[0]).join('')}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                            <p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleDateString()}</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                  </div>
-                  <p className="ml-[52px] mt-1 text-sm text-muted-foreground">{a.content}</p>
-                </CardContent>
-              </Card>
-            ))}
+                      <p className="ml-[52px] mt-1 text-sm text-muted-foreground">{item.content}</p>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card
+                    key={`leave-${item.id}`}
+                    className="cursor-pointer hover:border-primary/50 transition-colors"
+                    onClick={() => navigate(currentUser?.roles?.includes('super_admin') || currentUser?.roles?.includes('admin') || currentUser?.roles?.includes('supervisor') || currentUser?.roles?.includes('manager') ? '/dashboard/leave-approvals' : '/dashboard/leave')}
+                  >
+                    <CardContent className="pt-4 pb-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                              {item.employee_name.split(' ').map((n) => n[0]).join('')}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              {item.employee_name} — {item.leave_type}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(item.start_date).toLocaleDateString()} – {new Date(item.end_date).toLocaleDateString()}
+                              {item.number_of_days != null ? ` • ${item.number_of_days} day${item.number_of_days !== 1 ? 's' : ''}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={
+                            item.status === 'approved'
+                              ? 'bg-green-100 text-green-700 border-green-200'
+                              : item.status === 'rejected'
+                                ? 'bg-red-100 text-red-700 border-red-200'
+                                : 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                          }
+                        >
+                          {item.status}
+                        </Badge>
+                      </div>
+                      {item.reason && <p className="ml-[52px] mt-1 text-sm text-muted-foreground line-clamp-2">{item.reason}</p>}
+                      {(item.status === 'approved' || item.status === 'rejected') && item.approver_name && (
+                        <p className="ml-[52px] mt-1 text-xs text-muted-foreground">
+                          {item.status === 'approved' ? 'Approved' : 'Rejected'} by {item.approver_name}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              )}
           </div>
         </div>
       </div>
@@ -612,18 +774,45 @@ const Dashboard = () => {
                 for (let i = 0; i < startPad; i++) cells.push(<div key={`pad-${i}`} className="aspect-square" />);
                 for (let d = 1; d <= daysInMonth; d++) {
                   const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
-                  cells.push(
+                  const isMyLeave = calendarLeaveData.myLeaveDates.has(dateStr);
+                  const teamOnLeave = calendarLeaveData.teamLeaveByDate.get(dateStr) || [];
+                  const hasTeamLeave = teamOnLeave.length > 0;
+                  const hasLeave = isMyLeave || hasTeamLeave;
+                  const tooltipText = isMyLeave
+                    ? `You're on leave`
+                    : hasTeamLeave
+                      ? `${teamOnLeave.length} on leave: ${teamOnLeave.join(', ')}`
+                      : null;
+                  const cell = (
                     <div
-                      key={d}
                       className={cn(
-                        'aspect-square flex flex-col items-center justify-center text-sm rounded-md',
+                        'aspect-square flex flex-col items-center justify-center text-sm rounded-md transition-colors',
                         isToday(d)
                           ? 'bg-primary text-primary-foreground font-semibold'
-                          : 'text-foreground hover:bg-muted'
+                          : hasLeave
+                            ? isMyLeave
+                              ? 'bg-primary/15 text-primary border border-primary/30 font-medium'
+                              : 'bg-amber-100/80 dark:bg-amber-950/50 border border-amber-200/60 text-amber-800 dark:text-amber-300'
+                            : 'text-foreground hover:bg-muted'
                       )}
                     >
                       <span>{d}</span>
+                      {hasLeave && !isToday(d) && (
+                        <span className="mt-0.5 h-1 w-1 rounded-full bg-current opacity-60" aria-hidden />
+                      )}
                     </div>
+                  );
+                  cells.push(
+                    tooltipText ? (
+                      <Tooltip key={d}>
+                        <TooltipTrigger asChild>{cell}</TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[220px]">
+                          {tooltipText}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <React.Fragment key={d}>{cell}</React.Fragment>
+                    )
                   );
                 }
                 return cells;
