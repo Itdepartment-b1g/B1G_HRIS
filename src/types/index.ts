@@ -78,6 +78,22 @@ export interface LeaveTypeConfigForBalance {
   is_system: boolean;
 }
 
+export interface OvertimeRequest {
+  id: string;
+  employee_id: string;
+  date: string;
+  start_time: string;
+  end_time: string;
+  hours: number | null;
+  reason: string | null;
+  attachment_url: string | null;
+  status: 'pending' | 'approved' | 'rejected';
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approver_name?: string | null;
+  employee_name?: string;
+}
+
 export interface Announcement {
   id: string;
   title: string;

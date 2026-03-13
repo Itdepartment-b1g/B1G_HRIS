@@ -76,8 +76,8 @@ const LeaveBalances = () => {
   const [deleting, setDeleting] = useState<LeaveTypeConfig | null>(null);
   const [page, setPage] = useState(1);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchData = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     const [configRes, eligRes, statusRes] = await Promise.all([
       supabase.from('leave_type_config').select('*').order('sort_order'),
       supabase.from('leave_type_eligibility').select('*, employment_statuses!employment_status_id(name)'),
@@ -104,11 +104,27 @@ const LeaveBalances = () => {
     } else {
       setEmploymentStatuses(statusRes.data || []);
     }
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, []);
 
   useEffect(() => {
     fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    const channel = supabase
+      .channel('leave-balances-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_config' }, () => {
+        fetchData(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_eligibility' }, () => {
+        fetchData(true);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [fetchData]);
 
   const filtered = configs;

@@ -19,11 +19,12 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { Loader2, Plus, FileText, RefreshCw, Calendar, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Wallet, Baby } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { getWeekdayForDate } from '@/lib/attendanceStatus';
 import type { LeaveBalance, LeaveRequest, LeaveTypeConfigForBalance } from '@/types';
+import LeaveApprovals from './LeaveApprovals';
 
 const ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> = {
   vl: Palmtree,
@@ -107,6 +108,7 @@ function countDaysExcludingSunday(startStr: string, endStr: string, durationType
 
 const Leave = () => {
   const { user: currentUser } = useCurrentUser();
+  const [searchParams] = useSearchParams();
   const [balance, setBalance] = useState<LeaveBalance | null>(null);
   const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -119,6 +121,14 @@ const Leave = () => {
   const [slAttachmentFile, setSlAttachmentFile] = useState<File | null>(null);
   const [eligibleLeaveTypes, setEligibleLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
   const [leavePage, setLeavePage] = useState(1);
+  const [selectedApprovalLeaveType, setSelectedApprovalLeaveType] = useState<string>('');
+  const tabParam = searchParams.get('tab');
+  const [mainTab, setMainTab] = useState<'leave' | 'approval'>(() =>
+    tabParam === 'approval' ? 'approval' : 'leave'
+  );
+  useEffect(() => {
+    if (tabParam === 'approval') setMainTab('approval');
+  }, [tabParam]);
 
   const [form, setForm] = useState<{
     leave_type: string;
@@ -245,6 +255,37 @@ const Leave = () => {
     fetchAll();
   }, [fetchAll]);
 
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel('leave-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_requests', filter: `employee_id=eq.${currentUser.id}` },
+        () => {
+          fetchMyRequests();
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_balances', filter: `employee_id=eq.${currentUser.id}` },
+        () => {
+          fetchBalance();
+        }
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_config' }, () => {
+        fetchBalance();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_eligibility' }, () => {
+        fetchBalance();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, fetchBalance, fetchMyRequests]);
+
   const fetchShiftForDate = useCallback(async (dateStr: string) => {
     if (!currentUser?.id || !dateStr) {
       setShiftForSLDate(null);
@@ -305,6 +346,16 @@ const Leave = () => {
     return isRegular ? types : types.filter((t) => t.code === 'lwop');
   }, [isRegular, eligibleLeaveTypes]);
 
+  const approvalSidebarItems = useMemo(() => {
+    const types = eligibleLeaveTypes.length > 0 ? eligibleLeaveTypes : defaultTypes;
+    return types.map((t) => ({
+      value: t.code,
+      label: t.name,
+      description: `${t.name} requests`,
+      icon: ICON_BY_CODE[t.code] || DEFAULT_ICON,
+    }));
+  }, [eligibleLeaveTypes]);
+
   useEffect(() => {
     if (!isRegular && !['lwop', ''].includes(selectedLeaveType)) {
       setSelectedLeaveType('lwop');
@@ -320,6 +371,12 @@ const Leave = () => {
   useEffect(() => {
     setLeavePage(1);
   }, [selectedLeaveType]);
+
+  useEffect(() => {
+    if (mainTab === 'approval' && approvalSidebarItems.length > 0 && selectedApprovalLeaveType === '') {
+      setSelectedApprovalLeaveType(approvalSidebarItems[0].value);
+    }
+  }, [mainTab, approvalSidebarItems, selectedApprovalLeaveType]);
 
   const paginatedMyRequests = useMemo(() => {
     const start = (leavePage - 1) * PAGE_SIZE;
@@ -409,22 +466,100 @@ const Leave = () => {
   }
 
   const year = new Date().getFullYear();
+  const canApprove = currentUser?.roles?.some((r) =>
+    ['super_admin', 'admin', 'supervisor', 'manager'].includes(r)
+  );
 
   return (
-    <div className="flex gap-6 min-h-[calc(100vh-120px)]">
-      {/* Sidebar - Leave types */}
-      <aside className="hidden lg:flex flex-col w-64 shrink-0 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
+    <div className="flex flex-col flex-1 min-h-0">
+      <div className="shrink-0">
+        <h1 className="text-2xl font-bold">{mainTab === 'approval' ? 'Leave Approvals' : 'Leave Management'}</h1>
+        <p className="text-muted-foreground text-sm mt-1">
+          {mainTab === 'approval'
+            ? 'Review and approve leave requests from your team members'
+            : 'View balances, file leave requests, and approve team requests'}
+        </p>
+      </div>
+
+    <div className="flex gap-6 flex-1 min-h-0 mt-4">
+      {/* Sidebar - Leave types (Leave) or Approval types (Approval) */}
+      <aside className="hidden lg:flex flex-col w-64 shrink-0 min-h-0 overflow-y-auto pr-1">
         <div className="flex items-center gap-3 px-4 py-4 mb-2 rounded-xl bg-primary/5 border border-primary/10">
           <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
             <Calendar className="h-5 w-5 text-primary" />
           </div>
           <div className="min-w-0">
-            <p className="font-semibold text-foreground text-sm leading-tight">Leave Management</p>
+            <p className="font-semibold text-foreground text-sm leading-tight">
+              {mainTab === 'approval' ? 'Leave Approvals' : 'Leave Management'}
+            </p>
             <p className="text-xs text-muted-foreground leading-tight mt-0.5">Filter by leave type</p>
           </div>
         </div>
 
-        {/* Leave balance summary in sidebar */}
+        {/* Leave | Approval tabs - Master Data style */}
+        {canApprove && (
+          <div className="flex rounded-lg bg-muted p-0.5 mb-3">
+            <button
+              onClick={() => setMainTab('leave')}
+              className={cn(
+                'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                mainTab === 'leave'
+                  ? 'bg-white text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Leave
+            </button>
+            <button
+              onClick={() => setMainTab('approval')}
+              className={cn(
+                'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                mainTab === 'approval'
+                  ? 'bg-white text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Approval
+            </button>
+          </div>
+        )}
+
+        {/* Leave tab: balance + leave type nav | Approval tab: leave type nav for approvals */}
+        {mainTab === 'approval' ? (
+        <nav className="flex flex-col gap-0.5">
+          {approvalSidebarItems.map((item) => {
+            const Icon = item.icon;
+            const active = selectedApprovalLeaveType === item.value;
+            return (
+              <button
+                key={item.value}
+                onClick={() => setSelectedApprovalLeaveType(item.value)}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors group w-full relative',
+                  active
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground/70 hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <div
+                  className={cn(
+                    'h-8 w-8 rounded-md flex items-center justify-center shrink-0 transition-colors',
+                    active ? 'bg-primary/15' : 'bg-muted group-hover:bg-muted/80'
+                  )}
+                >
+                  <Icon className={cn('h-4 w-4', active ? 'text-primary' : 'text-muted-foreground')} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm leading-tight">{item.label}</p>
+                  <p className="text-[11px] text-muted-foreground leading-tight mt-0.5 truncate">{item.description}</p>
+                </div>
+                <ChevronRight className={cn('h-4 w-4 shrink-0 transition-opacity', active ? 'opacity-60' : 'opacity-0 group-hover:opacity-30')} />
+              </button>
+            );
+          })}
+        </nav>
+        ) : (
+        <>
         <div className="mb-4 rounded-xl border bg-card p-4 shadow-sm">
           <div className="flex items-center gap-2 mb-3">
             <Wallet className="h-4 w-4 text-primary" />
@@ -501,17 +636,47 @@ const Leave = () => {
             );
           })}
         </nav>
+        </>
+        )}
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 min-w-0 space-y-6">
-        <div className="flex flex-row items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold">Leave Management</h1>
-            <p className="text-muted-foreground text-sm mt-1">View balances and file leave requests</p>
+      <div className="flex-1 min-w-0 min-h-0 overflow-y-auto space-y-6">
+        {/* Mobile: Leave | Approval tabs when sidebar hidden */}
+        {canApprove && (
+          <div className="lg:hidden flex rounded-lg bg-muted p-0.5">
+            <button
+              onClick={() => setMainTab('leave')}
+              className={cn(
+                'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                mainTab === 'leave'
+                  ? 'bg-white text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Leave
+            </button>
+            <button
+              onClick={() => setMainTab('approval')}
+              className={cn(
+                'flex-1 text-xs font-medium py-1.5 rounded-md transition-colors',
+                mainTab === 'approval'
+                  ? 'bg-white text-foreground shadow-sm'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              Approval
+            </button>
           </div>
-        </div>
-
+        )}
+        {mainTab === 'approval' ? (
+          <LeaveApprovals
+            embedded
+            filterCode={selectedApprovalLeaveType}
+            onFilterChange={setSelectedApprovalLeaveType}
+          />
+        ) : (
+        <>
         {/* Mobile: balance summary + leave type filter */}
         <div className="lg:hidden space-y-3">
           <div className="rounded-lg border bg-card p-3 shadow-sm">
@@ -665,7 +830,6 @@ const Leave = () => {
           </Card>
 
         </div>
-      </div>
 
       <Dialog open={fileDialogOpen} onOpenChange={setFileDialogOpen}>
         <DialogContent className="max-w-md">
@@ -929,6 +1093,10 @@ const Leave = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+        </>
+        )}
+      </div>
+    </div>
     </div>
   );
 };

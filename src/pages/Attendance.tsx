@@ -418,6 +418,31 @@ const Attendance = () => {
   // Today's absent records have no DB row yet — use upsert to create one on first edit
   const isTodayAbsent = (r: RecordRow) => r.id.startsWith('today-absent-');
 
+  // Retry on transient network errors (ERR_CONNECTION_CLOSED, etc.)
+  const withRetry = async <T,>(
+    fn: () => Promise<T>,
+    maxRetries = 3
+  ): Promise<T> => {
+    let lastErr: unknown;
+    for (let i = 0; i < maxRetries; i++) {
+      try {
+        return await fn();
+      } catch (e) {
+        lastErr = e;
+        const msg = (e as Error)?.message?.toLowerCase() || '';
+        const isRetryable =
+          msg.includes('fetch') ||
+          msg.includes('network') ||
+          msg.includes('connection') ||
+          msg.includes('closed') ||
+          msg.includes('aborted');
+        if (i === maxRetries - 1 || !isRetryable) throw e;
+        await new Promise((r) => setTimeout(r, 400 * Math.pow(2, i)));
+      }
+    }
+    throw lastErr;
+  };
+
   const upsertForTodayAbsent = (record: RecordRow, fields: Record<string, any>) =>
     supabase.from('attendance_records').upsert(
       { employee_id: record.employee_id, date: record.date, status: 'absent', ...fields },
@@ -476,9 +501,11 @@ const Attendance = () => {
     const exemptions = empRes.data ? { late_exempted: empRes.data.late_exempted, grace_period_exempted: empRes.data.grace_period_exempted } : undefined;
     const { status, minutesLate } = computeAttendanceStatusFromTimeIn({ timeInIso: ts, date, shift: shiftInfo, exemptions, currentStoredStatus: editingRecord.status as any });
 
-    const { error } = isTodayAbsent(editingRecord)
-      ? await upsertForTodayAbsent(editingRecord, { time_in: ts, status, minutes_late: minutesLate })
-      : await supabase.from('attendance_records').update({ time_in: ts, status, minutes_late: minutesLate }).eq('id', editingRecord.id);
+    const { error } = await withRetry(() =>
+      isTodayAbsent(editingRecord)
+        ? upsertForTodayAbsent(editingRecord, { time_in: ts, status, minutes_late: minutesLate })
+        : supabase.from('attendance_records').update({ time_in: ts, status, minutes_late: minutesLate }).eq('id', editingRecord.id)
+    );
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -499,9 +526,11 @@ const Attendance = () => {
     const updateFields: Record<string, any> = { time_out: ts };
     if (shouldUpdateStatus) updateFields.status = 'present';
 
-    const { error } = isTodayAbsent(editingRecord)
-      ? await upsertForTodayAbsent(editingRecord, updateFields)
-      : await supabase.from('attendance_records').update(updateFields).eq('id', editingRecord.id);
+    const { error } = await withRetry(() =>
+      isTodayAbsent(editingRecord)
+        ? upsertForTodayAbsent(editingRecord, updateFields)
+        : supabase.from('attendance_records').update(updateFields).eq('id', editingRecord.id)
+    );
     setSaving(false);
     if (error) toast.error(error.message);
     else {

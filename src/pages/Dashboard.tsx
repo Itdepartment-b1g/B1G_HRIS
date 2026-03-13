@@ -314,6 +314,27 @@ const Dashboard = () => {
   }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
 
   useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_records', filter: `employee_id=eq.${currentUser.id}` },
+        () => fetchAttendanceLog()
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => fetchAnnouncements())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => {
+        fetchLeaveFeed();
+        fetchApprovedLeavesForCalendar();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchApprovedLeavesForCalendar]);
+
+  useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
     const todayRecord = attendanceLog.find((r) => r.date === today);
     if (todayRecord) {
@@ -676,7 +697,7 @@ const Dashboard = () => {
                   <Card
                     key={`leave-${item.id}`}
                     className="cursor-pointer hover:border-primary/50 transition-colors"
-                    onClick={() => navigate(currentUser?.roles?.includes('super_admin') || currentUser?.roles?.includes('admin') || currentUser?.roles?.includes('supervisor') || currentUser?.roles?.includes('manager') ? '/dashboard/leave-approvals' : '/dashboard/leave')}
+                    onClick={() => navigate(currentUser?.roles?.some((r) => ['super_admin', 'admin', 'supervisor', 'manager'].includes(r)) ? '/dashboard/leave?tab=approval' : '/dashboard/leave')}
                   >
                     <CardContent className="pt-4 pb-4">
                       <div className="flex items-start justify-between">

@@ -12,10 +12,9 @@ import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
 import Employees from "./pages/Employees";
 import Leave from "./pages/Leave";
-import LeaveApprovals from "./pages/LeaveApprovals";
 import MyLeaveBalance from "./pages/MyLeaveBalance";
+import Overtime from "./pages/Overtime";
 import {
-  Overtime,
   BusinessTrip,
   Correction,
   Announcements,
@@ -63,7 +62,6 @@ const App = () => (
             <Route path="attendance" element={<Attendance />} />
             <Route path="leave" element={<Leave />} />
             <Route path="leave-balance" element={<MyLeaveBalance />} />
-            <Route path="leave-approvals" element={<LeaveApprovals />} />
             <Route path="overtime" element={<Overtime />} />
             <Route path="business-trip" element={<BusinessTrip />} />
             <Route path="correction" element={<Correction />} />

@@ -36,8 +36,9 @@ const MyLeaveBalance = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [isRegular, setIsRegular] = useState(true);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (silent = false) => {
     if (!currentUser?.id) return;
+    if (!silent) setLoading(true);
     const year = new Date().getFullYear();
 
     const { data: empData } = await supabase
@@ -122,12 +123,30 @@ const MyLeaveBalance = () => {
       return false;
     });
     setEligibleLeaveTypes(eligible.length > 0 ? eligible : DEFAULT_TYPES);
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [currentUser?.id]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel('my-leave-balance-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'leave_balances', filter: `employee_id=eq.${currentUser.id}` },
+        () => fetchData(true)
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_config' }, () => fetchData(true))
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_eligibility' }, () => fetchData(true))
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, fetchData]);
 
   const refresh = async () => {
     setRefreshing(true);

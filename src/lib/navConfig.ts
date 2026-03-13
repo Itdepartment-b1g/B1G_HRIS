@@ -46,9 +46,8 @@ export const navDropdowns: NavDropdown[] = [
     label: 'Time Attendance',
     items: [
       { label: 'Attendance', path: '/dashboard/attendance', description: 'Attendance related data', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', icon: Clock },
-      { label: 'Leave', path: '/dashboard/leave', description: 'Leave related data', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Calendar },
-      { label: 'Leave Approvals', path: '/dashboard/leave-approvals', description: 'Approve or reject team leave requests', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: ClipboardList, roles: ['super_admin', 'admin', 'supervisor', 'manager'] },
-      { label: 'Overtime', path: '/dashboard/overtime', description: 'Overtime related data', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', icon: Timer },
+      { label: 'Leave', path: '/dashboard/leave', description: 'Leave and approvals', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Calendar },
+      { label: 'Overtime', path: '/dashboard/overtime', description: 'Overtime and approvals', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', icon: Timer },
       { label: 'Business Trip', path: '/dashboard/business-trip', description: 'Business trip related data', iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', icon: Briefcase },
     ],
   },

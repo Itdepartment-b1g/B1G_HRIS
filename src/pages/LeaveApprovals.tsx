@@ -51,14 +51,24 @@ const defaultTypes: LeaveTypeConfigForBalance[] = [
   { code: 'lwop', name: 'Leave Without Pay', annual_entitlement: 0, cap: null, is_system: true },
 ];
 
-const LeaveApprovals = () => {
+interface LeaveApprovalsProps {
+  /** When true, renders without page title for embedding inside a parent page with tabs */
+  embedded?: boolean;
+  /** When provided with embedded, parent provides sidebar - use this for filtering */
+  filterCode?: string;
+  onFilterChange?: (code: string) => void;
+}
+
+const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovalsProps) => {
   const { user: currentUser } = useCurrentUser();
   const [pending, setPending] = useState<LeaveRequestWithEmployee[]>([]);
   const [approved, setApproved] = useState<LeaveRequestWithEmployee[]>([]);
   const [rejected, setRejected] = useState<LeaveRequestWithEmployee[]>([]);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
-  const [selectedLeaveType, setSelectedLeaveType] = useState<string>('');
+  const [internalFilter, setInternalFilter] = useState<string>('');
+  const useExternalFilter = embedded && filterCode !== undefined && onFilterChange !== undefined;
+  const selectedLeaveType = useExternalFilter ? (filterCode ?? '') : internalFilter;
   const [viewingRequest, setViewingRequest] = useState<LeaveRequestWithEmployee | null>(null);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
 
@@ -102,15 +112,15 @@ const LeaveApprovals = () => {
     setLeaveTypes(configs.length > 0 ? configs : []);
   }, []);
 
-  const fetchRequests = useCallback(async () => {
+  const fetchRequests = useCallback(async (silent = false) => {
     if (!currentUser?.id) return;
-    setLoading(true);
+    if (!silent) setLoading(true);
     const ids = await fetchSupervisedIds();
     if (ids.length === 0) {
       setPending([]);
       setApproved([]);
       setRejected([]);
-      setLoading(false);
+      if (!silent) setLoading(false);
       return;
     }
     const { data } = await supabase
@@ -126,7 +136,7 @@ const LeaveApprovals = () => {
     setPending(withName.filter((r) => r.status === 'pending'));
     setApproved(withName.filter((r) => r.status === 'approved'));
     setRejected(withName.filter((r) => r.status === 'rejected'));
-    setLoading(false);
+    if (!silent) setLoading(false);
   }, [currentUser?.id, fetchSupervisedIds]);
 
   useEffect(() => {
@@ -138,10 +148,27 @@ const LeaveApprovals = () => {
   }, [fetchRequests]);
 
   useEffect(() => {
-    if (sidebarLeaveItems.length > 0 && selectedLeaveType === '') {
-      setSelectedLeaveType(sidebarLeaveItems[0].value);
+    if (!useExternalFilter && sidebarLeaveItems.length > 0 && internalFilter === '') {
+      setInternalFilter(sidebarLeaveItems[0].value);
     }
-  }, [sidebarLeaveItems, selectedLeaveType]);
+  }, [useExternalFilter, sidebarLeaveItems, internalFilter]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel('leave-approvals-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => {
+        fetchRequests(true);
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_config' }, () => {
+        fetchLeaveTypes();
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, fetchRequests, fetchLeaveTypes]);
 
   const filterByType = (list: LeaveRequestWithEmployee[]) =>
     !selectedLeaveType ? list : list.filter((r) => (r.leave_type || '').toLowerCase() === selectedLeaveType.toLowerCase());
@@ -294,64 +321,72 @@ const LeaveApprovals = () => {
     );
   };
 
-  return (
-    <RequireRole roles={['super_admin', 'admin', 'supervisor', 'manager']}>
-      <div className="flex gap-6 min-h-[calc(100vh-120px)]">
-        {/* Sidebar - Leave types */}
-        <aside className="hidden lg:flex flex-col w-64 shrink-0 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
-          <div className="flex items-center gap-3 px-4 py-4 mb-2 rounded-xl bg-primary/5 border border-primary/10">
-            <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-              <Calendar className="h-5 w-5 text-primary" />
-            </div>
-            <div className="min-w-0">
-              <p className="font-semibold text-foreground text-sm leading-tight">Leave Approvals</p>
-              <p className="text-xs text-muted-foreground leading-tight mt-0.5">Filter by leave type</p>
-            </div>
+  const setFilter = useExternalFilter ? (onFilterChange!) : setInternalFilter;
+
+  const content = (
+    <>
+    <div className={cn('min-h-[calc(100vh-120px)]', useExternalFilter ? '' : 'flex gap-6')}>
+      {!useExternalFilter && (
+      <>
+      {/* Sidebar - Leave types (when not embedded with external filter) */}
+      <aside className="hidden lg:flex flex-col w-64 shrink-0 max-h-[calc(100vh-120px)] overflow-y-auto pr-1">
+        <div className="flex items-center gap-3 px-4 py-4 mb-2 rounded-xl bg-primary/5 border border-primary/10">
+          <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <Calendar className="h-5 w-5 text-primary" />
           </div>
-          <nav className="flex flex-col gap-0.5">
-            {sidebarLeaveItems.map((item) => {
-              const Icon = item.icon;
-              const active = selectedLeaveType === item.value;
-              return (
-                <button
-                  key={item.value}
-                  onClick={() => setSelectedLeaveType(item.value)}
+          <div className="min-w-0">
+            <p className="font-semibold text-foreground text-sm leading-tight">Leave Approvals</p>
+            <p className="text-xs text-muted-foreground leading-tight mt-0.5">Filter by leave type</p>
+          </div>
+        </div>
+        <nav className="flex flex-col gap-0.5">
+          {sidebarLeaveItems.map((item) => {
+            const Icon = item.icon;
+            const active = selectedLeaveType === item.value;
+            return (
+              <button
+                key={item.value}
+                onClick={() => setFilter(item.value)}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors group w-full relative',
+                  active
+                    ? 'bg-primary/10 text-primary font-medium'
+                    : 'text-foreground/70 hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <div
                   className={cn(
-                    'flex items-center gap-3 px-3 py-2.5 rounded-lg text-left transition-colors group w-full relative',
-                    active
-                      ? 'bg-primary/10 text-primary font-medium'
-                      : 'text-foreground/70 hover:bg-muted hover:text-foreground'
+                    'h-8 w-8 rounded-md flex items-center justify-center shrink-0 transition-colors',
+                    active ? 'bg-primary/15' : 'bg-muted group-hover:bg-muted/80'
                   )}
                 >
-                  <div
-                    className={cn(
-                      'h-8 w-8 rounded-md flex items-center justify-center shrink-0 transition-colors',
-                      active ? 'bg-primary/15' : 'bg-muted group-hover:bg-muted/80'
-                    )}
-                  >
-                    <Icon className={cn('h-4 w-4', active ? 'text-primary' : 'text-muted-foreground')} />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm leading-tight">{item.label}</p>
-                    <p className="text-[11px] text-muted-foreground leading-tight mt-0.5 truncate">{item.description}</p>
-                  </div>
-                  <ChevronRight className={cn('h-4 w-4 shrink-0 transition-opacity', active ? 'opacity-60' : 'opacity-0 group-hover:opacity-30')} />
-                </button>
-              );
-            })}
-          </nav>
-        </aside>
+                  <Icon className={cn('h-4 w-4', active ? 'text-primary' : 'text-muted-foreground')} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm leading-tight">{item.label}</p>
+                  <p className="text-[11px] text-muted-foreground leading-tight mt-0.5 truncate">{item.description}</p>
+                </div>
+                <ChevronRight className={cn('h-4 w-4 shrink-0 transition-opacity', active ? 'opacity-60' : 'opacity-0 group-hover:opacity-30')} />
+              </button>
+            );
+          })}
+        </nav>
+      </aside>
+      </>
+      )}
 
-        {/* Main content */}
-        <div className="flex-1 min-w-0 space-y-6">
-          <div>
-            <h1 className="text-2xl font-bold">Leave Approvals</h1>
-            <p className="text-muted-foreground text-sm mt-1">
-              Review and approve leave requests from your team members
-            </p>
-          </div>
+      {/* Main content */}
+      <div className={cn('min-w-0 space-y-6', !useExternalFilter && 'flex-1')}>
+          {!embedded && (
+            <div>
+              <h1 className="text-2xl font-bold">Leave Approvals</h1>
+              <p className="text-muted-foreground text-sm mt-1">
+                Review and approve leave requests from your team members
+              </p>
+            </div>
+          )}
 
-          {/* Mobile: leave type filter */}
+          {/* Mobile: leave type filter (always show when embedded - parent sidebar hidden on mobile) */}
           <div className="lg:hidden flex gap-2 overflow-x-auto pb-1 -mx-1">
             {sidebarLeaveItems.map((item) => {
               const Icon = item.icon;
@@ -359,7 +394,7 @@ const LeaveApprovals = () => {
               return (
                 <button
                   key={item.value}
-                  onClick={() => setSelectedLeaveType(item.value)}
+                  onClick={() => setFilter(item.value)}
                   className={cn(
                     'flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-colors shrink-0',
                     active
@@ -495,8 +530,10 @@ const LeaveApprovals = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </RequireRole>
+    </>
   );
+
+  return <RequireRole roles={['super_admin', 'admin', 'supervisor', 'manager']}>{content}</RequireRole>;
 };
 
 export default LeaveApprovals;
