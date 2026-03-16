@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallback } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Building2, Plus, Pencil, Trash2, Search, Loader2, Users, Eye } from 'lucide-react';
@@ -308,7 +309,7 @@ const Departments = () => {
                           <Avatar className="h-7 w-7">
                             <AvatarImage src={dept.head.avatar_url ?? undefined} alt="" />
                             <AvatarFallback className="bg-amber-100 text-amber-700 text-xs">
-                              {dept.head.first_name[0]}{dept.head.last_name[0]}
+                              {getAvatarFallback(dept.head.first_name, dept.head.last_name)}
                             </AvatarFallback>
                           </Avatar>
                           <span className="text-sm">{dept.head.first_name} {dept.head.last_name}</span>

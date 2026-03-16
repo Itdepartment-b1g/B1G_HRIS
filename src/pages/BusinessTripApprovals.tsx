@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallbackFromFullName } from '@/lib/utils';
 import { Loader2, Check, X, MapPin, Eye, Paperclip, Briefcase, CalendarDays } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -175,7 +176,7 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
                   <Avatar className="h-10 w-10 shrink-0">
                     <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                      {r.employee_name.split(' ').map((n) => n[0]).join('')}
+                      {getAvatarFallbackFromFullName(r.employee_name)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">

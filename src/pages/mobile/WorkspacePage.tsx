@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallback } from '@/lib/utils';
 import { FileText, Cake } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Employee } from '@/types';
@@ -88,8 +89,7 @@ const WorkspacePage = () => {
                   <Avatar className="h-12 w-12">
                     <AvatarImage src={emp.avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                      {emp.first_name[0]}
-                      {emp.last_name[0]}
+                      {getAvatarFallback(emp.first_name, emp.last_name)}
                     </AvatarFallback>
                   </Avatar>
                   <div className="flex-1 min-w-0">

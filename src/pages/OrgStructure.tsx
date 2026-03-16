@@ -18,6 +18,7 @@ import dagre from 'dagre';
 import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallbackFromFullName } from '@/lib/utils';
 import { Building2, Loader2, Maximize2, ExternalLink, User, Plus, Minus } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -110,7 +111,7 @@ function PersonNode({
         <Avatar className="h-8 w-8 shrink-0">
           <AvatarImage src={avatar_url ?? undefined} alt="" />
           <AvatarFallback className={isCeo ? 'bg-primary/20 text-primary text-xs' : 'bg-muted text-muted-foreground text-xs'}>
-            {name.split(' ').map((n) => n[0]).join('').slice(0, 2) || <User className="h-4 w-4" />}
+            {(() => { const fb = getAvatarFallbackFromFullName(name); return fb !== '?' ? fb : <User className="h-4 w-4" />; })()}
           </AvatarFallback>
         </Avatar>
         <div className="min-w-0 flex-1">

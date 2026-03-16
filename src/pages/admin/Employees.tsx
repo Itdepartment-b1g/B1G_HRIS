@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallback } from '@/lib/utils';
 
 interface EmpRow {
   id: string;
@@ -131,7 +132,7 @@ const AdminEmployees = () => {
                         <Avatar className="h-8 w-8">
                           <AvatarImage src={emp.avatar_url ?? undefined} alt="" />
                           <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                            {emp.first_name[0]}{emp.last_name[0]}
+                            {getAvatarFallback(emp.first_name, emp.last_name)}
                           </AvatarFallback>
                         </Avatar>
                         <div>

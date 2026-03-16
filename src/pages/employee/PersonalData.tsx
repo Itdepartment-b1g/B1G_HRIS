@@ -1,10 +1,21 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import Cropper, { Area } from 'react-easy-crop';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallback } from '@/lib/utils';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Slider } from '@/components/ui/slider';
 import { Loader2, Mail, Phone, Briefcase, Building2, Calendar, Hash, Clock, Users, Camera } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -51,7 +62,56 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
 );
 
 const MAX_AVATAR_SIZE_MB = 2;
+const MAX_AVATAR_BYTES = MAX_AVATAR_SIZE_MB * 1024 * 1024;
 const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
+function createImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = url;
+  });
+}
+
+async function getCroppedBlob(
+  imageSrc: string,
+  pixelCrop: Area,
+  maxBytes: number = MAX_AVATAR_BYTES
+): Promise<Blob> {
+  const image = await createImage(imageSrc);
+  const canvas = document.createElement('canvas');
+  let { width, height } = pixelCrop;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Could not get canvas context');
+
+  canvas.width = width;
+  canvas.height = height;
+  ctx.drawImage(image, pixelCrop.x, pixelCrop.y, width, height, 0, 0, width, height);
+
+  let quality = 0.92;
+  let blob: Blob | null = null;
+  for (let attempt = 0; attempt < 8; attempt++) {
+    blob = await new Promise<Blob | null>((res) =>
+      canvas.toBlob((b) => res(b), 'image/jpeg', quality)
+    );
+    if (!blob) throw new Error('Could not create blob');
+    if (blob.size <= maxBytes) return blob;
+    quality -= 0.12;
+    if (quality < 0.3) {
+      width = Math.floor(width * 0.85);
+      height = Math.floor(height * 0.85);
+      if (width < 80 || height < 80) return blob;
+      canvas.width = width;
+      canvas.height = height;
+      ctx.drawImage(image, pixelCrop.x, pixelCrop.y, pixelCrop.width, pixelCrop.height, 0, 0, width, height);
+      quality = 0.88;
+    }
+  }
+  return blob!;
+}
+
+const MAX_RAW_FILE_MB = 10;
 
 const PersonalData = () => {
   const { user, loading, refetch } = useCurrentUser();
@@ -60,6 +120,11 @@ const PersonalData = () => {
   const [loadingExtra, setLoadingExtra] = useState(true);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [cropDialogOpen, setCropDialogOpen] = useState(false);
+  const [cropImageSrc, setCropImageSrc] = useState<string | null>(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [croppedAreaPixels, setCroppedAreaPixels] = useState<Area | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -92,7 +157,11 @@ const PersonalData = () => {
     loadExtra();
   }, [user]);
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onCropAreaChange = useCallback((_croppedArea: Area, pixels: Area) => {
+    setCroppedAreaPixels(pixels);
+  }, []);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !user) return;
     e.target.value = '';
@@ -101,18 +170,38 @@ const PersonalData = () => {
       toast.error('Please use JPEG, PNG, or WebP format');
       return;
     }
-    if (file.size > MAX_AVATAR_SIZE_MB * 1024 * 1024) {
-      toast.error(`Image must be under ${MAX_AVATAR_SIZE_MB}MB`);
+    if (file.size > MAX_RAW_FILE_MB * 1024 * 1024) {
+      toast.error(`Image must be under ${MAX_RAW_FILE_MB}MB`);
       return;
     }
 
+    const url = URL.createObjectURL(file);
+    setCropImageSrc(url);
+    setCrop({ x: 0, y: 0 });
+    setZoom(1);
+    setCroppedAreaPixels(null);
+    setCropDialogOpen(true);
+  };
+
+  const handleCropCancel = useCallback(() => {
+    if (cropImageSrc) URL.revokeObjectURL(cropImageSrc);
+    setCropDialogOpen(false);
+    setCropImageSrc(null);
+  }, [cropImageSrc]);
+
+  const handleCropConfirm = async () => {
+    if (!cropImageSrc || !croppedAreaPixels || !user) return;
     setUploading(true);
     try {
-      const ext = file.name.split('.').pop() || 'jpg';
-      const path = `${user.id}/avatar.${ext}`;
+      const blob = await getCroppedBlob(cropImageSrc, croppedAreaPixels);
+      URL.revokeObjectURL(cropImageSrc);
+      setCropDialogOpen(false);
+      setCropImageSrc(null);
+
+      const path = `${user.id}/avatar.jpg`;
       const { error: uploadErr } = await supabase.storage
         .from('profile-pictures')
-        .upload(path, file, { contentType: file.type, upsert: true });
+        .upload(path, blob, { contentType: 'image/jpeg', upsert: true });
       if (uploadErr) throw uploadErr;
 
       const { data: urlData } = supabase.storage.from('profile-pictures').getPublicUrl(path);
@@ -162,7 +251,7 @@ const PersonalData = () => {
               <Avatar className="h-20 w-20 border-2 border-primary/20">
                 <AvatarImage src={user.avatar_url ?? undefined} alt="" />
                 <AvatarFallback className="bg-primary/10 text-primary text-2xl font-bold">
-                  {user.first_name[0]}{user.last_name[0]}
+                  {getAvatarFallback(user.first_name, user.last_name)}
                 </AvatarFallback>
               </Avatar>
               <input
@@ -170,7 +259,7 @@ const PersonalData = () => {
                 type="file"
                 accept="image/jpeg,image/png,image/webp"
                 className="hidden"
-                onChange={handleAvatarUpload}
+                onChange={handleFileSelect}
                 disabled={uploading}
               />
               <Button
@@ -215,6 +304,68 @@ const PersonalData = () => {
         </CardContent>
       </Card>
 
+      {/* Crop dialog — no scale animation so Cropper dimensions render correctly */}
+      <Dialog open={cropDialogOpen} onOpenChange={(open) => !open && handleCropCancel()}>
+        <DialogContent
+          className="max-w-md p-0 gap-0 overflow-hidden [&>button]:top-2 [&>button]:right-2"
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onEscapeKeyDown={handleCropCancel}
+        >
+          <DialogHeader className="p-4 pb-2">
+            <DialogTitle>Crop profile photo</DialogTitle>
+            <DialogDescription>
+              Adjust the crop area and zoom. The image will be compressed to fit under {MAX_AVATAR_SIZE_MB}MB.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="relative h-[320px] w-full bg-muted">
+            {cropImageSrc && (
+              <Cropper
+                image={cropImageSrc}
+                crop={crop}
+                zoom={zoom}
+                aspect={1}
+                cropShape="round"
+                showGrid={false}
+                onCropChange={setCrop}
+                onZoomChange={setZoom}
+                onCropAreaChange={onCropAreaChange}
+              />
+            )}
+          </div>
+          <div className="p-4 space-y-3">
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-muted-foreground shrink-0">Zoom</span>
+              <Slider
+                value={[zoom]}
+                onValueChange={([v]) => setZoom(v)}
+                min={1}
+                max={3}
+                step={0.1}
+                className="flex-1"
+              />
+            </div>
+          </div>
+          <DialogFooter className="p-4 pt-0">
+            <Button variant="outline" onClick={handleCropCancel}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleCropConfirm}
+              disabled={!croppedAreaPixels || uploading}
+            >
+              {uploading ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Uploading…
+                </>
+              ) : (
+                'Confirm & upload'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Contact Information */}
         <Card>
@@ -249,7 +400,7 @@ const PersonalData = () => {
                 <Avatar className="h-10 w-10">
                   <AvatarImage src={supervisor.avatar_url ?? undefined} alt="" />
                   <AvatarFallback className="bg-amber-100 text-amber-700 text-sm font-semibold">
-                    {supervisor.first_name[0]}{supervisor.last_name[0]}
+                    {getAvatarFallback(supervisor.first_name, supervisor.last_name)}
                   </AvatarFallback>
                 </Avatar>
                 <div>
