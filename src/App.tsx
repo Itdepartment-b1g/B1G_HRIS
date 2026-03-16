@@ -15,13 +15,15 @@ import Leave from "./pages/Leave";
 import MyLeaveBalance from "./pages/MyLeaveBalance";
 import Overtime from "./pages/Overtime";
 import BusinessTrip from "./pages/BusinessTrip";
+import SurveyPage from "./pages/activity/SurveyPage";
+import AnnouncementsPage from "./pages/activity/AnnouncementsPage";
+import PoliciesPage from "./pages/activity/PoliciesPage";
+import SurveyAnalyticsPage from "./pages/activity/SurveyAnalyticsPage";
 import {
   Correction,
-  Announcements,
   TaskFeedback,
   DailyActivity,
   EventScheduling,
-  EmployeeSurvey,
   Reports,
   MyPayslip,
   SettingsPage,
@@ -67,10 +69,15 @@ const App = () => (
             <Route path="correction" element={<Correction />} />
             <Route path="task-feedback" element={<TaskFeedback />} />
             <Route path="daily-activity" element={<DailyActivity />} />
-            <Route path="chat" element={<Announcements />} />
-            <Route path="announcements" element={<Announcements />} />
+            <Route path="activity" element={<Navigate to="/dashboard/activity/survey" replace />} />
+            <Route path="activity/survey" element={<SurveyPage />} />
+            <Route path="activity/announcements" element={<AnnouncementsPage />} />
+            <Route path="activity/policies" element={<PoliciesPage />} />
+            <Route path="activity/survey-analytics" element={<RequireRole roles={['admin', 'super_admin']}><SurveyAnalyticsPage /></RequireRole>} />
+            <Route path="chat" element={<Navigate to="/dashboard/activity/announcements" replace />} />
+            <Route path="announcements" element={<Navigate to="/dashboard/activity/announcements" replace />} />
             <Route path="events" element={<EventScheduling />} />
-            <Route path="survey" element={<EmployeeSurvey />} />
+            <Route path="survey" element={<Navigate to="/dashboard/activity/survey" replace />} />
             <Route path="claims" element={<Reports />} />
             <Route path="payslip" element={<MyPayslip />} />
             <Route path="employees" element={<RequireRole roles={['admin', 'super_admin']}><Employees /></RequireRole>} />

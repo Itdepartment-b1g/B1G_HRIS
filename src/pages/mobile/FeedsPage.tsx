@@ -9,12 +9,20 @@ const FeedsPage = () => {
 
   useEffect(() => {
     const fetchData = async () => {
+      const today = new Date().toISOString().slice(0, 10);
       const { data } = await supabase
         .from('announcements')
-        .select('id, title, content, created_at, author:employees!author_id(first_name, last_name)')
+        .select('id, title, content, created_at, publish_date, expiration_date, author:employees!author_id(first_name, last_name)')
         .order('created_at', { ascending: false })
-        .limit(10);
-      setAnnouncements((data || []).map((a: any) => ({
+        .limit(20);
+      const filtered = (data || []).filter((a: any) => {
+        const pub = a.publish_date || a.created_at?.slice(0, 10);
+        if (pub && pub > today) return false;
+        const exp = a.expiration_date;
+        if (exp && exp < today) return false;
+        return true;
+      }).slice(0, 10);
+      setAnnouncements(filtered.map((a: any) => ({
         id: a.id,
         title: a.title,
         content: a.content,
