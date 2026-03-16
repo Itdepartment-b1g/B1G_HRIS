@@ -16,6 +16,8 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useActivityCompliance } from '@/hooks/useActivityCompliance';
+import { SurveyAnswerDialog } from '@/components/SurveyAnswerDialog';
 import { supabase } from '@/lib/supabase';
 import { cn, timeTo12Hour } from '@/lib/utils';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
@@ -60,6 +62,7 @@ function getWorkingDatesInRange(startStr: string, endStr: string): string[] {
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useCurrentUser();
+  const { canTimeOut, pending, refetch: refetchCompliance } = useActivityCompliance();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [clockedIn, setClockedIn] = useState(false);
   const [clockInTime, setClockInTime] = useState<string | null>(null);
@@ -73,6 +76,9 @@ const Dashboard = () => {
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
   const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
+  const [pendingSurveys, setPendingSurveys] = useState<Array<{ id: string; title: string; description?: string | null }>>([]);
+  const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
+  const [surveyDialogId, setSurveyDialogId] = useState<string | null>(null);
   const [calendarLeaveData, setCalendarLeaveData] = useState<{
     myLeaveDates: Set<string>;
     myBusinessTripDates: Set<string>;
@@ -152,6 +158,38 @@ const Dashboard = () => {
       created_at: a.created_at,
     })));
   }, []);
+
+  const fetchPendingSurveys = useCallback(async () => {
+    if (!currentUser?.id || currentUser?.login_exempted) {
+      setPendingSurveys([]);
+      return;
+    }
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const { data: surveyRes } = await supabase
+      .from('surveys')
+      .select('id, title, description, start_date, end_date, target_audience, target_employee_ids')
+      .lte('start_date', todayStr)
+      .gte('end_date', todayStr);
+    const { data: respData } = await supabase
+      .from('survey_responses')
+      .select('survey_id')
+      .eq('employee_id', currentUser.id);
+    const { data: compData } = await supabase
+      .from('survey_completions')
+      .select('survey_id')
+      .eq('employee_id', currentUser.id);
+    const completedIds = new Set([
+      ...(respData || []).map((r) => r.survey_id),
+      ...(compData || []).map((r) => r.survey_id),
+    ]);
+    const userId = currentUser.id.toLowerCase();
+    const isTargeted = (a?: string, ids?: string[]) =>
+      a !== 'selected' || !ids?.length || ids.some((id) => id?.toLowerCase() === userId);
+    const pending = (surveyRes || []).filter(
+      (s) => !completedIds.has(s.id) && isTargeted(s.target_audience, s.target_employee_ids)
+    );
+    setPendingSurveys(pending.map((s) => ({ id: s.id, title: s.title, description: s.description })));
+  }, [currentUser?.id, currentUser?.login_exempted]);
 
   const fetchLeaveFeed = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -415,11 +453,12 @@ const Dashboard = () => {
     fetchAttendanceLog();
     fetchAnnouncements();
     fetchLeaveFeed();
+    fetchPendingSurveys();
     fetchApprovedLeavesForCalendar();
     fetchEmployeesAndCompany();
     fetchWorkLocations();
     fetchAssignedShift();
-  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
+  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -435,12 +474,15 @@ const Dashboard = () => {
         fetchLeaveFeed();
         fetchApprovedLeavesForCalendar();
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, () => fetchPendingSurveys())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'survey_responses', filter: `employee_id=eq.${currentUser.id}` }, () => fetchPendingSurveys())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'survey_completions', filter: `employee_id=eq.${currentUser.id}` }, () => fetchPendingSurveys())
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.id, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchApprovedLeavesForCalendar]);
+  }, [currentUser?.id, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar]);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -699,14 +741,29 @@ const Dashboard = () => {
                   >
                     {loadingLocation ? '...' : 'Time In'}
                   </Button>
-                  <Button
-                    className="w-full sm:flex-1"
-                    onClick={() => navigate('/dashboard/time-in-out?mode=out')}
-                    disabled={loadingLocation || hasTimeOut || !hasTimeIn}
-                    variant={hasTimeOut || !hasTimeIn ? 'outline' : 'default'}
-                  >
-                    {loadingLocation ? '...' : 'Time Out'}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="w-full sm:flex-1 flex">
+                        <Button
+                          className="w-full"
+                          onClick={() => navigate('/dashboard/time-in-out?mode=out')}
+                          disabled={loadingLocation || hasTimeOut || !hasTimeIn || !canTimeOut}
+                          variant={hasTimeOut || !hasTimeIn || !canTimeOut ? 'outline' : 'default'}
+                        >
+                          {loadingLocation ? '...' : 'Time Out'}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {!canTimeOut
+                        ? 'Complete pending acknowledgements and surveys to time out.'
+                        : hasTimeOut
+                          ? 'Already timed out.'
+                          : !hasTimeIn
+                            ? 'Time in first.'
+                            : 'Record time out'}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               )}
 
@@ -1145,12 +1202,40 @@ const Dashboard = () => {
                 </div>
               </TabsContent>
               <TabsContent value="survey" className="pt-6">
-                <div className="flex flex-col items-center text-center py-4">
-                  <div className="h-20 w-20 bg-muted rounded-lg flex items-center justify-center mb-3">
-                    <FileText className="h-8 w-8 text-muted-foreground/40" />
+                {pendingSurveys.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground mb-2">Complete these surveys to unlock Time Out.</p>
+                    {pendingSurveys.map((s) => (
+                      <div
+                        key={s.id}
+                        className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/50 hover:border-primary/50 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm text-foreground truncate">{s.title}</p>
+                          {s.description && (
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">{s.description}</p>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setSurveyDialogId(s.id);
+                            setSurveyDialogOpen(true);
+                          }}
+                        >
+                          Take Survey
+                        </Button>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-sm text-muted-foreground">No records to display</p>
-                </div>
+                ) : (
+                  <div className="flex flex-col items-center text-center py-4">
+                    <div className="h-20 w-20 bg-muted rounded-lg flex items-center justify-center mb-3">
+                      <FileText className="h-8 w-8 text-muted-foreground/40" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">No surveys to complete</p>
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -1179,6 +1264,19 @@ const Dashboard = () => {
           </CardContent>
         </Card>
       </div>
+
+      <SurveyAnswerDialog
+        surveyId={surveyDialogId}
+        open={surveyDialogOpen}
+        onOpenChange={(o) => {
+          setSurveyDialogOpen(o);
+          if (!o) setSurveyDialogId(null);
+        }}
+        onSuccess={() => {
+          fetchPendingSurveys();
+          refetchCompliance();
+        }}
+      />
 
       <Dialog open={attendanceLogOpen} onOpenChange={setAttendanceLogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">

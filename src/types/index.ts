@@ -121,4 +121,77 @@ export interface Announcement {
   created_at: string;
   updated_at?: string;
   is_pinned: boolean;
+  publish_date?: string;
+  expiration_date?: string | null;
+  attachment_url?: string | null;
+  target_audience?: string;
+  target_employee_ids?: string[];
+}
+
+export interface AnnouncementAcknowledgement {
+  id: string;
+  announcement_id: string;
+  employee_id: string;
+  acknowledged_at: string;
+}
+
+export type SurveyAnswerType = 'multiple_choice' | 'rating' | 'text';
+
+export interface Survey {
+  id: string;
+  title: string;
+  description: string | null;
+  start_date: string;
+  end_date: string;
+  target_audience: string;
+  target_employee_ids: string[];
+  is_anonymous: boolean;
+  author_id: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface SurveyQuestion {
+  id: string;
+  survey_id: string;
+  sort_order: number;
+  question_text: string;
+  answer_type: SurveyAnswerType;
+  options: string[];
+}
+
+export interface SurveyResponse {
+  id: string;
+  survey_id: string;
+  employee_id: string | null;
+  responded_at: string;
+}
+
+export interface SurveyAnswer {
+  id: string;
+  response_id: string;
+  question_id: string;
+  answer_text: string | null;
+  answer_rating: number | null;
+  answer_choice: string | null;
+}
+
+export interface Policy {
+  id: string;
+  title: string;
+  description: string;
+  effective_date: string;
+  attachment_url: string | null;
+  target_audience: string;
+  target_employee_ids: string[];
+  author_id: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface PolicyAcknowledgement {
+  id: string;
+  policy_id: string;
+  employee_id: string;
+  acknowledged_at: string;
 }

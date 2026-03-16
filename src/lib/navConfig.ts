@@ -9,7 +9,7 @@ import {
   MessageCircle,
   FileText,
   Banknote,
-  Network,
+  BarChart3,
   Settings,
   type LucideIcon,
 } from 'lucide-react';
@@ -54,7 +54,10 @@ export const navDropdowns: NavDropdown[] = [
   {
     label: 'Activity',
     items: [
-      { label: 'Announcements', path: '/dashboard/announcements', description: 'Company announcements and updates', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: MessageCircle },
+      { label: 'Employee Survey', path: '/dashboard/activity/survey', description: 'Surveys and feedback', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: ClipboardList },
+      { label: 'Announcements', path: '/dashboard/activity/announcements', description: 'Company announcements and updates', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: MessageCircle },
+      { label: 'Policy Updates', path: '/dashboard/activity/policies', description: 'Company policies', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: FileText },
+      { label: 'Survey Analytics', path: '/dashboard/activity/survey-analytics', description: 'View survey responses and analytics', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: BarChart3, roles: ['super_admin', 'admin'] },
     ],
   },
   {

@@ -21,6 +21,8 @@ import { cn } from '@/lib/utils';
 import { navDropdowns } from '@/lib/navConfig';
 import type { NavDropdown } from '@/lib/navConfig';
 import MobileBottomNav from '@/components/MobileBottomNav';
+import ActivityPopup from '@/components/ActivityPopup';
+import { ActivityComplianceProvider } from '@/contexts/ActivityComplianceContext';
 
 const DashboardLayout = () => {
   const navigate = useNavigate();
@@ -110,6 +112,7 @@ const DashboardLayout = () => {
   const initials = `${user.first_name[0]}${user.last_name[0]}`;
 
   return (
+    <ActivityComplianceProvider userId={user?.id}>
     <div className="flex flex-col min-h-screen bg-background" ref={dropdownRef}>
       {/* Top Navbar - hidden on mobile, visible on desktop */}
       <header className="hidden lg:block sticky top-0 z-50 border-b border-white/10 bg-black" style={{ boxShadow: 'var(--shadow-sm)' }}>
@@ -294,7 +297,11 @@ const DashboardLayout = () => {
 
       {/* Mobile Bottom Navigation */}
       <MobileBottomNav />
+
+      {/* Activity pop-up: unacknowledged announcements and policies on login */}
+      <ActivityPopup />
     </div>
+    </ActivityComplianceProvider>
   );
 };
 
