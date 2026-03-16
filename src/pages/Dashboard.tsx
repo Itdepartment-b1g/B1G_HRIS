@@ -19,7 +19,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { SurveyAnswerDialog } from '@/components/SurveyAnswerDialog';
 import { supabase } from '@/lib/supabase';
-import { cn, timeTo12Hour } from '@/lib/utils';
+import { cn, timeTo12Hour, getAvatarFallback, getAvatarFallbackFromFullName } from '@/lib/utils';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import type { AttendanceRecord } from '@/types';
 import type { Employee } from '@/types';
@@ -686,7 +686,7 @@ const Dashboard = () => {
               <Avatar className="h-10 w-10 shrink-0">
                 <AvatarImage src={currentUser.avatar_url} alt="" />
                 <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                  {currentUser.first_name[0]}{currentUser.last_name[0]}
+                  {getAvatarFallback(currentUser.first_name, currentUser.last_name)}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
@@ -706,9 +706,12 @@ const Dashboard = () => {
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-primary">{currentUser.first_name[0]}{currentUser.last_name[0]}</span>
-                  </div>
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarImage src={currentUser.avatar_url ?? undefined} alt="" />
+                    <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
+                      {getAvatarFallback(currentUser.first_name, currentUser.last_name)}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Start Time</p>
                     <div className="flex items-center gap-1">
@@ -718,9 +721,12 @@ const Dashboard = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-primary">{currentUser.first_name[0]}{currentUser.last_name[0]}</span>
-                  </div>
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarImage src={currentUser.avatar_url ?? undefined} alt="" />
+                    <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
+                      {getAvatarFallback(currentUser.first_name, currentUser.last_name)}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">End Time</p>
                     <div className="flex items-center gap-1">
@@ -804,7 +810,7 @@ const Dashboard = () => {
                   <Avatar className="h-14 w-14 border-2 border-primary/20">
                     <AvatarImage src={supervisor.avatar_url} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                      {supervisor.first_name[0]}{supervisor.last_name[0]}
+                      {getAvatarFallback(supervisor.first_name, supervisor.last_name)}
                     </AvatarFallback>
                   </Avatar>
                   <p className="text-xs font-medium text-foreground mt-1.5 text-center">
@@ -821,7 +827,7 @@ const Dashboard = () => {
                     <Avatar className="h-10 w-10">
                       <AvatarImage src={cw.avatar_url} alt="" />
                       <AvatarFallback className="bg-muted text-muted-foreground text-xs">
-                        {cw.first_name[0]}{cw.last_name[0]}
+                        {getAvatarFallback(cw.first_name, cw.last_name)}
                       </AvatarFallback>
                     </Avatar>
                     <p className="text-[10px] text-muted-foreground mt-1 text-center max-w-[60px] truncate">{cw.first_name}</p>
@@ -853,7 +859,7 @@ const Dashboard = () => {
                           <Avatar className="h-10 w-10">
                             <AvatarImage src={item.author_avatar_url} alt="" />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                              {item.author.split(' ').map((n) => n[0]).join('')}
+                              {getAvatarFallbackFromFullName(item.author)}
                             </AvatarFallback>
                           </Avatar>
                           <div>
@@ -877,7 +883,7 @@ const Dashboard = () => {
                           <Avatar className="h-10 w-10">
                             <AvatarImage src={item.employee_avatar_url} alt="" />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                              {item.employee_name.split(' ').map((n) => n[0]).join('')}
+                              {getAvatarFallbackFromFullName(item.employee_name)}
                             </AvatarFallback>
                           </Avatar>
                           <div>

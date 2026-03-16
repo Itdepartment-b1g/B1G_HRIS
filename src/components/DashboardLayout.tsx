@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { cn, getAvatarFallback } from '@/lib/utils';
 import { navDropdowns } from '@/lib/navConfig';
 import type { NavDropdown } from '@/lib/navConfig';
 import MobileBottomNav from '@/components/MobileBottomNav';
@@ -109,7 +109,7 @@ const DashboardLayout = () => {
 
   if (loading || !user) return null;
 
-  const initials = `${user.first_name[0]}${user.last_name[0]}`;
+  const initials = getAvatarFallback(user.first_name, user.last_name);
 
   return (
     <ActivityComplianceProvider userId={user?.id}>

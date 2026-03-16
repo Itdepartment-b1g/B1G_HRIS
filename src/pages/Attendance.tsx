@@ -21,7 +21,8 @@ import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
-import { timeTo12Hour } from '@/lib/utils';
+import { timeTo12Hour, getAvatarFallbackFromFullName } from '@/lib/utils';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 
 interface RecordRow {
   id: string;
@@ -36,6 +37,7 @@ interface RecordRow {
   time_out: string | null;
   time_in_photo_url: string | null;
   time_out_photo_url: string | null;
+  employee_avatar_url?: string | null;
   lat_in: number | null;
   lng_in: number | null;
   lat_out: number | null;
@@ -163,7 +165,7 @@ const Attendance = () => {
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
       let query = supabase
         .from('attendance_records')
-        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name)')
+        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name, avatar_url)')
         .gte('date', dateFrom)
         .lte('date', dateTo);
       if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
@@ -178,6 +180,7 @@ const Attendance = () => {
         employee_code: r.employee?.employee_code,
         employee_first_name: r.employee?.first_name,
         employee_last_name: r.employee?.last_name,
+        employee_avatar_url: r.employee?.avatar_url,
       }));
     } else {
       data = rpcData || [];
@@ -258,6 +261,7 @@ const Attendance = () => {
         time_out: r.time_out,
         time_in_photo_url: r.time_in_photo_url,
         time_out_photo_url: r.time_out_photo_url,
+        employee_avatar_url: r.employee_avatar_url ?? null,
         lat_in: r.lat_in,
         lng_in: r.lng_in,
         lat_out: r.lat_out,
@@ -281,7 +285,7 @@ const Attendance = () => {
       // Fetch all active employees
       const { data: allEmployees } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name, login_exempted')
+        .select('id, employee_code, first_name, last_name, login_exempted, avatar_url')
         .eq('is_active', true);
 
       // Fetch all employee_shifts with shift info
@@ -337,6 +341,7 @@ const Attendance = () => {
           time_out: null,
           time_in_photo_url: null,
           time_out_photo_url: null,
+          employee_avatar_url: emp.avatar_url ?? null,
           lat_in: null,
           lng_in: null,
           lat_out: null,
@@ -683,9 +688,12 @@ const Attendance = () => {
                               <img src={r.time_in_photo_url} alt="Time in" className="h-20 w-20 object-cover rounded-full border" />
                             </a>
                           ) : (
-                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
-                              <span className="text-xs text-muted-foreground">No Data</span>
-                            </div>
+                            <Avatar className="h-20 w-20">
+                              <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
+                              <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
+                                {getAvatarFallbackFromFullName(r.employee_name)}
+                              </AvatarFallback>
+                            </Avatar>
                           )}
                           <div className="flex items-center gap-1 text-xs">
                             <MapPin className="h-3 w-3" />
@@ -701,9 +709,12 @@ const Attendance = () => {
                               <img src={r.time_out_photo_url} alt="Time out" className="h-20 w-20 object-cover rounded-full border" />
                             </a>
                           ) : (
-                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
-                              <span className="text-xs text-muted-foreground">No Data</span>
-                            </div>
+                            <Avatar className="h-20 w-20">
+                              <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
+                              <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
+                                {getAvatarFallbackFromFullName(r.employee_name)}
+                              </AvatarFallback>
+                            </Avatar>
                           )}
                           <div className="flex items-center gap-1 text-xs">
                             <MapPin className="h-3 w-3" />

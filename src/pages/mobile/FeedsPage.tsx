@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallbackFromFullName } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 
 const FeedsPage = () => {
@@ -53,7 +54,7 @@ const FeedsPage = () => {
                   <Avatar className="h-10 w-10">
                     <AvatarImage src={a.author_avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                      {a.author.split(' ').map((n) => n[0]).join('')}
+                      {getAvatarFallbackFromFullName(a.author)}
                     </AvatarFallback>
                   </Avatar>
                   <div>

@@ -66,6 +66,30 @@ export function isValidPhonePH(value: string): boolean {
 }
 
 /**
+ * Avatar fallback: first letter of first name + last letter of last name.
+ * Used when profile picture is not available.
+ */
+export function getAvatarFallback(firstName?: string | null, lastName?: string | null): string {
+  const first = (firstName ?? '').trim()[0] ?? '';
+  const last = (lastName ?? '').trim().slice(-1) ?? '';
+  const result = (first + last).toUpperCase();
+  return result || '?';
+}
+
+/**
+ * Avatar fallback from full name (e.g. "Franco Romey" -> "Fy").
+ * Parses "First Last" to first letter of first word + last letter of last word.
+ */
+export function getAvatarFallbackFromFullName(fullName?: string | null): string {
+  const parts = (fullName ?? '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return '?';
+  if (parts.length === 1) return (parts[0][0] ?? '?').toUpperCase();
+  const first = parts[0][0] ?? '';
+  const last = (parts[parts.length - 1] ?? '').slice(-1) ?? '';
+  return (first + last).toUpperCase() || '?';
+}
+
+/**
  * Convert 24-hour time string (e.g. "08:00", "17:00:00") to 12-hour AM/PM format
  */
 export function timeTo12Hour(timeStr: string): string {
