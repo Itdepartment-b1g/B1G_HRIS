@@ -14,8 +14,8 @@ import Employees from "./pages/Employees";
 import Leave from "./pages/Leave";
 import MyLeaveBalance from "./pages/MyLeaveBalance";
 import Overtime from "./pages/Overtime";
+import BusinessTrip from "./pages/BusinessTrip";
 import {
-  BusinessTrip,
   Correction,
   Announcements,
   TaskFeedback,

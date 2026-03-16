@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar } from 'lucide-react';
+import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar, Briefcase, CalendarDays } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -75,8 +75,23 @@ const Dashboard = () => {
   const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
   const [calendarLeaveData, setCalendarLeaveData] = useState<{
     myLeaveDates: Set<string>;
+    myBusinessTripDates: Set<string>;
     teamLeaveByDate: Map<string, string[]>;
-  }>({ myLeaveDates: new Set(), teamLeaveByDate: new Map() });
+    teamBusinessTripByDate: Map<string, string[]>;
+    myLeaveDetailsByDate: Map<string, Array<{ leave_type: string; start_date: string; end_date: string; number_of_days?: number; reason?: string }>>;
+    myBusinessTripDetailsByDate: Map<string, Array<{ trip_type: string; destination: string; purpose?: string; start_date: string; end_date: string }>>;
+    teamLeaveDetailsByDate: Map<string, Array<{ name: string; leave_type: string; start_date: string; end_date: string }>>;
+    teamBusinessTripDetailsByDate: Map<string, Array<{ name: string; trip_type: string; destination: string; start_date: string; end_date: string }>>;
+  }>({
+    myLeaveDates: new Set(),
+    myBusinessTripDates: new Set(),
+    teamLeaveByDate: new Map(),
+    teamBusinessTripByDate: new Map(),
+    myLeaveDetailsByDate: new Map(),
+    myBusinessTripDetailsByDate: new Map(),
+    teamLeaveDetailsByDate: new Map(),
+    teamBusinessTripDetailsByDate: new Map(),
+  });
   const [leaveFeedItems, setLeaveFeedItems] = useState<Array<{
     id: string;
     type: 'leave_request';
@@ -92,6 +107,18 @@ const Dashboard = () => {
   }>>([]);
   const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string; roles: string[] }>>([]);
   const [companyProfile, setCompanyProfile] = useState<{ name: string; address?: string; work_start_time?: string; work_end_time?: string } | null>(null);
+  const [calendarDateDialog, setCalendarDateDialog] = useState<{
+    dateStr: string;
+    dateLabel: string;
+    isMyLeave: boolean;
+    isMyBusinessTrip: boolean;
+    teamOnLeave: string[];
+    teamOnBusinessTrip: string[];
+    myLeaveDetails: Array<{ leave_type: string; start_date: string; end_date: string; number_of_days?: number; reason?: string }>;
+    myBusinessTripDetails: Array<{ trip_type: string; destination: string; purpose?: string; start_date: string; end_date: string }>;
+    teamLeaveDetails: Array<{ name: string; leave_type: string; start_date: string; end_date: string }>;
+    teamBusinessTripDetails: Array<{ name: string; trip_type: string; destination: string; start_date: string; end_date: string }>;
+  } | null>(null);
 
   const fetchAttendanceLog = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -191,31 +218,112 @@ const Dashboard = () => {
       employeeIds = Array.from(supervisedIds);
     }
 
-    const { data } = await supabase
-      .from('leave_requests')
-      .select('employee_id, start_date, end_date, employee:employees!employee_id(first_name, last_name)')
-      .in('employee_id', employeeIds)
-      .eq('status', 'approved')
-      .gte('end_date', rangeStart)
-      .lte('start_date', rangeEnd);
+    const [leaveRes, tripRes] = await Promise.all([
+      supabase
+        .from('leave_requests')
+        .select('employee_id, leave_type, start_date, end_date, number_of_days, reason, employee:employees!employee_id(first_name, last_name)')
+        .in('employee_id', employeeIds)
+        .eq('status', 'approved')
+        .gte('end_date', rangeStart)
+        .lte('start_date', rangeEnd),
+      supabase
+        .from('business_trips')
+        .select('employee_id, trip_type, destination, purpose, start_date, end_date, employee:employees!employee_id(first_name, last_name)')
+        .in('employee_id', employeeIds)
+        .eq('status', 'approved')
+        .gte('end_date', rangeStart)
+        .lte('start_date', rangeEnd),
+    ]);
 
     const myLeaveDates = new Set<string>();
+    const myBusinessTripDates = new Set<string>();
     const teamLeaveByDate = new Map<string, string[]>();
-    (data || []).forEach((r: any) => {
+    const teamBusinessTripByDate = new Map<string, string[]>();
+    const myLeaveDetailsByDate = new Map<string, Array<{ leave_type: string; start_date: string; end_date: string; number_of_days?: number; reason?: string }>>();
+    const myBusinessTripDetailsByDate = new Map<string, Array<{ trip_type: string; destination: string; purpose?: string; start_date: string; end_date: string }>>();
+    const teamLeaveDetailsByDate = new Map<string, Array<{ name: string; leave_type: string; start_date: string; end_date: string }>>();
+    const teamBusinessTripDetailsByDate = new Map<string, Array<{ name: string; trip_type: string; destination: string; start_date: string; end_date: string }>>();
+
+    (leaveRes.data || []).forEach((r: any) => {
       const dates = getWorkingDatesInRange(r.start_date, r.end_date);
       const name = r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown';
       const isMe = r.employee_id === currentUser.id;
+      const detail = {
+        leave_type: r.leave_type || '',
+        start_date: r.start_date,
+        end_date: r.end_date,
+        number_of_days: r.number_of_days,
+        reason: r.reason,
+      };
       dates.forEach((dateStr) => {
         if (isMe) {
           myLeaveDates.add(dateStr);
+          const arr = myLeaveDetailsByDate.get(dateStr) || [];
+          if (!arr.some((d) => d.start_date === detail.start_date && d.end_date === detail.end_date)) {
+            arr.push(detail);
+            myLeaveDetailsByDate.set(dateStr, arr);
+          }
         } else {
           const arr = teamLeaveByDate.get(dateStr) || [];
           if (!arr.includes(name)) arr.push(name);
           teamLeaveByDate.set(dateStr, arr);
+          const detailArr = teamLeaveDetailsByDate.get(dateStr) || [];
+          if (!detailArr.some((d) => d.name === name && d.start_date === detail.start_date)) {
+            detailArr.push({ name, leave_type: detail.leave_type, start_date: detail.start_date, end_date: detail.end_date });
+            teamLeaveDetailsByDate.set(dateStr, detailArr);
+          }
         }
       });
     });
-    setCalendarLeaveData({ myLeaveDates, teamLeaveByDate });
+
+    const TRIP_TYPE_LABELS: Record<string, string> = {
+      work_visit_domestic: 'Work Visit (Domestic)',
+      work_visit_overseas: 'Work Visit (Overseas)',
+      training: 'Training',
+    };
+
+    (tripRes.data || []).forEach((r: any) => {
+      const dates = getWorkingDatesInRange(r.start_date, r.end_date);
+      const name = r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown';
+      const isMe = r.employee_id === currentUser.id;
+      const detail = {
+        trip_type: TRIP_TYPE_LABELS[r.trip_type ?? ''] ?? r.trip_type ?? '',
+        destination: r.destination || '',
+        purpose: r.purpose,
+        start_date: r.start_date,
+        end_date: r.end_date,
+      };
+      dates.forEach((dateStr) => {
+        if (isMe) {
+          myBusinessTripDates.add(dateStr);
+          const arr = myBusinessTripDetailsByDate.get(dateStr) || [];
+          if (!arr.some((d) => d.start_date === detail.start_date && d.end_date === detail.end_date)) {
+            arr.push(detail);
+            myBusinessTripDetailsByDate.set(dateStr, arr);
+          }
+        } else {
+          const arr = teamBusinessTripByDate.get(dateStr) || [];
+          if (!arr.includes(name)) arr.push(name);
+          teamBusinessTripByDate.set(dateStr, arr);
+          const detailArr = teamBusinessTripDetailsByDate.get(dateStr) || [];
+          if (!detailArr.some((d) => d.name === name && d.start_date === detail.start_date)) {
+            detailArr.push({ name, trip_type: detail.trip_type, destination: detail.destination, start_date: detail.start_date, end_date: detail.end_date });
+            teamBusinessTripDetailsByDate.set(dateStr, detailArr);
+          }
+        }
+      });
+    });
+
+    setCalendarLeaveData({
+      myLeaveDates,
+      myBusinessTripDates,
+      teamLeaveByDate,
+      teamBusinessTripByDate,
+      myLeaveDetailsByDate,
+      myBusinessTripDetailsByDate,
+      teamLeaveDetailsByDate,
+      teamBusinessTripDetailsByDate,
+    });
   }, [currentUser?.id, currentUser?.roles]);
 
   const fetchEmployeesAndCompany = useCallback(async () => {
@@ -796,24 +904,68 @@ const Dashboard = () => {
                 for (let d = 1; d <= daysInMonth; d++) {
                   const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
                   const isMyLeave = calendarLeaveData.myLeaveDates.has(dateStr);
+                  const isMyBusinessTrip = calendarLeaveData.myBusinessTripDates.has(dateStr);
                   const teamOnLeave = calendarLeaveData.teamLeaveByDate.get(dateStr) || [];
+                  const teamOnBusinessTrip = calendarLeaveData.teamBusinessTripByDate.get(dateStr) || [];
                   const hasTeamLeave = teamOnLeave.length > 0;
-                  const hasLeave = isMyLeave || hasTeamLeave;
-                  const tooltipText = isMyLeave
-                    ? `You're on leave`
-                    : hasTeamLeave
-                      ? `${teamOnLeave.length} on leave: ${teamOnLeave.join(', ')}`
-                      : null;
+                  const hasTeamBusinessTrip = teamOnBusinessTrip.length > 0;
+                  const hasLeave = isMyLeave || isMyBusinessTrip || hasTeamLeave || hasTeamBusinessTrip;
+                  const tooltipText = isMyBusinessTrip
+                    ? `You're on business trip`
+                    : isMyLeave
+                      ? `You're on leave`
+                      : hasTeamBusinessTrip || hasTeamLeave
+                        ? [
+                            hasTeamLeave ? `${teamOnLeave.length} on leave: ${teamOnLeave.join(', ')}` : null,
+                            hasTeamBusinessTrip ? `${teamOnBusinessTrip.length} on business trip: ${teamOnBusinessTrip.join(', ')}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')
+                        : null;
+                  const handleCellClick = hasLeave
+                    ? () =>
+                        setCalendarDateDialog({
+                          dateStr,
+                          dateLabel: new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric',
+                          }),
+                          isMyLeave,
+                          isMyBusinessTrip,
+                          teamOnLeave,
+                          teamOnBusinessTrip,
+                          myLeaveDetails: calendarLeaveData.myLeaveDetailsByDate.get(dateStr) || [],
+                          myBusinessTripDetails: calendarLeaveData.myBusinessTripDetailsByDate.get(dateStr) || [],
+                          teamLeaveDetails: calendarLeaveData.teamLeaveDetailsByDate.get(dateStr) || [],
+                          teamBusinessTripDetails: calendarLeaveData.teamBusinessTripDetailsByDate.get(dateStr) || [],
+                        })
+                    : undefined;
                   const cell = (
                     <div
+                      role={hasLeave ? 'button' : undefined}
+                      tabIndex={hasLeave ? 0 : undefined}
+                      onClick={handleCellClick}
+                      onKeyDown={
+                        hasLeave
+                          ? (e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleCellClick?.();
+                              }
+                            }
+                          : undefined
+                      }
                       className={cn(
                         'aspect-square flex flex-col items-center justify-center text-sm rounded-md transition-colors',
+                        hasLeave && 'cursor-pointer',
                         isToday(d)
                           ? 'bg-primary text-primary-foreground font-semibold'
                           : hasLeave
-                            ? isMyLeave
-                              ? 'bg-primary/15 text-primary border border-primary/30 font-medium'
-                              : 'bg-amber-100/80 dark:bg-amber-950/50 border border-amber-200/60 text-amber-800 dark:text-amber-300'
+                            ? isMyLeave || isMyBusinessTrip
+                              ? 'bg-primary/15 text-primary border border-primary/30 font-medium hover:bg-primary/20'
+                              : 'bg-amber-100/80 dark:bg-amber-950/50 border border-amber-200/60 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/70'
                             : 'text-foreground hover:bg-muted'
                       )}
                     >
@@ -829,6 +981,9 @@ const Dashboard = () => {
                         <TooltipTrigger asChild>{cell}</TooltipTrigger>
                         <TooltipContent side="top" className="max-w-[220px]">
                           {tooltipText}
+                          {hasLeave && (
+                            <span className="block mt-1 text-[10px] opacity-80">Click for details</span>
+                          )}
                         </TooltipContent>
                       </Tooltip>
                     ) : (
@@ -841,6 +996,135 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog
+          open={!!calendarDateDialog}
+          onOpenChange={(open) => !open && setCalendarDateDialog(null)}
+        >
+          <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-base">
+                {calendarDateDialog?.dateLabel}
+              </DialogTitle>
+              <DialogDescription>
+                {calendarDateDialog?.isMyBusinessTrip && calendarDateDialog?.isMyLeave
+                  ? "You're on leave and business trip"
+                  : calendarDateDialog?.isMyBusinessTrip
+                    ? "You're on business trip"
+                    : calendarDateDialog?.isMyLeave
+                      ? "You're on leave"
+                      : (calendarDateDialog?.teamOnLeave.length ?? 0) + (calendarDateDialog?.teamOnBusinessTrip.length ?? 0) > 0
+                        ? 'Team members on leave or business trip'
+                        : ''}
+              </DialogDescription>
+            </DialogHeader>
+            {calendarDateDialog && (
+              <div className="space-y-4 py-2">
+                {calendarDateDialog.myLeaveDetails.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      Your leave
+                    </p>
+                    <div className="space-y-3 rounded-lg border p-3 bg-muted/30">
+                      {calendarDateDialog.myLeaveDetails.map((l, i) => (
+                        <div key={i} className="text-sm space-y-1">
+                          <p className="font-medium capitalize">{l.leave_type.replace('_', ' ')}</p>
+                          <p className="text-muted-foreground text-xs">
+                            {new Date(l.start_date).toLocaleDateString()} – {new Date(l.end_date).toLocaleDateString()}
+                            {l.number_of_days != null ? ` • ${l.number_of_days} day${l.number_of_days !== 1 ? 's' : ''}` : ''}
+                          </p>
+                          {l.reason && <p className="text-xs text-muted-foreground line-clamp-2">{l.reason}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {calendarDateDialog.myBusinessTripDetails.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <Briefcase className="h-3.5 w-3.5" />
+                      Your business trip
+                    </p>
+                    <div className="space-y-3 rounded-lg border p-3 bg-muted/30">
+                      {calendarDateDialog.myBusinessTripDetails.map((t, i) => (
+                        <div key={i} className="text-sm space-y-1">
+                          <p className="font-medium">{t.trip_type || 'Business trip'}</p>
+                          <p className="text-muted-foreground text-xs">{t.destination}</p>
+                          <p className="text-muted-foreground text-xs">
+                            {new Date(t.start_date).toLocaleDateString()} – {new Date(t.end_date).toLocaleDateString()}
+                          </p>
+                          {t.purpose && <p className="text-xs text-muted-foreground line-clamp-2">{t.purpose}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(calendarDateDialog.teamLeaveDetails.length > 0 || calendarDateDialog.teamBusinessTripDetails.length > 0) && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Team</p>
+                    {calendarDateDialog.teamLeaveDetails.length > 0 && (
+                      <div className="space-y-2 rounded-lg border p-3 bg-muted/30">
+                        {calendarDateDialog.teamLeaveDetails.map((l, i) => (
+                          <div key={i} className="text-sm space-y-0.5">
+                            <p className="font-medium">{l.name}</p>
+                            <p className="text-muted-foreground text-xs capitalize">{l.leave_type.replace('_', ' ')}</p>
+                            <p className="text-muted-foreground text-xs">
+                              {new Date(l.start_date).toLocaleDateString()} – {new Date(l.end_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {calendarDateDialog.teamBusinessTripDetails.length > 0 && (
+                      <div className="space-y-2 rounded-lg border p-3 bg-muted/30 mt-2">
+                        {calendarDateDialog.teamBusinessTripDetails.map((t, i) => (
+                          <div key={i} className="text-sm space-y-0.5">
+                            <p className="font-medium">{t.name}</p>
+                            <p className="text-muted-foreground text-xs">{t.trip_type || 'Business trip'} • {t.destination}</p>
+                            <p className="text-muted-foreground text-xs">
+                              {new Date(t.start_date).toLocaleDateString()} – {new Date(t.end_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2 pt-2 border-t">
+                  {(calendarDateDialog.isMyLeave || calendarDateDialog.teamOnLeave.length > 0) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setCalendarDateDialog(null);
+                        navigate(currentUser?.roles?.some((r) => ['super_admin', 'admin', 'supervisor', 'manager'].includes(r)) ? '/dashboard/leave?tab=approval' : '/dashboard/leave');
+                      }}
+                    >
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      Go to Leave
+                    </Button>
+                  )}
+                  {(calendarDateDialog.isMyBusinessTrip || calendarDateDialog.teamOnBusinessTrip.length > 0) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setCalendarDateDialog(null);
+                        navigate('/dashboard/business-trip');
+                      }}
+                    >
+                      <Briefcase className="h-3.5 w-3.5" />
+                      Go to Business Trips
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <Card>
           <CardHeader className="pb-2">

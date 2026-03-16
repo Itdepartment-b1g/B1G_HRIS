@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
-import { Loader2, Plus, FileText, RefreshCw, Calendar, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Wallet, Baby } from 'lucide-react';
+import { Loader2, Plus, FileText, RefreshCw, Calendar, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Baby, Clock } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -31,10 +31,22 @@ const ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> 
   sl: HeartPulse,
   pto: Briefcase,
   lwop: CalendarX,
+  cto: Clock,
   maternity: Baby,
   paternity: Baby,
 };
 const DEFAULT_ICON = Calendar;
+
+/** Per-type color accent (left border) for balance cards */
+const BORDER_BY_CODE: Record<string, string> = {
+  vl: 'border-l-emerald-500',
+  sl: 'border-l-rose-500',
+  pto: 'border-l-amber-500',
+  cto: 'border-l-sky-500',
+  maternity: 'border-l-pink-500',
+  paternity: 'border-l-blue-500',
+  lwop: 'border-l-slate-400',
+};
 
 const DURATION_TYPES = [
   { value: 'fullday', label: 'Full Day' },
@@ -559,51 +571,6 @@ const Leave = () => {
           })}
         </nav>
         ) : (
-        <>
-        <div className="mb-4 rounded-xl border bg-card p-4 shadow-sm">
-          <div className="flex items-center gap-2 mb-3">
-            <Wallet className="h-4 w-4 text-primary" />
-            <span className="text-sm font-medium">My Balances</span>
-          </div>
-          {!isRegular ? (
-            <div className="space-y-1.5">
-              <div className="flex justify-between text-sm">
-                <span className="text-muted-foreground">LWOP used</span>
-                <span className="font-semibold tabular-nums">{balance?.lwop_days_used ?? 0}</span>
-              </div>
-            </div>
-          ) : loading ? (
-            <p className="text-xs text-muted-foreground">Loading...</p>
-          ) : balance ? (
-            <div className="space-y-2">
-              {fileLeaveOptions.filter((t) => t.code !== 'lwop').map((cfg) => {
-                const val = getBalanceForType(balance, cfg);
-                const label = ['vl', 'sl', 'pto'].includes(cfg.code) ? cfg.code.toUpperCase() : cfg.name;
-                return (
-                  <div key={cfg.code} className="flex justify-between items-center text-sm">
-                    <span className="text-muted-foreground truncate">{label}</span>
-                    <span className="font-semibold tabular-nums shrink-0 ml-2">{val}</span>
-                  </div>
-                );
-              })}
-              {fileLeaveOptions.some((t) => t.code === 'lwop') && (
-                <div className="flex justify-between items-center text-sm pt-1 border-t">
-                  <span className="text-muted-foreground">LWOP used</span>
-                  <span className="font-semibold tabular-nums">{balance?.lwop_days_used ?? 0}</span>
-                </div>
-              )}
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground">No balance record</p>
-          )}
-          <Link
-            to="/dashboard/leave-balance"
-            className="mt-3 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
-          >
-            View full balance <ChevronRight className="h-3 w-3" />
-          </Link>
-        </div>
-
         <nav className="flex flex-col gap-0.5">
           {sidebarLeaveItems.map((item) => {
             const Icon = item.icon;
@@ -636,15 +603,14 @@ const Leave = () => {
             );
           })}
         </nav>
-        </>
         )}
       </aside>
 
       {/* Main content */}
-      <div className="flex-1 min-w-0 min-h-0 overflow-y-auto space-y-6">
+      <div className="flex-1 min-w-0 min-h-0 flex flex-col">
         {/* Mobile: Leave | Approval tabs when sidebar hidden */}
         {canApprove && (
-          <div className="lg:hidden flex rounded-lg bg-muted p-0.5">
+          <div className="lg:hidden flex rounded-lg bg-muted p-0.5 shrink-0">
             <button
               onClick={() => setMainTab('leave')}
               className={cn(
@@ -670,43 +636,88 @@ const Leave = () => {
           </div>
         )}
         {mainTab === 'approval' ? (
-          <LeaveApprovals
-            embedded
-            filterCode={selectedApprovalLeaveType}
-            onFilterChange={setSelectedApprovalLeaveType}
-          />
-        ) : (
-        <>
-        {/* Mobile: balance summary + leave type filter */}
-        <div className="lg:hidden space-y-3">
-          <div className="rounded-lg border bg-card p-3 shadow-sm">
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 min-w-0">
-                <Wallet className="h-4 w-4 text-primary shrink-0" />
-                <span className="text-sm text-muted-foreground truncate">
-                  {!isRegular ? (
-                    <>LWOP Used: {balance?.lwop_days_used ?? 0}</>
-                  ) : balance ? (
-                    <>
-                      {fileLeaveOptions.filter((t) => t.code !== 'lwop').map((cfg) => {
-                        const val = getBalanceForType(balance, cfg);
-                        const label = ['vl', 'sl', 'pto'].includes(cfg.code) ? cfg.code.toUpperCase() : cfg.name;
-                        return `${label} ${val}`;
-                      }).join(' • ')}
-                      {fileLeaveOptions.some((t) => t.code === 'lwop') && ` • LWOP ${balance.lwop_days_used ?? 0} used`}
-                    </>
-                  ) : loading ? (
-                    'Loading...'
-                  ) : (
-                    'No balance record'
-                  )}
-                </span>
-              </div>
-              <Link to="/dashboard/leave-balance" className="text-sm font-medium text-primary shrink-0">
-                View full →
-              </Link>
-            </div>
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <LeaveApprovals
+              embedded
+              filterCode={selectedApprovalLeaveType}
+              onFilterChange={setSelectedApprovalLeaveType}
+            />
           </div>
+        ) : (
+        <div className="flex flex-col flex-1 min-h-0">
+        {/* Leave balances row - horizontal scroll, above leave requests table */}
+        <div className="shrink-0 overflow-x-auto pb-1 -mx-1 scroll-smooth snap-x snap-mandatory">
+          <div className="flex gap-3 min-w-max">
+            {!isRegular ? (
+              <div className="shrink-0 rounded-lg border border-l-4 border-l-slate-400 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-[100px] snap-start">
+                <div className="flex items-center gap-1.5">
+                  <CalendarX className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-xs text-muted-foreground">LWOP used</span>
+                </div>
+                <span className="text-xl font-bold tabular-nums">{balance?.lwop_days_used ?? 0}</span>
+              </div>
+            ) : loading ? (
+              <div className="shrink-0 rounded-lg border bg-muted/50 px-4 py-3 min-w-[100px] snap-start">
+                <span className="text-xs text-muted-foreground">Loading...</span>
+              </div>
+            ) : balance && fileLeaveOptions.filter((t) => t.code !== 'lwop').length > 0 ? (
+              <>
+                {fileLeaveOptions.filter((t) => t.code !== 'lwop').map((cfg) => {
+                  const val = getBalanceForType(balance, cfg);
+                  const label = ['vl', 'sl', 'pto'].includes(cfg.code) ? cfg.code.toUpperCase() : cfg.name;
+                  const maxVal = cfg.cap ?? cfg.annual_entitlement;
+                  const Icon = ICON_BY_CODE[cfg.code] || DEFAULT_ICON;
+                  const borderCls = BORDER_BY_CODE[cfg.code] || 'border-l-slate-400';
+                  const isLow = cfg.code !== 'lwop' && val <= 3;
+                  return (
+                    <div
+                      key={cfg.code}
+                      className={cn(
+                        'shrink-0 rounded-lg border border-l-4 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-[100px] hover:bg-muted/30 transition-colors snap-start',
+                        borderCls,
+                        isLow && 'ring-1 ring-amber-200'
+                      )}
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <span className="text-xs text-muted-foreground truncate max-w-[90px]">{label}</span>
+                      </div>
+                      <span className="text-xl font-bold tabular-nums">{val}</span>
+                      {maxVal != null && cfg.code !== 'lwop' && (
+                        <span className="text-[11px] text-muted-foreground">of {maxVal} days</span>
+                      )}
+                    </div>
+                  );
+                })}
+                {fileLeaveOptions.some((t) => t.code === 'lwop') && (
+                  <div className="shrink-0 rounded-lg border border-l-4 border-l-slate-400 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-[100px] snap-start">
+                    <div className="flex items-center gap-1.5">
+                      <CalendarX className="h-4 w-4 text-muted-foreground" />
+                      <span className="text-xs text-muted-foreground">LWOP used</span>
+                    </div>
+                    <span className="text-xl font-bold tabular-nums">{balance?.lwop_days_used ?? 0}</span>
+                  </div>
+                )}
+                <Link
+                  to="/dashboard/leave-balance"
+                  className="shrink-0 rounded-lg border border-dashed border-muted-foreground/30 px-4 py-3 flex items-center justify-center gap-1 text-xs font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors min-w-[100px] snap-start"
+                >
+                  View full balance <ChevronRight className="h-3 w-3" />
+                </Link>
+              </>
+            ) : (
+              <Link
+                to="/dashboard/leave-balance"
+                className="shrink-0 rounded-lg border border-dashed border-muted-foreground/30 px-4 py-3 flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors min-w-[100px] snap-start"
+              >
+                View full balance <ChevronRight className="h-3 w-3" />
+              </Link>
+            )}
+          </div>
+        </div>
+
+        {/* Mobile: leave type filter */}
+        <div className="lg:hidden shrink-0">
           <div className="flex gap-2 overflow-x-auto pb-1 -mx-1">
           {sidebarLeaveItems.map((item) => {
             const Icon = item.icon;
@@ -730,7 +741,8 @@ const Leave = () => {
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          <div className="space-y-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between">
               <CardTitle className="text-base">My Leave Requests</CardTitle>
@@ -829,6 +841,7 @@ const Leave = () => {
             </CardContent>
           </Card>
 
+          </div>
         </div>
 
       <Dialog open={fileDialogOpen} onOpenChange={setFileDialogOpen}>
@@ -1093,7 +1106,7 @@ const Leave = () => {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-        </>
+        </div>
         )}
       </div>
     </div>
