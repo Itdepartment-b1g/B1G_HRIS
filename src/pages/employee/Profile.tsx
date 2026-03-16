@@ -1,5 +1,5 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 const EmployeeProfile = () => {
@@ -21,6 +21,7 @@ const EmployeeProfile = () => {
         <CardContent className="space-y-6">
           <div className="flex items-center gap-4">
             <Avatar className="h-20 w-20">
+              <AvatarImage src={currentUser?.avatar_url ?? undefined} alt="" />
               <AvatarFallback className="bg-primary/10 text-primary text-2xl font-semibold">
                 {currentUser.first_name[0]}{currentUser.last_name[0]}
               </AvatarFallback>

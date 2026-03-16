@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Cake } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Employee } from '@/types';
@@ -38,6 +38,7 @@ const BirthdaysPage = () => {
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50"
                 >
                   <Avatar className="h-12 w-12">
+                    <AvatarImage src={emp.avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                       {emp.first_name[0]}
                       {emp.last_name[0]}

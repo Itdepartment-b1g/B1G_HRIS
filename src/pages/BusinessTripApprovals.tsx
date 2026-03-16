@@ -3,7 +3,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Loader2, Check, X, MapPin, Eye, Paperclip, Briefcase, CalendarDays } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -34,6 +34,7 @@ function formatDate(dateStr: string) {
 
 interface BusinessTripWithEmployee extends BusinessTrip {
   employee_name: string;
+  employee_avatar_url?: string | null;
 }
 
 interface BusinessTripApprovalsProps {
@@ -80,7 +81,7 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
     const { data } = await supabase
       .from('business_trips')
       .select(
-        '*, employee:employees!employee_id(first_name, last_name), approver:employees!approved_by(first_name, last_name)'
+        '*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)'
       )
       .in('employee_id', ids)
       .order('start_date', { ascending: false })
@@ -91,6 +92,10 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
         r.employee && typeof r.employee === 'object' && 'first_name' in r.employee && 'last_name' in r.employee
           ? `${(r.employee as { first_name: string }).first_name} ${(r.employee as { last_name: string }).last_name}`
           : 'Unknown',
+      employee_avatar_url:
+        r.employee && typeof r.employee === 'object' && 'avatar_url' in r.employee
+          ? (r.employee as { avatar_url: string | null }).avatar_url
+          : null,
       approver_name:
         r.approver && typeof r.approver === 'object' && 'first_name' in r.approver && 'last_name' in r.approver
           ? `${(r.approver as { first_name: string }).first_name} ${(r.approver as { last_name: string }).last_name}`
@@ -168,6 +173,7 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   <Avatar className="h-10 w-10 shrink-0">
+                    <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                       {r.employee_name.split(' ').map((n) => n[0]).join('')}
                     </AvatarFallback>

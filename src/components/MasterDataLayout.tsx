@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
-import { Users, Network, Clock, Settings, ChevronRight, Briefcase, MapPin, CalendarDays, Target, Wallet, CalendarClock } from 'lucide-react';
+import { Users, Network, Clock, Settings, ChevronRight, Briefcase, MapPin, CalendarDays, Target, Wallet, CalendarClock, GitBranch } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 
@@ -24,6 +24,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { path: '/dashboard/master-data/employees', label: 'Employee List', icon: Users, description: 'Manage all employees' },
       { path: '/dashboard/master-data/departments', label: 'Department', icon: Network, description: 'Department management' },
+      { path: '/dashboard/master-data/org-structure', label: 'Org Structure', icon: GitBranch, description: 'Visual org chart with drag-and-drop' },
       { path: '/dashboard/master-data/employment-status', label: 'Employment Status', icon: Briefcase, description: 'Status types & duration' },
       { path: '/dashboard/master-data/positions', label: 'Position', icon: Target, description: 'Job titles & positions' },
     ],
