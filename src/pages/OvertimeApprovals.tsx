@@ -3,7 +3,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Loader2, Check, X, Calendar, Clock, Eye, Paperclip, Timer } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -35,6 +35,7 @@ function formatTime(timeStr: string) {
 
 interface OvertimeRequestWithEmployee extends OvertimeRequest {
   employee_name: string;
+  employee_avatar_url?: string | null;
 }
 
 interface OvertimeApprovalsProps {
@@ -82,13 +83,14 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
     }
     const { data } = await supabase
       .from('overtime_requests')
-      .select('*, employee:employees!employee_id(first_name, last_name), approver:employees!approved_by(first_name, last_name)')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)')
       .in('employee_id', ids)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
     const withName = (data || []).map((r: any) => ({
       ...r,
       employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
+      employee_avatar_url: r.employee?.avatar_url ?? null,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
     }));
     setAllRequests(withName);
@@ -163,6 +165,7 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
               <div className="flex items-start justify-between gap-4">
                 <div className="flex items-start gap-3 min-w-0 flex-1">
                   <Avatar className="h-10 w-10 shrink-0">
+                    <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                       {r.employee_name.split(' ').map((n) => n[0]).join('')}
                     </AvatarFallback>

@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Loader2, Mail, Phone, Briefcase, Building2, Calendar, Hash, Clock, Users } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Loader2, Mail, Phone, Briefcase, Building2, Calendar, Hash, Clock, Users, Camera } from 'lucide-react';
+import { toast } from 'sonner';
 
 interface ShiftInfo {
   name: string;
@@ -17,6 +19,7 @@ interface SupervisorInfo {
   first_name: string;
   last_name: string;
   position: string | null;
+  avatar_url: string | null;
 }
 
 function formatTime(time: string): string {
@@ -47,11 +50,16 @@ const InfoRow = ({ icon: Icon, label, value }: { icon: React.ElementType; label:
   </div>
 );
 
+const MAX_AVATAR_SIZE_MB = 2;
+const ALLOWED_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
+
 const PersonalData = () => {
-  const { user, loading } = useCurrentUser();
+  const { user, loading, refetch } = useCurrentUser();
   const [shifts, setShifts] = useState<ShiftInfo[]>([]);
   const [supervisor, setSupervisor] = useState<SupervisorInfo | null>(null);
   const [loadingExtra, setLoadingExtra] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -67,7 +75,7 @@ const PersonalData = () => {
         user.supervisor_id
           ? supabase
               .from('employees')
-              .select('first_name, last_name, position')
+              .select('first_name, last_name, position, avatar_url')
               .eq('id', user.supervisor_id)
               .maybeSingle()
           : Promise.resolve({ data: null }),
@@ -83,6 +91,45 @@ const PersonalData = () => {
 
     loadExtra();
   }, [user]);
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !user) return;
+    e.target.value = '';
+
+    if (!ALLOWED_TYPES.includes(file.type)) {
+      toast.error('Please use JPEG, PNG, or WebP format');
+      return;
+    }
+    if (file.size > MAX_AVATAR_SIZE_MB * 1024 * 1024) {
+      toast.error(`Image must be under ${MAX_AVATAR_SIZE_MB}MB`);
+      return;
+    }
+
+    setUploading(true);
+    try {
+      const ext = file.name.split('.').pop() || 'jpg';
+      const path = `${user.id}/avatar.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from('profile-pictures')
+        .upload(path, file, { contentType: file.type, upsert: true });
+      if (uploadErr) throw uploadErr;
+
+      const { data: urlData } = supabase.storage.from('profile-pictures').getPublicUrl(path);
+      const { error: updateErr } = await supabase
+        .from('employees')
+        .update({ avatar_url: urlData.publicUrl })
+        .eq('id', user.id);
+      if (updateErr) throw updateErr;
+
+      await refetch();
+      toast.success('Profile photo updated');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Failed to upload photo');
+    } finally {
+      setUploading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -111,11 +158,37 @@ const PersonalData = () => {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
-            <Avatar className="h-20 w-20 border-2 border-primary/20">
-              <AvatarFallback className="bg-primary/10 text-primary text-2xl font-bold">
-                {user.first_name[0]}{user.last_name[0]}
-              </AvatarFallback>
-            </Avatar>
+            <div className="relative group">
+              <Avatar className="h-20 w-20 border-2 border-primary/20">
+                <AvatarImage src={user.avatar_url ?? undefined} alt="" />
+                <AvatarFallback className="bg-primary/10 text-primary text-2xl font-bold">
+                  {user.first_name[0]}{user.last_name[0]}
+                </AvatarFallback>
+              </Avatar>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                onChange={handleAvatarUpload}
+                disabled={uploading}
+              />
+              <Button
+                type="button"
+                variant="secondary"
+                size="icon"
+                className="absolute bottom-0 right-0 h-8 w-8 rounded-full shadow-md"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+                title="Upload photo"
+              >
+                {uploading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Camera className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
             <div className="flex-1 min-w-0">
               <h2 className="text-xl font-bold text-foreground">
                 {user.first_name} {user.last_name}
@@ -174,6 +247,7 @@ const PersonalData = () => {
             ) : supervisor ? (
               <div className="flex items-center gap-3">
                 <Avatar className="h-10 w-10">
+                  <AvatarImage src={supervisor.avatar_url ?? undefined} alt="" />
                   <AvatarFallback className="bg-amber-100 text-amber-700 text-sm font-semibold">
                     {supervisor.first_name[0]}{supervisor.last_name[0]}
                   </AvatarFallback>

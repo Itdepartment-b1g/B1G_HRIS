@@ -4,7 +4,7 @@ import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRi
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -75,7 +75,7 @@ const Dashboard = () => {
 
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
+  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; author_avatar_url?: string | null; created_at: string }>>([]);
   const [pendingSurveys, setPendingSurveys] = useState<Array<{ id: string; title: string; description?: string | null }>>([]);
   const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
   const [surveyDialogId, setSurveyDialogId] = useState<string | null>(null);
@@ -102,6 +102,7 @@ const Dashboard = () => {
     id: string;
     type: 'leave_request';
     employee_name: string;
+    employee_avatar_url?: string | null;
     leave_type: string;
     start_date: string;
     end_date: string;
@@ -147,7 +148,7 @@ const Dashboard = () => {
   const fetchAnnouncements = useCallback(async () => {
     const { data } = await supabase
       .from('announcements')
-      .select('*, author:employees!author_id(first_name, last_name)')
+      .select('*, author:employees!author_id(first_name, last_name, avatar_url)')
       .order('created_at', { ascending: false })
       .limit(10);
     setAnnouncements((data || []).map((a: any) => ({
@@ -155,6 +156,7 @@ const Dashboard = () => {
       title: a.title,
       content: a.content,
       author: a.author ? `${a.author.first_name} ${a.author.last_name}` : 'Unknown',
+      author_avatar_url: a.author?.avatar_url ?? null,
       created_at: a.created_at,
     })));
   }, []);
@@ -195,7 +197,7 @@ const Dashboard = () => {
     if (!currentUser?.id) return;
     let query = supabase
       .from('leave_requests')
-      .select('*, employee:employees!employee_id(first_name, last_name), approver:employees!approved_by(first_name, last_name)')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)')
       .order('created_at', { ascending: false })
       .limit(15);
     const isSuperAdmin = currentUser.roles?.includes('super_admin');
@@ -224,6 +226,7 @@ const Dashboard = () => {
       id: r.id,
       type: 'leave_request' as const,
       employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
+      employee_avatar_url: r.employee?.avatar_url ?? null,
       leave_type: r.leave_type || '',
       start_date: r.start_date,
       end_date: r.end_date,
@@ -681,6 +684,7 @@ const Dashboard = () => {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3 min-w-0">
               <Avatar className="h-10 w-10 shrink-0">
+                <AvatarImage src={currentUser.avatar_url} alt="" />
                 <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
                   {currentUser.first_name[0]}{currentUser.last_name[0]}
                 </AvatarFallback>
@@ -798,6 +802,7 @@ const Dashboard = () => {
                 <p className="text-xs font-semibold text-foreground mb-2">Supervisor</p>
                 <div className="flex flex-col items-center">
                   <Avatar className="h-14 w-14 border-2 border-primary/20">
+                    <AvatarImage src={supervisor.avatar_url} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                       {supervisor.first_name[0]}{supervisor.last_name[0]}
                     </AvatarFallback>
@@ -814,6 +819,7 @@ const Dashboard = () => {
                 {coworkers.slice(0, 4).map((cw) => (
                   <div key={cw.id} className="flex flex-col items-center shrink-0">
                     <Avatar className="h-10 w-10">
+                      <AvatarImage src={cw.avatar_url} alt="" />
                       <AvatarFallback className="bg-muted text-muted-foreground text-xs">
                         {cw.first_name[0]}{cw.last_name[0]}
                       </AvatarFallback>
@@ -845,6 +851,7 @@ const Dashboard = () => {
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10">
+                            <AvatarImage src={item.author_avatar_url} alt="" />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                               {item.author.split(' ').map((n) => n[0]).join('')}
                             </AvatarFallback>
@@ -868,6 +875,7 @@ const Dashboard = () => {
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
                           <Avatar className="h-10 w-10">
+                            <AvatarImage src={item.employee_avatar_url} alt="" />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                               {item.employee_name.split(' ').map((n) => n[0]).join('')}
                             </AvatarFallback>

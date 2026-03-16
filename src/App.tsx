@@ -7,6 +7,7 @@ import Login from "./pages/Login";
 import DashboardLayout from "./components/DashboardLayout";
 import EmployeeLayout from "./components/EmployeeLayout";
 import MasterDataLayout from "./components/MasterDataLayout";
+import CompanyLayout from "./components/CompanyLayout";
 import { RequireRole } from "./components/RequireRole";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
@@ -26,10 +27,11 @@ import {
   EventScheduling,
   Reports,
   MyPayslip,
-  SettingsPage,
 } from "./pages/PlaceholderPages";
 import Settings from "./pages/Settings";
 import Departments from "./pages/Departments";
+import OrgStructure from "./pages/OrgStructure";
+import CompanyProfile from "./pages/CompanyProfile";
 import Shifts from "./pages/Shifts";
 import EmploymentStatus from "./pages/EmploymentStatus";
 import WorkLocations from "./pages/WorkLocations";
@@ -87,6 +89,7 @@ const App = () => (
               <Route index element={<Navigate to="employees" replace />} />
               <Route path="employees" element={<Employees />} />
               <Route path="departments" element={<Departments />} />
+              <Route path="org-structure" element={<OrgStructure />} />
               <Route path="employment-status" element={<EmploymentStatus />} />
               <Route path="positions" element={<Positions />} />
               <Route path="shifts" element={<Shifts />} />
@@ -100,7 +103,11 @@ const App = () => (
               <Route path="personal-data" element={<PersonalData />} />
               <Route path="requests" element={<EmployeeRequests />} />
             </Route>
-            <Route path="company" element={<SettingsPage />} />
+            <Route path="company" element={<CompanyLayout />}>
+              <Route index element={<Navigate to="org-structure" replace />} />
+              <Route path="org-structure" element={<OrgStructure />} />
+              <Route path="profile" element={<CompanyProfile />} />
+            </Route>
             <Route path="settings" element={<Settings />} />
             <Route path="features" element={<FeaturesPage />} />
             <Route path="feeds" element={<FeedsPage />} />

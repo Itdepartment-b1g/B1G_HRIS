@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import type { Employee } from '@/types';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
@@ -221,6 +221,7 @@ const DashboardLayout = () => {
                 className="flex items-center gap-2"
               >
                 <Avatar className="h-8 w-8 border-2 border-white/30">
+                  <AvatarImage src={user?.avatar_url ?? undefined} alt="" />
                   <AvatarFallback className="bg-primary text-white text-xs font-semibold">
                     {initials}
                   </AvatarFallback>

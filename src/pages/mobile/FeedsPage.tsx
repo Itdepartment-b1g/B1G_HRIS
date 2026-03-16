@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { supabase } from '@/lib/supabase';
 
 const FeedsPage = () => {
-  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
+  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; author_avatar_url?: string | null; created_at: string }>>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -12,7 +12,7 @@ const FeedsPage = () => {
       const today = new Date().toISOString().slice(0, 10);
       const { data } = await supabase
         .from('announcements')
-        .select('id, title, content, created_at, publish_date, expiration_date, author:employees!author_id(first_name, last_name)')
+        .select('id, title, content, created_at, publish_date, expiration_date, author:employees!author_id(first_name, last_name, avatar_url)')
         .order('created_at', { ascending: false })
         .limit(20);
       const filtered = (data || []).filter((a: any) => {
@@ -27,6 +27,7 @@ const FeedsPage = () => {
         title: a.title,
         content: a.content,
         author: a.author ? `${a.author.first_name} ${a.author.last_name}` : 'Unknown',
+        author_avatar_url: a.author?.avatar_url ?? null,
         created_at: a.created_at,
       })));
       setLoading(false);
@@ -50,6 +51,7 @@ const FeedsPage = () => {
               <CardContent className="pt-4 pb-4">
                 <div className="flex items-center gap-3">
                   <Avatar className="h-10 w-10">
+                    <AvatarImage src={a.author_avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
                       {a.author.split(' ').map((n) => n[0]).join('')}
                     </AvatarFallback>

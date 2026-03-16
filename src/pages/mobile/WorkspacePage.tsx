@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { FileText, Cake } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import type { Employee } from '@/types';
@@ -86,6 +86,7 @@ const WorkspacePage = () => {
                   className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50"
                 >
                   <Avatar className="h-12 w-12">
+                    <AvatarImage src={emp.avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                       {emp.first_name[0]}
                       {emp.last_name[0]}
