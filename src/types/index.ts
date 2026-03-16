@@ -78,6 +78,24 @@ export interface LeaveTypeConfigForBalance {
   is_system: boolean;
 }
 
+export type TripType = 'work_visit_domestic' | 'work_visit_overseas' | 'training';
+
+export interface BusinessTrip {
+  id: string;
+  employee_id: string;
+  trip_type?: TripType | null;
+  destination: string;
+  purpose: string | null;
+  start_date: string;
+  end_date: string;
+  attachment_url: string | null;
+  status: 'pending' | 'approved' | 'rejected' | 'completed';
+  approved_by?: string | null;
+  approved_at?: string | null;
+  approver_name?: string | null;
+  employee_name?: string;
+}
+
 export interface OvertimeRequest {
   id: string;
   employee_id: string;
