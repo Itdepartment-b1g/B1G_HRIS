@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { CalendarClock, Plus, Pencil, Trash2, Loader2, Eye } from 'lucide-react';
 import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
@@ -31,6 +32,7 @@ interface LeaveTypeConfig {
   cap: number | null;
   sort_order: number;
   is_system: boolean;
+  pay_type: 'paid' | 'unpaid';
   created_at: string;
 }
 
@@ -70,6 +72,7 @@ const LeaveBalances = () => {
   const [formEntitlement, setFormEntitlement] = useState('');
   const [formResets, setFormResets] = useState(true);
   const [formCap, setFormCap] = useState('');
+  const [formPayType, setFormPayType] = useState<'paid' | 'unpaid'>('paid');
   const [formEligibility, setFormEligibility] = useState<Array<{ employment_status_id: string; gender_filter: string }>>([]);
   const [editing, setEditing] = useState<LeaveTypeConfig | null>(null);
   const [viewing, setViewing] = useState<LeaveTypeConfig | null>(null);
@@ -140,6 +143,7 @@ const LeaveBalances = () => {
     setFormEntitlement('');
     setFormResets(true);
     setFormCap('');
+    setFormPayType('paid');
     setFormEligibility([]);
   };
 
@@ -156,6 +160,7 @@ const LeaveBalances = () => {
     setFormEntitlement(String(c.annual_entitlement));
     setFormResets(c.resets_on_jan1);
     setFormCap(c.cap != null ? String(c.cap) : '');
+    setFormPayType(c.pay_type || 'paid');
     const elig = getEligibilityForConfig(c.id).map((e) => ({
       employment_status_id: e.employment_status_id,
       gender_filter: e.gender_filter,
@@ -204,6 +209,7 @@ const LeaveBalances = () => {
         annual_entitlement: entitlement,
         resets_on_jan1: formResets,
         cap: formCap.trim() ? parseFloat(formCap) : null,
+        pay_type: formPayType,
         sort_order: configs.length + 1,
         is_system: false,
       })
@@ -249,6 +255,7 @@ const LeaveBalances = () => {
         annual_entitlement: entitlement,
         resets_on_jan1: formResets,
         cap: formCap.trim() ? parseFloat(formCap) : null,
+        pay_type: formPayType,
         updated_at: new Date().toISOString(),
       })
       .eq('id', editing.id);
@@ -333,6 +340,27 @@ const LeaveBalances = () => {
           rows={2}
           className="resize-none w-full"
         />
+      </div>
+
+      <div className="space-y-2">
+        <Label>Pay Type <span className="text-red-500">*</span></Label>
+        <RadioGroup
+          value={formPayType}
+          onValueChange={(v) => setFormPayType(v as 'paid' | 'unpaid')}
+          className="flex gap-6"
+        >
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <RadioGroupItem value="paid" />
+            <span>Paid</span>
+          </label>
+          <label className="flex items-center gap-2 cursor-pointer text-sm">
+            <RadioGroupItem value="unpaid" />
+            <span>Unpaid</span>
+          </label>
+        </RadioGroup>
+        <p className="text-xs text-muted-foreground">
+          <strong>Paid</strong> — counts as present in payroll (full shift hours). <strong>Unpaid</strong> — counts as absence (0 hours).
+        </p>
       </div>
 
       <div className="space-y-4">
@@ -476,6 +504,7 @@ const LeaveBalances = () => {
                   <TableRow>
                     <TableHead>Code</TableHead>
                     <TableHead>Name</TableHead>
+                    <TableHead>Pay Type</TableHead>
                     <TableHead>Entitlement</TableHead>
                     <TableHead>Resets Jan 1</TableHead>
                     <TableHead>Cap</TableHead>
@@ -494,6 +523,16 @@ const LeaveBalances = () => {
                           {c.is_system && (
                             <Badge variant="outline" className="ml-1.5 text-xs">System</Badge>
                           )}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={c.pay_type === 'paid'
+                              ? 'bg-green-50 text-green-700 border-green-200'
+                              : 'bg-orange-50 text-orange-700 border-orange-200'}
+                          >
+                            {c.pay_type === 'paid' ? 'Paid' : 'Unpaid'}
+                          </Badge>
                         </TableCell>
                         <TableCell>{c.annual_entitlement} days</TableCell>
                         <TableCell>{c.resets_on_jan1 ? 'Yes' : 'No'}</TableCell>
@@ -544,7 +583,7 @@ const LeaveBalances = () => {
                   })}
                   {filtered.length === 0 && (
                     <TableRow>
-                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                         No leave types configured. Add one to get started.
                       </TableCell>
                     </TableRow>
@@ -573,6 +612,19 @@ const LeaveBalances = () => {
               <div className="grid grid-cols-2 gap-4 text-sm">
                 <div><span className="text-muted-foreground">Code</span><p className="font-mono font-medium">{viewing.code}</p></div>
                 <div><span className="text-muted-foreground">Name</span><p className="font-medium">{viewing.name}</p></div>
+                <div>
+                  <span className="text-muted-foreground">Pay Type</span>
+                  <p>
+                    <Badge
+                      variant="outline"
+                      className={viewing.pay_type === 'paid'
+                        ? 'bg-green-50 text-green-700 border-green-200'
+                        : 'bg-orange-50 text-orange-700 border-orange-200'}
+                    >
+                      {viewing.pay_type === 'paid' ? 'Paid' : 'Unpaid'}
+                    </Badge>
+                  </p>
+                </div>
                 <div><span className="text-muted-foreground">Annual Entitlement</span><p>{viewing.annual_entitlement} days</p></div>
                 <div><span className="text-muted-foreground">Resets on Jan 1</span><p>{viewing.resets_on_jan1 ? 'Yes' : 'No'}</p></div>
                 <div><span className="text-muted-foreground">Cap</span><p>{viewing.cap != null ? viewing.cap : 'No cap'}</p></div>

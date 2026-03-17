@@ -2,9 +2,11 @@
  * Attendance Export Report — CSV/XLSX
  * One row per active employee with:
  *   Employee Number, Employee Name,
- *   NoOfHours   — actual hours worked (time_out − time_in − break), capped at net shift hours,
+ *   NoOfHours   — actual hours worked (time_out − time_in − break), capped at net shift hours.
+ *                 For paid leaves (on_leave + pay_type='paid'), full net shift hours are added.
  *   Undertime   — sum of late minutes (past shift start) + early-out minutes (before shift end),
  *   Absences    — absent = 1 day, half_day = 0.5 day.
+ *                 For unpaid leaves (on_leave + pay_type='unpaid'), 1 day is added.
  */
 
 import * as XLSX from 'xlsx';
@@ -18,6 +20,22 @@ function parseTimeToMinutes(timeStr: string): number {
   return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
 }
 
+/** Get minutes from midnight for a timestamptz ISO string in Asia/Manila */
+function getMinutesFromMidnightManila(isoTimestamp: string): number {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Manila',
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const parts = dtf.formatToParts(new Date(isoTimestamp));
+  const h = Number(parts.find((p) => p.type === 'hour')?.value ?? 0);
+  const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
+  const s = Number(parts.find((p) => p.type === 'second')?.value ?? 0);
+  return h * 60 + m + s / 60;
+}
+
 /** Compute net working hours for a shift (gross hours minus break) */
 function computeNetShiftHours(startTime: string, endTime: string, breakHours: number): number {
   const startM = parseTimeToMinutes(startTime);
@@ -26,10 +44,34 @@ function computeNetShiftHours(startTime: string, endTime: string, breakHours: nu
   return Math.max(0, Math.round((gross - breakHours) * 100) / 100);
 }
 
+/** Compute gross shift hours (no break deduction) */
+function computeGrossShiftHours(startTime: string, endTime: string): number {
+  const startM = parseTimeToMinutes(startTime);
+  const endM = parseTimeToMinutes(endTime);
+  const gross = endM >= startM ? (endM - startM) / 60 : (24 * 60 - startM + endM) / 60;
+  return Math.max(0, Math.round(gross * 100) / 100);
+}
+
 /** Get abbreviated weekday name from a YYYY-MM-DD string */
 function getWeekday(dateStr: string): string {
   const d = new Date(dateStr + 'T12:00:00');
   return WEEKDAY_NAMES[d.getDay()];
+}
+
+function computeHalfDayMidpointTime(opts: { start_time: string; end_time: string; break_total_hours?: number }): string {
+  const startM = parseTimeToMinutes(opts.start_time);
+  const endM = parseTimeToMinutes(opts.end_time);
+  const grossMinutes = endM >= startM ? endM - startM : 24 * 60 - startM + endM;
+  const breakMinutes = Math.round((opts.break_total_hours ?? 0) * 60);
+  const netMinutes = Math.max(0, grossMinutes - breakMinutes);
+  const midMinutes = startM + Math.floor(netMinutes / 2) + breakMinutes;
+  const hh = Math.floor((midMinutes % (24 * 60)) / 60)
+    .toString()
+    .padStart(2, '0');
+  const mm = Math.floor(midMinutes % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${hh}:${mm}:00`;
 }
 
 export interface AttendanceReportRow {
@@ -61,14 +103,25 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
 
   if (empError) throw new Error(`Failed to fetch employees: ${empError.message}`);
 
-  // 2. Fetch attendance records in date range (include time_in/time_out for actual hours)
+  // 2. Fetch attendance records in date range (include time_in/time_out + leave_type_code)
   const { data: records, error: recError } = await supabase
     .from('attendance_records')
-    .select('employee_id, date, status, minutes_late, time_in, time_out')
+    .select('employee_id, date, status, minutes_late, time_in, time_out, leave_type_code, leave_duration_type, leave_day_fraction, business_trip_id')
     .gte('date', dateFrom)
     .lte('date', dateTo);
 
   if (recError) throw new Error(`Failed to fetch attendance records: ${recError.message}`);
+
+  // 2b. Fetch leave_type_config to determine pay_type (paid/unpaid) for on_leave records
+  const { data: leaveTypeConfigs } = await supabase
+    .from('leave_type_config')
+    .select('code, pay_type');
+
+  // Build lookup: leave code → pay_type ('paid' | 'unpaid')
+  const payTypeByCode = new Map<string, string>();
+  for (const ltc of leaveTypeConfigs || []) {
+    payTypeByCode.set(ltc.code, ltc.pay_type || 'paid');
+  }
 
   // 3. Fetch employee shifts (to compute net hours per working day)
   const { data: shiftData, error: shiftError } = await supabase
@@ -100,6 +153,56 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
     }
     const curr = agg.get(empId)!;
 
+    // Look up shift for this day (used by NoOfHours, Undertime, and on_leave paid hours)
+    const empShifts = shiftsByEmp.get(empId) || [];
+    const weekday = getWeekday(r.date);
+    const shiftForDay = empShifts.find((s) => !s.days?.length || s.days.includes(weekday)) || empShifts[0];
+    const breakHrs = shiftForDay?.break_total_hours ?? 0;
+
+    // Business Trip: approved trip days are temporarily exempt from time_in/out
+    // Treat as paid present day (full net shift hours), no undertime/late.
+    if ((r as any).business_trip_id) {
+      const netShiftHrs = shiftForDay
+        ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
+        : 8;
+      curr.totalWorkedHours += netShiftHrs;
+      continue;
+    }
+
+    // --- Handle leave credit using pay_type for either:
+    //  - full-day leave rows (status='on_leave')
+    //  - half-day leave rows that remain status='present' but are tagged with leave_type_code + duration
+    //
+    // Business rules (per requirement):
+    //  - Half-day + PAID  : NoOfHours credits FULL shift hours (e.g. 8) regardless of actual worked hours
+    //  - Half-day + UNPAID: NoOfHours counts ONLY actual worked hours (e.g. ~4); unpaid half counts as absence (0.5)
+    const leaveCode = (r as any).leave_type_code as string | null;
+    const leaveFraction = ((r as any).leave_day_fraction as number | null) ?? null;
+    const duration = (r as any).leave_duration_type as string | null;
+    const isHalfDayLeave = duration === 'first_half' || duration === 'second_half' || leaveFraction === 0.5;
+    const isFullDayLeaveRow = r.status === 'on_leave';
+    const isHalfDayTaggedPresent = r.status === 'present' && isHalfDayLeave && !!leaveCode;
+    const payType = leaveCode ? payTypeByCode.get(leaveCode) : 'paid';
+    const netShiftHrs = shiftForDay ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs) : 8;
+    let skipWorkedHoursFromTimeInOut = false;
+
+    if (isFullDayLeaveRow) {
+      if (payType === 'unpaid') curr.absences += 1;
+      else curr.totalWorkedHours += netShiftHrs;
+      continue; // nothing to compute from time_in/out
+    }
+
+    if (isHalfDayTaggedPresent) {
+      if (payType === 'unpaid') {
+        curr.absences += 0.5;
+        // Do NOT add leave hours; only actual work hours will be counted below (from time_in/out)
+      } else {
+        // Paid half-day: credit full shift hours; do not add actual worked hours to avoid double counting
+        curr.totalWorkedHours += netShiftHrs;
+        skipWorkedHoursFromTimeInOut = true;
+      }
+    }
+
     // Absences: absent = 1 day, half_day = 0.5 day
     if (r.status === 'absent') {
       curr.absences += 1;
@@ -107,24 +210,38 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
       curr.absences += 0.5;
     }
 
-    // Look up shift for this day (used by both NoOfHours and Undertime)
-    const empShifts = shiftsByEmp.get(empId) || [];
-    const weekday = getWeekday(r.date);
-    const shiftForDay = empShifts.find((s) => !s.days?.length || s.days.includes(weekday)) || empShifts[0];
-    const breakHrs = shiftForDay?.break_total_hours ?? 0;
-
     // Undertime = late minutes (time_in past shift start) + early-out minutes (time_out before shift end)
     let undertimeMinutes = 0;
 
-    // Late: minutes past shift start
-    if (r.minutes_late && r.minutes_late > 0) {
+    const leaveCodeForUndertime = (r as any).leave_type_code as string | null;
+    const durationForUndertime = (r as any).leave_duration_type as string | null;
+    const isHalfDay = durationForUndertime === 'first_half' || durationForUndertime === 'second_half';
+
+    // Late:
+    // - Normal day: keep existing minutes_late as-is
+    // - Half-day only: recompute late minutes from the half-day working start, applying grace period
+    if (isHalfDay && r.time_in && shiftForDay?.start_time && shiftForDay?.end_time && leaveCodeForUndertime) {
+      const grace = Math.max(0, (shiftForDay as any).grace_period_minutes ?? 0);
+      const workingStart = durationForUndertime === 'first_half'
+        ? computeHalfDayMidpointTime({
+            start_time: shiftForDay.start_time,
+            end_time: shiftForDay.end_time,
+            break_total_hours: breakHrs,
+          })
+        : shiftForDay.start_time;
+      const timeInM = getMinutesFromMidnightManila(r.time_in);
+      const startM = parseTimeToMinutes(workingStart);
+      const late = timeInM > startM + grace ? Math.floor(timeInM - (startM + grace)) : 0;
+      undertimeMinutes += late;
+    } else if (r.minutes_late && r.minutes_late > 0) {
       undertimeMinutes += r.minutes_late;
     }
 
-    // Early out: minutes before shift end
-    if (r.time_out && shiftForDay) {
-      const timeOutDate = new Date(r.time_out);
-      const timeOutMinutes = timeOutDate.getHours() * 60 + timeOutDate.getMinutes() + timeOutDate.getSeconds() / 60;
+    // Early out:
+    // Keep normal-day logic, but for half-day leave we do NOT compute early-out against the full shift,
+    // because the employee is expected to work only a half block.
+    if (!isHalfDay && r.time_out && shiftForDay) {
+      const timeOutMinutes = getMinutesFromMidnightManila(r.time_out);
       const shiftEndMinutes = parseTimeToMinutes(shiftForDay.end_time);
       if (timeOutMinutes < shiftEndMinutes) {
         undertimeMinutes += shiftEndMinutes - timeOutMinutes;
@@ -133,16 +250,18 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
 
     curr.sumUndertimeMinutes += undertimeMinutes;
 
-    // NoOfHours: actual hours worked = (time_out − time_in) minus break, capped at net shift hours
-    if (r.time_in && r.time_out) {
+    // NoOfHours: actual hours worked = (time_out − time_in) minus break (only when span covers the full shift), capped at net shift hours
+    if (!skipWorkedHoursFromTimeInOut && r.time_in && r.time_out) {
       const rawMs = new Date(r.time_out).getTime() - new Date(r.time_in).getTime();
       if (rawMs > 0) {
         const rawHours = rawMs / 3600000;
         const netShiftHrs = shiftForDay
           ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
           : rawHours;
-        // Deduct break from raw hours, but don't go below 0, and cap at net shift hours
-        const actualHrs = Math.min(Math.max(0, rawHours - breakHrs), netShiftHrs);
+        const grossShiftHrs = shiftForDay ? computeGrossShiftHours(shiftForDay.start_time, shiftForDay.end_time) : rawHours;
+        // Only deduct break if the employee worked a span that roughly covers the whole shift
+        const breakDeduction = rawHours >= grossShiftHrs * 0.9 ? breakHrs : 0;
+        const actualHrs = Math.min(Math.max(0, rawHours - breakDeduction), netShiftHrs);
         curr.totalWorkedHours += actualHrs;
       }
     }

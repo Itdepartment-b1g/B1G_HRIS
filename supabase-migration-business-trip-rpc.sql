@@ -120,30 +120,16 @@ BEGIN
 
     FOR v_d IN SELECT d::date FROM generate_series(v_rec.start_date, v_rec.end_date, '1 day'::interval) d
     LOOP
-      -- Business Trip = Present with auto time_in/time_out from employee's shift
+      -- Business Trip = Present and TEMPORARILY EXEMPT from time_in/time_out during approved dates
       v_dow := to_char(v_d, 'Dy');
-      SELECT s.start_time, s.end_time INTO v_shift
-      FROM employee_shifts es
-      JOIN shifts s ON s.id = es.shift_id
-      WHERE es.employee_id = v_rec.employee_id
-        AND s.is_active = true
-        AND (s.days IS NULL OR array_length(s.days, 1) IS NULL OR v_dow = ANY(s.days))
-      ORDER BY s.start_time
-      LIMIT 1;
-
-      IF FOUND THEN
-        v_time_in := (v_d || ' ' || v_shift.start_time::text)::timestamp AT TIME ZONE 'Asia/Manila';
-        v_time_out := (v_d || ' ' || v_shift.end_time::text)::timestamp AT TIME ZONE 'Asia/Manila';
-      ELSE
-        v_time_in := (v_d || ' ' || v_work_start::text)::timestamp AT TIME ZONE 'Asia/Manila';
-        v_time_out := (v_d || ' ' || v_work_end::text)::timestamp AT TIME ZONE 'Asia/Manila';
-      END IF;
+      v_time_in := NULL;
+      v_time_out := NULL;
 
       INSERT INTO attendance_records (employee_id, date, time_in, time_out, status, minutes_late, business_trip_id)
       VALUES (v_rec.employee_id, v_d, v_time_in, v_time_out, 'present'::attendance_status, 0, p_trip_id)
       ON CONFLICT (employee_id, date) DO UPDATE SET
-        time_in = EXCLUDED.time_in,
-        time_out = EXCLUDED.time_out,
+        time_in = NULL,
+        time_out = NULL,
         status = 'present'::attendance_status,
         minutes_late = 0,
         business_trip_id = EXCLUDED.business_trip_id,

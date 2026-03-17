@@ -21,8 +21,7 @@ import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
-import { timeTo12Hour, getAvatarFallbackFromFullName } from '@/lib/utils';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { timeTo12Hour } from '@/lib/utils';
 
 interface RecordRow {
   id: string;
@@ -37,7 +36,6 @@ interface RecordRow {
   time_out: string | null;
   time_in_photo_url: string | null;
   time_out_photo_url: string | null;
-  employee_avatar_url?: string | null;
   lat_in: number | null;
   lng_in: number | null;
   lat_out: number | null;
@@ -48,6 +46,9 @@ interface RecordRow {
   remarks: string | null;
   status: string;
   minutes_late: number | null;
+  leave_type_code: string | null; // e.g. 'vl', 'sl', 'lwop' — only set when status='on_leave'
+  leave_duration_type: 'fullday' | 'first_half' | 'second_half' | null;
+  business_trip_id: string | null;
 }
 
 function parseTimeToMinutes(time: string): number {
@@ -61,6 +62,22 @@ function computeNetWorkingHours(shiftStart: string, shiftEnd: string, breakHours
   const gross = endM >= startM ? (endM - startM) / 60 : (24 * 60 - startM + endM) / 60;
   const net = Math.max(0, gross - breakHours);
   return Math.round(net * 100) / 100;
+}
+
+function computeHalfDayMidpointTime(opts: { start_time: string; end_time: string; break_total_hours?: number }): string {
+  const startM = parseTimeToMinutes(opts.start_time.substring(0, 5));
+  const endM = parseTimeToMinutes(opts.end_time.substring(0, 5));
+  const grossMinutes = endM >= startM ? endM - startM : 24 * 60 - startM + endM;
+  const breakMinutes = Math.round((opts.break_total_hours ?? 0) * 60);
+  const netMinutes = Math.max(0, grossMinutes - breakMinutes);
+  const midMinutes = startM + Math.floor(netMinutes / 2) + breakMinutes;
+  const hh = Math.floor((midMinutes % (24 * 60)) / 60)
+    .toString()
+    .padStart(2, '0');
+  const mm = Math.floor(midMinutes % 60)
+    .toString()
+    .padStart(2, '0');
+  return `${hh}:${mm}:00`;
 }
 
 const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave'] as const;
@@ -165,7 +182,7 @@ const Attendance = () => {
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
       let query = supabase
         .from('attendance_records')
-        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, employee:employees!employee_id(id, employee_code, first_name, last_name, avatar_url)')
+        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, last_name)')
         .gte('date', dateFrom)
         .lte('date', dateTo);
       if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
@@ -180,7 +197,6 @@ const Attendance = () => {
         employee_code: r.employee?.employee_code,
         employee_first_name: r.employee?.first_name,
         employee_last_name: r.employee?.last_name,
-        employee_avatar_url: r.employee?.avatar_url,
       }));
     } else {
       data = rpcData || [];
@@ -200,7 +216,10 @@ const Attendance = () => {
     const shiftMap = new Map<string, string[]>();
     const shiftFormattedMap = new Map<string, string>();
     const shiftNetHoursMap = new Map<string, number>();
-    const shiftListByEmployee = new Map<string, Array<{ start_time: string; days?: string[] }>>();
+    const shiftListByEmployee = new Map<
+      string,
+      Array<{ start_time: string; end_time?: string; break_total_hours?: number; grace_period_minutes?: number; days?: string[] }>
+    >();
     shiftData.forEach((s: any) => {
       const sh = s.shift;
       const name = sh?.name || 'REG';
@@ -220,7 +239,13 @@ const Attendance = () => {
       }
       if (sh?.start_time) {
         const arr = shiftListByEmployee.get(s.employee_id) || [];
-        arr.push({ start_time: sh.start_time, days: sh.days });
+        arr.push({
+          start_time: sh.start_time,
+          end_time: sh.end_time,
+          break_total_hours: sh.break_total_hours ?? 0,
+          grace_period_minutes: sh.grace_period_minutes ?? 0,
+          days: sh.days,
+        });
         shiftListByEmployee.set(s.employee_id, arr);
       }
     });
@@ -234,15 +259,37 @@ const Attendance = () => {
       // Recompute minutes_late from shift start when missing/wrong (null or 0) but time_in exists
       // Use the shift that applies to this record's weekday
       let minutesLate = r.minutes_late ?? null;
-      if ((minutesLate == null || minutesLate === 0) && r.time_in) {
+      if (r.time_in) {
         const shiftList = shiftListByEmployee.get(r.employee_id) || [];
         const weekday = getWeekdayForDate(r.date);
         const shiftForDay = shiftList.find((s) => !s.days?.length || s.days.includes(weekday)) || shiftList[0];
-        if (shiftForDay?.start_time) {
+        // If this day is tagged as HALF-DAY leave, the "working shift start" changes:
+        // - first_half  => work starts at midpoint
+        // - second_half => work starts at shift start
+        const leaveDuration = (r.leave_duration_type as 'fullday' | 'first_half' | 'second_half' | null) || null;
+        const isHalfDay = leaveDuration === 'first_half' || leaveDuration === 'second_half';
+        const workingStart = isHalfDay && leaveDuration === 'first_half' && shiftForDay?.start_time && shiftForDay?.end_time
+          ? computeHalfDayMidpointTime({
+              start_time: shiftForDay.start_time,
+              end_time: shiftForDay.end_time,
+              break_total_hours: shiftForDay.break_total_hours ?? 0,
+            })
+          : shiftForDay?.start_time;
+        const grace = shiftForDay?.grace_period_minutes ?? 0;
+
+        // IMPORTANT: Do not change normal-day logic.
+        // For HALF-DAY only, apply grace period to the late counter so that late minutes start AFTER grace.
+        if (isHalfDay && workingStart) {
+          const timeInM = parseTimeToMinutes(new Date(r.time_in).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
+          const startM = parseTimeToMinutes(workingStart);
+          const graceM = Math.max(0, grace);
+          const computed = timeInM > startM + graceM ? Math.floor(timeInM - (startM + graceM)) : 0;
+          minutesLate = computed > 0 ? computed : null;
+        } else if ((minutesLate == null || minutesLate === 0) && workingStart) {
           const { minutesLate: computed } = computeAttendanceStatusFromTimeIn({
             timeInIso: r.time_in,
             date: r.date,
-            shift: { start_time: shiftForDay.start_time, grace_period_minutes: 0 },
+            shift: { start_time: workingStart, grace_period_minutes: 0 },
           });
           minutesLate = computed > 0 ? computed : null;
         }
@@ -261,7 +308,6 @@ const Attendance = () => {
         time_out: r.time_out,
         time_in_photo_url: r.time_in_photo_url,
         time_out_photo_url: r.time_out_photo_url,
-        employee_avatar_url: r.employee_avatar_url ?? null,
         lat_in: r.lat_in,
         lng_in: r.lng_in,
         lat_out: r.lat_out,
@@ -272,6 +318,9 @@ const Attendance = () => {
         remarks: r.remarks,
         status: r.status,
         minutes_late: minutesLate,
+        leave_type_code: r.leave_type_code || null,
+        leave_duration_type: (r.leave_duration_type as any) || null,
+        business_trip_id: r.business_trip_id || null,
       };
     });
 
@@ -285,7 +334,7 @@ const Attendance = () => {
       // Fetch all active employees
       const { data: allEmployees } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name, login_exempted, avatar_url')
+        .select('id, employee_code, first_name, last_name, login_exempted')
         .eq('is_active', true);
 
       // Fetch all employee_shifts with shift info
@@ -341,7 +390,6 @@ const Attendance = () => {
           time_out: null,
           time_in_photo_url: null,
           time_out_photo_url: null,
-          employee_avatar_url: emp.avatar_url ?? null,
           lat_in: null,
           lng_in: null,
           lat_out: null,
@@ -352,6 +400,9 @@ const Attendance = () => {
           remarks: null,
           status,
           minutes_late: null,
+          leave_type_code: null,
+          leave_duration_type: null,
+          business_trip_id: null,
         });
       }
 
@@ -423,31 +474,6 @@ const Attendance = () => {
   // Today's absent records have no DB row yet — use upsert to create one on first edit
   const isTodayAbsent = (r: RecordRow) => r.id.startsWith('today-absent-');
 
-  // Retry on transient network errors (ERR_CONNECTION_CLOSED, etc.)
-  const withRetry = async <T,>(
-    fn: () => Promise<T>,
-    maxRetries = 3
-  ): Promise<T> => {
-    let lastErr: unknown;
-    for (let i = 0; i < maxRetries; i++) {
-      try {
-        return await fn();
-      } catch (e) {
-        lastErr = e;
-        const msg = (e as Error)?.message?.toLowerCase() || '';
-        const isRetryable =
-          msg.includes('fetch') ||
-          msg.includes('network') ||
-          msg.includes('connection') ||
-          msg.includes('closed') ||
-          msg.includes('aborted');
-        if (i === maxRetries - 1 || !isRetryable) throw e;
-        await new Promise((r) => setTimeout(r, 400 * Math.pow(2, i)));
-      }
-    }
-    throw lastErr;
-  };
-
   const upsertForTodayAbsent = (record: RecordRow, fields: Record<string, any>) =>
     supabase.from('attendance_records').upsert(
       { employee_id: record.employee_id, date: record.date, status: 'absent', ...fields },
@@ -506,11 +532,9 @@ const Attendance = () => {
     const exemptions = empRes.data ? { late_exempted: empRes.data.late_exempted, grace_period_exempted: empRes.data.grace_period_exempted } : undefined;
     const { status, minutesLate } = computeAttendanceStatusFromTimeIn({ timeInIso: ts, date, shift: shiftInfo, exemptions, currentStoredStatus: editingRecord.status as any });
 
-    const { error } = await withRetry(() =>
-      isTodayAbsent(editingRecord)
-        ? upsertForTodayAbsent(editingRecord, { time_in: ts, status, minutes_late: minutesLate })
-        : supabase.from('attendance_records').update({ time_in: ts, status, minutes_late: minutesLate }).eq('id', editingRecord.id)
-    );
+    const { error } = isTodayAbsent(editingRecord)
+      ? await upsertForTodayAbsent(editingRecord, { time_in: ts, status, minutes_late: minutesLate })
+      : await supabase.from('attendance_records').update({ time_in: ts, status, minutes_late: minutesLate }).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -531,11 +555,9 @@ const Attendance = () => {
     const updateFields: Record<string, any> = { time_out: ts };
     if (shouldUpdateStatus) updateFields.status = 'present';
 
-    const { error } = await withRetry(() =>
-      isTodayAbsent(editingRecord)
-        ? upsertForTodayAbsent(editingRecord, updateFields)
-        : supabase.from('attendance_records').update(updateFields).eq('id', editingRecord.id)
-    );
+    const { error } = isTodayAbsent(editingRecord)
+      ? await upsertForTodayAbsent(editingRecord, updateFields)
+      : await supabase.from('attendance_records').update(updateFields).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -558,22 +580,42 @@ const Attendance = () => {
     }
   };
 
-  const statusBadge = (status: string, minutesLate?: number | null, opts?: { timeIn?: string | null; timeOut?: string | null }) => {
+  const statusBadge = (
+    status: string,
+    minutesLate?: number | null,
+    opts?: { timeIn?: string | null; timeOut?: string | null; leaveTypeCode?: string | null; leaveDurationType?: 'fullday' | 'first_half' | 'second_half' | null; businessTripId?: string | null }
+  ) => {
     const displayStatus = status === 'eti' ? 'present' : status === 'lti' ? 'late' : status; // legacy mapping
     const styles: Record<string, string> = {
       present: 'bg-emerald-50 text-emerald-700 border-emerald-200',
       late: 'bg-amber-50 text-amber-700 border-amber-200',
       absent: 'bg-red-50 text-red-700 border-red-200',
       half_day: 'bg-blue-50 text-blue-700 border-blue-200',
-      on_leave: 'bg-slate-100 text-slate-700 border-slate-200',
+      on_leave: 'bg-purple-50 text-purple-700 border-purple-200',
     };
     const lateLabel = minutesLate != null && minutesLate > 0 && (displayStatus === 'present' || displayStatus === 'late')
       ? formatMinutesLateVisual(minutesLate)
       : null;
-    const missingTimeOut = opts?.timeIn && !opts?.timeOut;
+    const missingTimeOut = opts?.timeIn && !opts?.timeOut && !opts?.businessTripId;
+    const leaveDuration = opts?.leaveDurationType;
+    const durationLabel =
+      leaveDuration === 'first_half' ? '1st half' : leaveDuration === 'second_half' ? '2nd half' : null;
+    const isHalfDayLeave = leaveDuration === 'first_half' || leaveDuration === 'second_half';
+    const leaveCode = opts?.leaveTypeCode;
+    const badgeLabel =
+      displayStatus === 'on_leave'
+        ? `On Leave${leaveCode ? ` (${leaveCode.toUpperCase()})` : ''}`
+        : displayStatus === 'present' && opts?.businessTripId
+          ? `Present (Business Trip)`
+        : displayStatus === 'present' && isHalfDayLeave
+          ? `Present (Half day)${leaveCode ? ` (${leaveCode.toUpperCase()})` : ''}`
+          : displayStatus.replace('_', ' ');
     return (
       <div className="flex flex-col gap-0.5">
-        <Badge variant="outline" className={styles[displayStatus] || ''}>{displayStatus.replace('_', ' ')}</Badge>
+        <Badge variant="outline" className={styles[displayStatus] || ''}>{badgeLabel}</Badge>
+        {displayStatus === 'present' && durationLabel && (
+          <span className="text-xs text-muted-foreground">{durationLabel}</span>
+        )}
         {lateLabel && lateLabel !== '—' && (
           <span className="text-xs text-muted-foreground">{lateLabel} past shift start</span>
         )}
@@ -688,12 +730,9 @@ const Attendance = () => {
                               <img src={r.time_in_photo_url} alt="Time in" className="h-20 w-20 object-cover rounded-full border" />
                             </a>
                           ) : (
-                            <Avatar className="h-20 w-20">
-                              <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
-                              <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
-                                {getAvatarFallbackFromFullName(r.employee_name)}
-                              </AvatarFallback>
-                            </Avatar>
+                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
+                              <span className="text-xs text-muted-foreground">No Data</span>
+                            </div>
                           )}
                           <div className="flex items-center gap-1 text-xs">
                             <MapPin className="h-3 w-3" />
@@ -709,12 +748,9 @@ const Attendance = () => {
                               <img src={r.time_out_photo_url} alt="Time out" className="h-20 w-20 object-cover rounded-full border" />
                             </a>
                           ) : (
-                            <Avatar className="h-20 w-20">
-                              <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
-                              <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
-                                {getAvatarFallbackFromFullName(r.employee_name)}
-                              </AvatarFallback>
-                            </Avatar>
+                            <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
+                              <span className="text-xs text-muted-foreground">No Data</span>
+                            </div>
                           )}
                           <div className="flex items-center gap-1 text-xs">
                             <MapPin className="h-3 w-3" />
@@ -725,7 +761,7 @@ const Attendance = () => {
                     </div>
 
                     <div className="mt-3">
-                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out })}
+                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id })}
                     </div>
                   </CardContent>
                 </Card>
@@ -824,7 +860,7 @@ const Attendance = () => {
                             <TableCell className="font-mono text-sm">{formatTime(r.time_out) || '—'}</TableCell>
                             <TableCell className="font-mono text-sm">{formatMinutesLate(r.minutes_late)}</TableCell>
                             <TableCell>
-                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out })}
+                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id })}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
@@ -971,7 +1007,7 @@ const Attendance = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-sm">Attendance Status</span>
-                <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out })}</div>
+                 <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out, leaveTypeCode: viewingRecord.leave_type_code, leaveDurationType: viewingRecord.leave_duration_type, businessTripId: viewingRecord.business_trip_id })}</div>
                 {isAdmin && <Button variant="outline" size="sm" className="mt-2" onClick={() => { setViewingRecord(null); openEditStatus(viewingRecord); }}><Pencil className="h-3 w-3 mr-1" /> Edit status</Button>}
               </div>
               {(viewingRecord.remarks || isAdmin) && (

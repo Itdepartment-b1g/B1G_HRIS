@@ -83,6 +83,6 @@ export function computeAttendanceStatusFromTimeIn(params: {
 
   // Always present when clocked in. Minutes late = time past shift start (for counting)
   const minutesLate =
-    timeInMinutes > shiftStartMinutes ? Math.round(timeInMinutes - shiftStartMinutes) : 0;
+    timeInMinutes > shiftStartMinutes ? Math.floor(timeInMinutes - shiftStartMinutes) : 0;
   return { status: 'present', minutesLate };
 }
