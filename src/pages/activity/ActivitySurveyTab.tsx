@@ -301,11 +301,14 @@ const ActivitySurveyTab = () => {
       }));
       const { error: qErr } = await supabase.from('survey_questions').insert(questionRows);
       if (qErr) toast.error(qErr.message);
-      else toast.success('Survey updated.');
-      setCreateOpen(false);
-      setEditingId(null);
-      setForm({ title: '', description: '', start_date: today, end_date: today, target_audience: 'all', target_employee_ids: [], is_anonymous: false, questions: [] });
-      fetchSurveys();
+      else {
+        toast.success('Survey updated.');
+        setCreateOpen(false);
+        setEditingId(null);
+        setForm({ title: '', description: '', start_date: today, end_date: today, target_audience: 'all', target_employee_ids: [], is_anonymous: false, questions: [] });
+        fetchSurveys();
+        window.dispatchEvent(new CustomEvent('activity-popup-refetch'));
+      }
     } else {
       const { data: surveyRow, error: surveyErr } = await supabase
         .from('surveys')
@@ -355,6 +358,7 @@ const ActivitySurveyTab = () => {
         questions: [],
       });
       fetchSurveys();
+      window.dispatchEvent(new CustomEvent('activity-popup-refetch'));
     }
     setSubmitting(false);
   };

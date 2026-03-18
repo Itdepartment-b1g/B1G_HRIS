@@ -17,3 +17,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     detectSessionInUrl: true,
   },
 });
+
+/** When auth fails (SIGNED_OUT, refresh failure), clear session tracking and redirect to login */
+if (typeof window !== 'undefined') {
+  supabase.auth.onAuthStateChange((event, session) => {
+    if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
+      localStorage.removeItem('b1g_session_id');
+      if (window.location.pathname !== '/') {
+        window.location.href = '/?session_expired=1';
+      }
+    }
+  });
+}

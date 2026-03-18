@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar, Briefcase, CalendarDays } from 'lucide-react';
+import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar, Briefcase, CalendarDays, Loader2, Award, Pin, ExternalLink } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -15,11 +16,13 @@ import {
 } from '@/components/ui/dialog';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { SurveyAnswerDialog } from '@/components/SurveyAnswerDialog';
 import { supabase } from '@/lib/supabase';
 import { cn, timeTo12Hour, getAvatarFallback, getAvatarFallbackFromFullName } from '@/lib/utils';
+import { isImageUrl } from '@/lib/attachmentUtils';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import type { AttendanceRecord } from '@/types';
 import type { Employee } from '@/types';
@@ -75,7 +78,8 @@ const Dashboard = () => {
 
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; author_avatar_url?: string | null; created_at: string }>>([]);
+  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; author_avatar_url?: string | null; attachment_url?: string | null; is_pinned?: boolean; created_at: string }>>([]);
+  const [employeeOfMonth, setEmployeeOfMonth] = useState<{ id: string; name: string; avatar_url: string | null } | null>(null);
   const [pendingSurveys, setPendingSurveys] = useState<Array<{ id: string; title: string; description?: string | null }>>([]);
   const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
   const [surveyDialogId, setSurveyDialogId] = useState<string | null>(null);
@@ -98,6 +102,9 @@ const Dashboard = () => {
     teamLeaveDetailsByDate: new Map(),
     teamBusinessTripDetailsByDate: new Map(),
   });
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const [hasMoreFeed, setHasMoreFeed] = useState(true);
+  const feedBottomRef = useRef<HTMLDivElement>(null);
   const [leaveFeedItems, setLeaveFeedItems] = useState<Array<{
     id: string;
     type: 'leave_request';
@@ -145,20 +152,52 @@ const Dashboard = () => {
     setAttendanceLog(withName as AttendanceRecord[]);
   }, [currentUser?.id, currentUser?.first_name, currentUser?.last_name]);
 
-  const fetchAnnouncements = useCallback(async () => {
-    const { data } = await supabase
+  const fetchAnnouncements = useCallback(async (before?: string) => {
+    let query = supabase
       .from('announcements')
       .select('*, author:employees!author_id(first_name, last_name, avatar_url)')
       .order('created_at', { ascending: false })
       .limit(10);
-    setAnnouncements((data || []).map((a: any) => ({
+    if (before) query = query.lt('created_at', before);
+    const { data } = await query;
+    const mapped = (data || []).map((a: any) => ({
       id: a.id,
       title: a.title,
       content: a.content,
       author: a.author ? `${a.author.first_name} ${a.author.last_name}` : 'Unknown',
       author_avatar_url: a.author?.avatar_url ?? null,
+      attachment_url: a.attachment_url ?? null,
+      is_pinned: a.is_pinned ?? false,
       created_at: a.created_at,
-    })));
+    }));
+    if (!before) setAnnouncements(mapped);
+    return mapped;
+  }, []);
+
+  const fetchEmployeeOfMonth = useCallback(async () => {
+    const now = new Date();
+    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const { data } = await supabase
+      .from('employee_of_the_month')
+      .select('employee:employees!employee_id(id, first_name, last_name, avatar_url)')
+      .eq('for_month', firstOfMonth)
+      .maybeSingle();
+    if (data?.employee) {
+      const raw = data.employee;
+      const emp = Array.isArray(raw) ? raw[0] : raw;
+      if (emp && typeof emp === 'object' && 'id' in emp) {
+        const e = emp as unknown as { id: string; first_name: string; last_name: string; avatar_url: string | null };
+        setEmployeeOfMonth({
+          id: e.id,
+          name: `${e.first_name} ${e.last_name}`,
+          avatar_url: e.avatar_url,
+        });
+      } else {
+        setEmployeeOfMonth(null);
+      }
+    } else {
+      setEmployeeOfMonth(null);
+    }
   }, []);
 
   const fetchPendingSurveys = useCallback(async () => {
@@ -166,7 +205,7 @@ const Dashboard = () => {
       setPendingSurveys([]);
       return;
     }
-    const todayStr = new Date().toISOString().slice(0, 10);
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
     const { data: surveyRes } = await supabase
       .from('surveys')
       .select('id, title, description, start_date, end_date, target_audience, target_employee_ids')
@@ -193,13 +232,14 @@ const Dashboard = () => {
     setPendingSurveys(pending.map((s) => ({ id: s.id, title: s.title, description: s.description })));
   }, [currentUser?.id, currentUser?.login_exempted]);
 
-  const fetchLeaveFeed = useCallback(async () => {
-    if (!currentUser?.id) return;
+  const fetchLeaveFeed = useCallback(async (before?: string) => {
+    if (!currentUser?.id) return [];
     let query = supabase
       .from('leave_requests')
       .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)')
       .order('created_at', { ascending: false })
-      .limit(15);
+      .limit(before ? 10 : 15);
+    if (before) query = query.lt('created_at', before);
     const isSuperAdmin = currentUser.roles?.includes('super_admin');
     const isAdminOrSupervisor = currentUser.roles?.includes('admin') || currentUser.roles?.includes('supervisor') || currentUser.roles?.includes('manager');
     if (isSuperAdmin) {
@@ -214,15 +254,15 @@ const Dashboard = () => {
       }
       const ids = Array.from(supervisedIds);
       if (ids.length === 0) {
-        setLeaveFeedItems([]);
-        return;
+        if (!before) setLeaveFeedItems([]);
+        return [];
       }
       query = query.in('employee_id', ids);
     } else {
       query = query.eq('employee_id', currentUser.id);
     }
     const { data } = await query;
-    setLeaveFeedItems((data || []).map((r: any) => ({
+    const mapped = (data || []).map((r: any) => ({
       id: r.id,
       type: 'leave_request' as const,
       employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
@@ -235,8 +275,32 @@ const Dashboard = () => {
       reason: r.reason,
       created_at: r.created_at,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
-    })));
+    }));
+    if (!before) setLeaveFeedItems(mapped);
+    return mapped;
   }, [currentUser?.id, currentUser?.roles]);
+
+  const loadMoreFeed = useCallback(async () => {
+    if (feedLoadingMore || !hasMoreFeed) return;
+    const feedItems = [
+      ...announcements.map((a) => ({ ...a, type: 'announcement' as const })),
+      ...leaveFeedItems.map((l) => ({ ...l, type: 'leave_request' as const })),
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const cursor = feedItems[feedItems.length - 1]?.created_at;
+    if (!cursor) return;
+    setFeedLoadingMore(true);
+    try {
+      const [annData, leaveData] = await Promise.all([
+        fetchAnnouncements(cursor),
+        fetchLeaveFeed(cursor),
+      ]);
+      setAnnouncements((prev) => [...prev, ...annData]);
+      setLeaveFeedItems((prev) => [...prev, ...leaveData]);
+      setHasMoreFeed((annData.length === 10) || (leaveData.length === 10));
+    } finally {
+      setFeedLoadingMore(false);
+    }
+  }, [feedLoadingMore, hasMoreFeed, announcements, leaveFeedItems, fetchAnnouncements, fetchLeaveFeed]);
 
   const fetchApprovedLeavesForCalendar = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -461,7 +525,8 @@ const Dashboard = () => {
     fetchEmployeesAndCompany();
     fetchWorkLocations();
     fetchAssignedShift();
-  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
+    fetchEmployeeOfMonth();
+  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift, fetchEmployeeOfMonth]);
 
   useEffect(() => {
     if (!currentUser?.id) return;
@@ -473,6 +538,7 @@ const Dashboard = () => {
         () => fetchAttendanceLog()
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => fetchAnnouncements())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_of_the_month' }, () => fetchEmployeeOfMonth())
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => {
         fetchLeaveFeed();
         fetchApprovedLeavesForCalendar();
@@ -485,7 +551,21 @@ const Dashboard = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.id, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar]);
+  }, [currentUser?.id, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar, fetchEmployeeOfMonth]);
+
+  useEffect(() => {
+    const el = feedBottomRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        loadMoreFeed();
+      },
+      { root: null, rootMargin: '100px', threshold: 0 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loadMoreFeed]);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -674,9 +754,11 @@ const Dashboard = () => {
   const shiftName = assignedShift?.name ?? 'REG';
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0 lg:h-full lg:overflow-hidden items-stretch">
       {/* LEFT COLUMN */}
-      <div className="lg:col-span-3 space-y-5">
+      <div className="lg:col-span-3 flex flex-col min-h-0">
+        <ScrollArea className="flex-1 min-h-0 lg:h-[calc(100vh-10rem)] overscroll-contain pr-2">
+          <div className="space-y-5">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold">Attendance</CardTitle>
@@ -837,19 +919,46 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+          </div>
+        </ScrollArea>
       </div>
 
-      {/* CENTER COLUMN */}
-      <div className="lg:col-span-6 space-y-5">
-        <div>
-          <h3 className="font-semibold text-lg text-foreground mb-3">All Feeds</h3>
-          <div className="space-y-3">
+      {/* CENTER COLUMN - hidden on mobile */}
+      <div className="hidden lg:flex lg:col-span-6 flex-col min-h-0">
+        {employeeOfMonth && (
+          <Card className="mb-4 shrink-0">
+            <CardContent className="pt-4 pb-4 flex items-center gap-4">
+              <Avatar className="h-16 w-16">
+                <AvatarImage src={employeeOfMonth.avatar_url ?? undefined} alt="" />
+                <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
+                  {getAvatarFallbackFromFullName(employeeOfMonth.name)}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <Award className="h-3.5 w-3.5" />
+                  Employee of the Month
+                </p>
+                <p className="text-lg font-semibold text-foreground">{employeeOfMonth.name}</p>
+                <p className="text-xs text-muted-foreground">{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <h3 className="font-semibold text-lg text-foreground mb-3 shrink-0">All Feeds</h3>
+        <ScrollArea className="flex-1 min-h-0 lg:h-[calc(100vh-10rem)] overscroll-contain">
+          <div className="space-y-3 pr-2">
             {[
               ...announcements.map((a) => ({ ...a, type: 'announcement' as const })),
               ...leaveFeedItems.map((l) => ({ ...l, type: 'leave_request' as const })),
             ]
-              .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
-              .slice(0, 20)
+              .sort((a, b) => {
+                const aPinned = a.type === 'announcement' && (a as any).is_pinned;
+                const bPinned = b.type === 'announcement' && (b as any).is_pinned;
+                if (aPinned && !bPinned) return -1;
+                if (!aPinned && bPinned) return 1;
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+              })
               .map((item) =>
                 item.type === 'announcement' ? (
                   <Card key={`ann-${item.id}`}>
@@ -863,12 +972,32 @@ const Dashboard = () => {
                             </AvatarFallback>
                           </Avatar>
                           <div>
-                            <p className="text-sm font-semibold text-foreground">{item.title}</p>
+                            <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                              {(item as any).is_pinned && <Pin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                              {item.title}
+                            </p>
                             <p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleDateString()}</p>
                           </div>
                         </div>
                       </div>
                       <p className="ml-[52px] mt-1 text-sm text-muted-foreground">{item.content}</p>
+                      {item.attachment_url && (
+                        isImageUrl(item.attachment_url) ? (
+                          <div className="ml-[52px] mt-3">
+                            <img src={item.attachment_url} alt="Attachment" className="max-w-full max-h-64 rounded-lg border object-contain" />
+                          </div>
+                        ) : (
+                          <a
+                            href={item.attachment_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-[52px] mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/50 hover:bg-muted text-sm font-medium transition-colors"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            View attachment
+                          </a>
+                        )
+                      )}
                     </CardContent>
                   </Card>
                 ) : (
@@ -920,12 +1049,20 @@ const Dashboard = () => {
                   </Card>
                 )
               )}
+            <div ref={feedBottomRef} className="h-4" />
+            {feedLoadingMore && (
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
           </div>
-        </div>
+        </ScrollArea>
       </div>
 
       {/* RIGHT COLUMN */}
-      <div className="lg:col-span-3 space-y-5">
+      <div className="lg:col-span-3 flex flex-col min-h-0">
+        <ScrollArea className="flex-1 min-h-0 lg:h-[calc(100vh-10rem)] overscroll-contain pr-2">
+          <div className="space-y-5">
         {/* Calendar - system date */}
         <Card>
           <CardHeader className="pb-3">
@@ -1277,6 +1414,8 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+          </div>
+        </ScrollArea>
       </div>
 
       <SurveyAnswerDialog

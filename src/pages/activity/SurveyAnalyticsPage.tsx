@@ -11,7 +11,15 @@ import {
 } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Loader2, ArrowLeft } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Loader2, ArrowLeft, Download } from 'lucide-react';
+import { toast } from 'sonner';
+import { exportSurveyResults } from '@/lib/exportSurveyResults';
 import type { Survey, SurveyQuestion } from '@/types';
 
 interface SurveyWithMeta extends Survey {
@@ -38,6 +46,7 @@ const SurveyAnalyticsPage = () => {
   const [responseCount, setResponseCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [exportLoading, setExportLoading] = useState(false);
 
   const fetchSurveys = useCallback(async () => {
     const { data } = await supabase
@@ -157,6 +166,25 @@ const SurveyAnalyticsPage = () => {
 
   const selectedSurvey = surveys.find((s) => s.id === selectedSurveyId);
 
+  const handleExport = async (format: 'pdf' | 'csv' | 'xlsx') => {
+    if (!selectedSurveyId || !selectedSurvey) return;
+    setExportLoading(true);
+    try {
+      await exportSurveyResults({
+        surveyId: selectedSurveyId,
+        format,
+        survey: selectedSurvey,
+        analytics,
+        responseCount,
+      });
+      toast.success(`Survey results exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export survey results');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -182,18 +210,35 @@ const SurveyAnalyticsPage = () => {
           <CardTitle className="text-base">Select Survey</CardTitle>
         </CardHeader>
         <CardContent>
-          <Select value={selectedSurveyId || ''} onValueChange={(v) => setSelectedSurveyId(v || null)}>
-            <SelectTrigger className="max-w-md">
-              <SelectValue placeholder="Choose a survey" />
-            </SelectTrigger>
-            <SelectContent>
-              {surveys.map((s) => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.title} ({s.start_date} – {s.end_date}) — {s.response_count ?? 0} responses
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex flex-wrap items-center gap-3">
+            <Select value={selectedSurveyId || ''} onValueChange={(v) => setSelectedSurveyId(v || null)}>
+              <SelectTrigger className="max-w-md">
+                <SelectValue placeholder="Choose a survey" />
+              </SelectTrigger>
+              <SelectContent>
+                {surveys.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.title} ({s.start_date} – {s.end_date}) — {s.response_count ?? 0} responses
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedSurveyId && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={exportLoading}>
+                    {exportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                    Download
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleExport('pdf')}>Export PDF</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
         </CardContent>
       </Card>
 

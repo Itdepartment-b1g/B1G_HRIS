@@ -23,6 +23,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { getWeekdayForDate } from '@/lib/attendanceStatus';
+import { sendRequestNotification } from '@/lib/edgeFunctions';
 import type { LeaveBalance, LeaveRequest, LeaveTypeConfigForBalance } from '@/types';
 import LeaveApprovals from './LeaveApprovals';
 
@@ -454,6 +455,9 @@ const Leave = () => {
       const result = data as { success: boolean; error?: string; id?: string };
       if (result?.success) {
         toast.success('Leave request submitted successfully');
+        if (result.id) {
+          sendRequestNotification({ event: 'submitted', requestType: 'leave', requestId: result.id }).catch(() => {});
+        }
         setFileDialogOpen(false);
         setForm({ leave_type: fileLeaveOptions[0]?.code ?? 'lwop', start_date: '', end_date: '', leave_duration_type: 'fullday', reason: '' });
         setSlAttachmentFile(null);

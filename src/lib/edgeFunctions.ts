@@ -39,7 +39,14 @@ async function callEdgeFunction<T>(
     if (sessionError || !session?.access_token) {
       throw new Error('You must be logged in to perform this action.');
     }
-    const { data: refreshed } = await supabase.auth.refreshSession();
+    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
+    if (refreshError) {
+      await supabase.auth.signOut();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        window.location.href = '/?session_expired=1';
+      }
+      throw new Error('Session expired. Please sign in again.');
+    }
     const token = refreshed?.session?.access_token ?? session.access_token;
     const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
       method: 'POST',
@@ -49,6 +56,13 @@ async function callEdgeFunction<T>(
       },
       body: body ? JSON.stringify(body) : undefined,
     });
+    if (response.status === 401) {
+      await supabase.auth.signOut();
+      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+        window.location.href = '/?session_expired=1';
+      }
+      throw new Error('Session expired. Please sign in again.');
+    }
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({ error: 'Unknown error' }));
       throw new Error(errBody.error || `Failed to call ${functionName}`);
@@ -187,6 +201,21 @@ export async function getEmailByEmployeeCode(employeeCode: string): Promise<{ em
   const trimmed = employeeCode?.trim();
   if (!trimmed) throw new Error('Employee code is required');
   return callEdgeFunction<{ email: string }>('get-email-by-employee-code', { employee_code: trimmed });
+}
+
+export interface SendRequestNotificationPayload {
+  event: 'submitted' | 'approved' | 'rejected';
+  requestType: 'leave' | 'overtime' | 'business_trip';
+  requestId: string;
+  approverId?: string;
+}
+
+/**
+ * Send email notifications for leave, overtime, or business trip requests.
+ * Call after successful submit or approve/reject. Fire-and-forget: catch errors to avoid blocking UI.
+ */
+export async function sendRequestNotification(payload: SendRequestNotificationPayload): Promise<void> {
+  return callEdgeFunction<{ success: boolean }>('send-request-notifications', payload, { useUserAuth: true });
 }
 
 /**

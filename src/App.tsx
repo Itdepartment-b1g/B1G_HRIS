@@ -14,12 +14,14 @@ import Attendance from "./pages/Attendance";
 import Employees from "./pages/Employees";
 import Leave from "./pages/Leave";
 import MyLeaveBalance from "./pages/MyLeaveBalance";
+import AllEmployeeLeaveBalances from "./pages/AllEmployeeLeaveBalances";
 import Overtime from "./pages/Overtime";
 import BusinessTrip from "./pages/BusinessTrip";
 import SurveyPage from "./pages/activity/SurveyPage";
 import AnnouncementsPage from "./pages/activity/AnnouncementsPage";
 import PoliciesPage from "./pages/activity/PoliciesPage";
 import SurveyAnalyticsPage from "./pages/activity/SurveyAnalyticsPage";
+import EmployeeOfMonthPage from "./pages/activity/EmployeeOfMonthPage";
 import {
   Correction,
   TaskFeedback,
@@ -66,6 +68,7 @@ const App = () => (
             <Route path="attendance" element={<Attendance />} />
             <Route path="leave" element={<Leave />} />
             <Route path="leave-balance" element={<MyLeaveBalance />} />
+            <Route path="employee-leave-balances" element={<RequireRole roles={['admin', 'super_admin']}><AllEmployeeLeaveBalances /></RequireRole>} />
             <Route path="overtime" element={<Overtime />} />
             <Route path="business-trip" element={<BusinessTrip />} />
             <Route path="correction" element={<Correction />} />
@@ -76,6 +79,7 @@ const App = () => (
             <Route path="activity/announcements" element={<AnnouncementsPage />} />
             <Route path="activity/policies" element={<PoliciesPage />} />
             <Route path="activity/survey-analytics" element={<RequireRole roles={['admin', 'super_admin']}><SurveyAnalyticsPage /></RequireRole>} />
+            <Route path="activity/employee-of-month" element={<RequireRole roles={['admin', 'super_admin']}><EmployeeOfMonthPage /></RequireRole>} />
             <Route path="chat" element={<Navigate to="/dashboard/activity/announcements" replace />} />
             <Route path="announcements" element={<Navigate to="/dashboard/activity/announcements" replace />} />
             <Route path="events" element={<EventScheduling />} />

@@ -18,6 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { RequireRole } from '@/components/RequireRole';
 import { cn } from '@/lib/utils';
+import { sendRequestNotification } from '@/lib/edgeFunctions';
 import type { LeaveRequest, LeaveTypeConfigForBalance } from '@/types';
 
 function formatDate(dateStr: string) {
@@ -186,6 +187,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
       const { data } = await supabase.rpc('approve_leave_request', { p_leave_id: id, p_action: action });
       const result = data as { success: boolean; error?: string };
       if (result?.success) {
+        sendRequestNotification({ event: action, requestType: 'leave', requestId: id, approverId: currentUser?.id }).catch(() => {});
         toast.success(action === 'approved' ? 'Leave approved' : 'Leave rejected');
         fetchRequests();
       } else {

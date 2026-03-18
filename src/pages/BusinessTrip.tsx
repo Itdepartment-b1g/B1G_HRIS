@@ -24,6 +24,7 @@ import { Loader2, Plus, Briefcase, Eye, Paperclip, MapPin, CalendarDays, Clipboa
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { sendRequestNotification } from '@/lib/edgeFunctions';
 import type { BusinessTrip, TripType } from '@/types';
 import BusinessTripApprovals from './BusinessTripApprovals';
 
@@ -176,6 +177,9 @@ const BusinessTrip = () => {
       const result = data as { success: boolean; error?: string; id?: string };
       if (result?.success) {
         toast.success('Business trip request submitted successfully');
+        if (result.id) {
+          sendRequestNotification({ event: 'submitted', requestType: 'business_trip', requestId: result.id }).catch(() => {});
+        }
         setFileDialogOpen(false);
         setForm({
           trip_type: 'work_visit_domestic',

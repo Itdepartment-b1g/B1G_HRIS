@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { format } from 'date-fns';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { SurveyAnswerDialog } from '@/components/SurveyAnswerDialog';
@@ -11,7 +12,9 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
-import { Loader2, MessageCircle, FileText, ClipboardList, Sparkles } from 'lucide-react';
+import { Loader2, MessageCircle, FileText, ClipboardList, ExternalLink } from 'lucide-react';
+import { cn } from '@/lib/utils';
+import { isImageUrl } from '@/lib/attachmentUtils';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 
 type PendingItem =
@@ -29,10 +32,10 @@ const ActivityPopup = () => {
   const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
   const [surveyDialogId, setSurveyDialogId] = useState<string | null>(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = format(new Date(), 'yyyy-MM-dd');
 
   const fetchPending = useCallback(async () => {
-    if (!currentUser?.id || currentUser?.login_exempted) {
+    if (!currentUser?.id) {
       setItems([]);
       setLoading(false);
       return;
@@ -42,7 +45,7 @@ const ActivityPopup = () => {
       supabase
         .from('announcements')
         .select('id, title, content, attachment_url, publish_date, expiration_date, target_audience, target_employee_ids')
-        .lte('publish_date', today)
+        .or(`publish_date.lte.${today},publish_date.is.null`)
         .or(`expiration_date.gte.${today},expiration_date.is.null`),
       supabase
         .from('policies')
@@ -129,15 +132,40 @@ const ActivityPopup = () => {
     setItems(pending);
     setOpen(pending.length > 0);
     setLoading(false);
-  }, [currentUser?.id, currentUser?.login_exempted, today]);
+  }, [currentUser?.id, today]);
 
   useEffect(() => {
     fetchPending();
   }, [fetchPending]);
 
+  // Refetch when user returns to tab or navigates to dashboard
+  useEffect(() => {
+    if (!currentUser?.id) return;
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') fetchPending();
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [currentUser?.id, fetchPending]);
+  
+  // Listen for explicit refetch (e.g. when creator creates item in same tab)
+  useEffect(() => {
+    const onRefetch = () => fetchPending();
+    window.addEventListener('activity-popup-refetch', onRefetch);
+    return () => window.removeEventListener('activity-popup-refetch', onRefetch);
+  }, [fetchPending]);
+
+  // Periodic polling when no pending items (fallback if realtime misses other users)
+  useEffect(() => {
+    if (!currentUser?.id || items.length > 0) return;
+    const interval = setInterval(fetchPending, 60000);
+    return () => clearInterval(interval);
+  }, [currentUser?.id, items.length, fetchPending]);
+
   // Realtime: refetch pending when new announcements, policies, or surveys are created
   useEffect(() => {
-    if (!currentUser?.id || currentUser?.login_exempted) return;
+    if (!currentUser?.id) return;
 
     const channel = supabase
       .channel('activity-popup-pending')
@@ -149,7 +177,7 @@ const ActivityPopup = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.id, currentUser?.login_exempted, fetchPending]);
+  }, [currentUser?.id, fetchPending]);
 
   const handleAcknowledge = async () => {
     const item = items[0];
@@ -214,45 +242,58 @@ const ActivityPopup = () => {
     />
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="max-w-2xl sm:max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-3 text-xl">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-violet-100">
+        <DialogHeader className="space-y-4 pb-4 border-b">
+          <div className="flex items-start gap-4">
+            <div
+              className={cn(
+                'flex h-12 w-12 shrink-0 items-center justify-center rounded-xl',
+                item.type === 'announcement' && 'bg-violet-100',
+                item.type === 'policy' && 'bg-blue-100',
+                item.type === 'survey' && 'bg-amber-100'
+              )}
+            >
               {item.type === 'announcement' ? (
-                <MessageCircle className="h-5 w-5 text-violet-600" />
+                <MessageCircle className="h-6 w-6 text-violet-600" />
               ) : item.type === 'policy' ? (
-                <FileText className="h-5 w-5 text-violet-600" />
+                <FileText className="h-6 w-6 text-blue-600" />
               ) : (
-                <ClipboardList className="h-5 w-5 text-violet-600" />
+                <ClipboardList className="h-6 w-6 text-amber-600" />
               )}
             </div>
-            <div className="flex flex-col gap-1">
-              <span className="flex items-center gap-2">
-                <Sparkles className="h-4 w-4 text-amber-500" />
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 New {item.type === 'announcement' ? 'Announcement' : item.type === 'policy' ? 'Policy' : 'Survey'}
-              </span>
-              <span className="font-semibold text-foreground">{item.title}</span>
+              </p>
+              <DialogTitle className="text-lg font-semibold mt-1 text-foreground">{item.title}</DialogTitle>
             </div>
-          </DialogTitle>
+          </div>
           <DialogDescription className="sr-only">
             Please review before continuing. You must acknowledge to proceed.
           </DialogDescription>
         </DialogHeader>
-        <div className="py-6">
-          <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+        <div className="py-6 overflow-y-auto">
+          <p className="text-foreground leading-relaxed whitespace-pre-wrap">
             {item.type === 'announcement' ? item.content : item.type === 'policy' ? item.description : item.description || 'Please complete this survey.'}
           </p>
           {item.type !== 'survey' && item.attachment_url && (
-            <a
-              href={item.attachment_url}
-              target="_blank"
-              rel="noreferrer"
-              className="text-primary text-sm mt-4 inline-block hover:underline font-medium"
-            >
-              View attachment
-            </a>
+            isImageUrl(item.attachment_url) ? (
+              <div className="mt-4">
+                <img src={item.attachment_url} alt="Attachment" className="max-w-full max-h-64 rounded-lg border object-contain" />
+              </div>
+            ) : (
+              <a
+                href={item.attachment_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-2 mt-4 px-4 py-2.5 rounded-lg border bg-muted/50 hover:bg-muted text-sm font-medium transition-colors"
+              >
+                <ExternalLink className="h-4 w-4" />
+                View attachment
+              </a>
+            )
           )}
         </div>
-        <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
+        <DialogFooter className="flex-col-reverse sm:flex-row gap-2 pt-4 border-t">
           {item.type === 'survey' ? (
             <Button onClick={handleTakeSurvey} size="lg" className="w-full sm:w-auto">
               Take Survey
