@@ -22,10 +22,18 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Loader2, Plus, FileText, CheckCircle, Calendar as CalendarIcon, Users, Pencil, Trash2 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Loader2, Plus, FileText, CheckCircle, Calendar as CalendarIcon, Users, Pencil, Trash2, Download } from 'lucide-react';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
+import { exportAcknowledgements } from '@/lib/exportAcknowledgements';
+import { isImageUrl } from '@/lib/attachmentUtils';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -64,6 +72,7 @@ const ActivityPoliciesTab = () => {
   const [acknowledging, setAcknowledgementing] = useState<string | null>(null);
   const [viewingAcks, setViewingAcks] = useState<{ id: string; title: string } | null>(null);
   const [ackList, setAckList] = useState<Array<{ employee_name: string; acknowledged_at: string }>>([]);
+  const [exportLoadingId, setExportLoadingId] = useState<string | null>(null);
 
   const [form, setForm] = useState({
     title: '',
@@ -216,6 +225,7 @@ const ActivityPoliciesTab = () => {
         setForm({ title: '', description: '', effective_date: format(new Date(), 'yyyy-MM-dd'), target_audience: 'all', target_employee_ids: [] });
         setAttachmentFile(null);
         fetchPolicies();
+        window.dispatchEvent(new CustomEvent('activity-popup-refetch'));
       }
     } else {
       (payload as any).author_id = currentUser.id;
@@ -227,6 +237,7 @@ const ActivityPoliciesTab = () => {
         setForm({ title: '', description: '', effective_date: format(new Date(), 'yyyy-MM-dd'), target_audience: 'all', target_employee_ids: [] });
         setAttachmentFile(null);
         fetchPolicies();
+        window.dispatchEvent(new CustomEvent('activity-popup-refetch'));
       }
     }
     setSubmitting(false);
@@ -254,6 +265,27 @@ const ActivityPoliciesTab = () => {
         acknowledged_at: x.acknowledged_at,
       }))
     );
+  };
+
+  const handleExportAcknowledgements = async (policyId: string, title: string, format: 'pdf' | 'csv' | 'xlsx') => {
+    setExportLoadingId(policyId);
+    try {
+      const { data } = await supabase
+        .from('policy_acknowledgements')
+        .select('acknowledged_at, employee:employees!employee_id(first_name, last_name)')
+        .eq('policy_id', policyId)
+        .order('acknowledged_at', { ascending: false });
+      const items = (data || []).map((x: any) => ({
+        employee_name: x.employee ? `${x.employee.first_name} ${x.employee.last_name}` : 'Unknown',
+        acknowledged_at: x.acknowledged_at,
+      }));
+      exportAcknowledgements({ items, title: `Policy: ${title}`, format });
+      toast.success(`Acknowledgements exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export acknowledgements');
+    } finally {
+      setExportLoadingId(null);
+    }
   };
 
   if (loading) {
@@ -317,6 +349,18 @@ const ActivityPoliciesTab = () => {
                         >
                           <Users className="h-4 w-4" />
                         </Button>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button variant="outline" size="sm" disabled={exportLoadingId === p.id}>
+                              {exportLoadingId === p.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => handleExportAcknowledgements(p.id, p.title, 'pdf')}>Export PDF</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExportAcknowledgements(p.id, p.title, 'csv')}>Export CSV</DropdownMenuItem>
+                            <DropdownMenuItem onClick={() => handleExportAcknowledgements(p.id, p.title, 'xlsx')}>Export XLSX</DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
                         <Button variant="outline" size="sm" onClick={() => openCreate(p)}>
                           <Pencil className="h-4 w-4" />
                         </Button>
@@ -336,14 +380,20 @@ const ActivityPoliciesTab = () => {
               <CardContent>
                 <p className="text-sm text-muted-foreground whitespace-pre-wrap">{p.description}</p>
                 {p.attachment_url && (
-                  <a
-                    href={p.attachment_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary text-sm mt-2 inline-block hover:underline"
-                  >
-                    View policy document
-                  </a>
+                  isImageUrl(p.attachment_url) ? (
+                    <div className="mt-3">
+                      <img src={p.attachment_url} alt="Attachment" className="max-w-full max-h-64 rounded-lg border object-contain" />
+                    </div>
+                  ) : (
+                    <a
+                      href={p.attachment_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary text-sm mt-2 inline-block hover:underline"
+                    >
+                      View attachment
+                    </a>
+                  )
                 )}
               </CardContent>
             </Card>

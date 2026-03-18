@@ -17,6 +17,7 @@ import {
 } from '@/components/ui/dialog';
 import { RequireRole } from '@/components/RequireRole';
 import { cn } from '@/lib/utils';
+import { sendRequestNotification } from '@/lib/edgeFunctions';
 import type { BusinessTrip } from '@/types';
 
 const TRIP_TYPE_LABELS: Record<string, string> = {
@@ -133,6 +134,7 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
       });
       const result = data as { success: boolean; error?: string };
       if (result?.success) {
+        sendRequestNotification({ event: action, requestType: 'business_trip', requestId: id, approverId: currentUser?.id }).catch(() => {});
         toast.success(action === 'approved' ? 'Business trip approved' : 'Business trip rejected');
         fetchRequests();
       } else {
