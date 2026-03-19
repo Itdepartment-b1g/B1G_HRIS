@@ -80,6 +80,30 @@ export interface AttendanceReportRow {
   noOfHours: string;
   undertime: string;
   absences: string;
+  // Overtime & premium pay columns (placeholder values)
+  regularOT: string;
+  restDay: string;
+  restDayOT: string;
+  specialHoliday1: string;
+  specialHoliday2: string;
+  specialHoliday3: string;
+  specialHoliday4: string;
+  legalHoliday1: string;
+  legalHoliday2: string;
+  legalHoliday3: string;
+  legalHolidayRestDayOT: string;
+  nightDiffReg1: string;
+  nightDiffReg2: string;
+  nightDiffRes1: string;
+  nightDiffRes2: string;
+  nightDiffSpe1: string;
+  nightDiffSpe2: string;
+  nightDiffSpe3: string;
+  nightDiffSpe4: string;
+  nightDiffLeg1: string;
+  nightDiffLeg2: string;
+  nightDiffLeg3: string;
+  nightDiffLeg4: string;
 }
 
 export interface ExportAttendanceReportOptions {
@@ -267,6 +291,8 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
     }
   }
 
+  const EMPTY_PREMIUM = '0';
+
   // 5. Build rows: one per active employee
   const rows: AttendanceReportRow[] = (employees || []).map((emp) => {
     const a = agg.get(emp.id) ?? { totalWorkedHours: 0, sumUndertimeMinutes: 0, absences: 0 };
@@ -277,6 +303,29 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
       noOfHours: a.totalWorkedHours.toFixed(2),
       undertime: undertimeHours.toFixed(2),
       absences: a.absences % 1 === 0 ? String(a.absences) : a.absences.toFixed(1),
+      regularOT: EMPTY_PREMIUM,
+      restDay: EMPTY_PREMIUM,
+      restDayOT: EMPTY_PREMIUM,
+      specialHoliday1: EMPTY_PREMIUM,
+      specialHoliday2: EMPTY_PREMIUM,
+      specialHoliday3: EMPTY_PREMIUM,
+      specialHoliday4: EMPTY_PREMIUM,
+      legalHoliday1: EMPTY_PREMIUM,
+      legalHoliday2: EMPTY_PREMIUM,
+      legalHoliday3: EMPTY_PREMIUM,
+      legalHolidayRestDayOT: EMPTY_PREMIUM,
+      nightDiffReg1: EMPTY_PREMIUM,
+      nightDiffReg2: EMPTY_PREMIUM,
+      nightDiffRes1: EMPTY_PREMIUM,
+      nightDiffRes2: EMPTY_PREMIUM,
+      nightDiffSpe1: EMPTY_PREMIUM,
+      nightDiffSpe2: EMPTY_PREMIUM,
+      nightDiffSpe3: EMPTY_PREMIUM,
+      nightDiffSpe4: EMPTY_PREMIUM,
+      nightDiffLeg1: EMPTY_PREMIUM,
+      nightDiffLeg2: EMPTY_PREMIUM,
+      nightDiffLeg3: EMPTY_PREMIUM,
+      nightDiffLeg4: EMPTY_PREMIUM,
     };
   });
 
@@ -297,15 +346,74 @@ function escapeCsvField(val: string | number): string {
   return s;
 }
 
+const REPORT_HEADERS = [
+  'Employee Number',
+  'Employee Name',
+  'NoOfHours',
+  'Undertime',
+  'Absences',
+  'RegularOT',
+  'RestDay',
+  'RestDayOT',
+  'SpecialHoliday1',
+  'SpecialHoliday2',
+  'SpecialHoliday3',
+  'SpecialHoliday4',
+  'LegalHoliday1',
+  'LegalHoliday2',
+  'LegalHoliday3',
+  'LegalHolidayRestDayOT',
+  'NightDiffReg1',
+  'NightDiffReg2',
+  'NightDiffRes1',
+  'NightDiffRes2',
+  'NightDiffSpe1',
+  'NightDiffSpe2',
+  'NightDiffSpe3',
+  'NightDiffSpe4',
+  'NightDiffLeg1',
+  'NightDiffLeg2',
+  'NightDiffLeg3',
+  'NightDiffLeg4',
+];
+
+function rowToArray(r: AttendanceReportRow): (string | number)[] {
+  return [
+    r.employeeNumber,
+    r.employeeName,
+    r.noOfHours,
+    r.undertime,
+    r.absences,
+    r.regularOT,
+    r.restDay,
+    r.restDayOT,
+    r.specialHoliday1,
+    r.specialHoliday2,
+    r.specialHoliday3,
+    r.specialHoliday4,
+    r.legalHoliday1,
+    r.legalHoliday2,
+    r.legalHoliday3,
+    r.legalHolidayRestDayOT,
+    r.nightDiffReg1,
+    r.nightDiffReg2,
+    r.nightDiffRes1,
+    r.nightDiffRes2,
+    r.nightDiffSpe1,
+    r.nightDiffSpe2,
+    r.nightDiffSpe3,
+    r.nightDiffSpe4,
+    r.nightDiffLeg1,
+    r.nightDiffLeg2,
+    r.nightDiffLeg3,
+    r.nightDiffLeg4,
+  ];
+}
+
 function downloadCsv(rows: AttendanceReportRow[], filename: string): void {
-  const headers = ['Employee Number', 'Employee Name', 'NoOfHours', 'Undertime', 'Absences'];
   const lines = [
-    headers.join(','),
-    ...rows.map((r) =>
-      [r.employeeNumber, r.employeeName, r.noOfHours, r.undertime, r.absences]
-        .map(escapeCsvField)
-        .join(',')
-    ),
+    REPORT_HEADERS.join(','),
+    ...rows.map((r) => rowToArray(r).map(escapeCsvField).join(',')),
   ];
   const csv = lines.join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -318,10 +426,7 @@ function downloadCsv(rows: AttendanceReportRow[], filename: string): void {
 }
 
 function downloadXlsx(rows: AttendanceReportRow[], filename: string): void {
-  const wsData = [
-    ['Employee Number', 'Employee Name', 'NoOfHours', 'Undertime', 'Absences'],
-    ...rows.map((r) => [r.employeeNumber, r.employeeName, r.noOfHours, r.undertime, r.absences]),
-  ];
+  const wsData = [REPORT_HEADERS, ...rows.map((r) => rowToArray(r))];
   const ws = XLSX.utils.aoa_to_sheet(wsData);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Attendance Report');
