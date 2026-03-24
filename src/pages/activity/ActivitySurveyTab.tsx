@@ -27,6 +27,7 @@ import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
+import { createActivityInAppNotification } from '@/lib/inAppNotifications';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -302,6 +303,16 @@ const ActivitySurveyTab = () => {
       const { error: qErr } = await supabase.from('survey_questions').insert(questionRows);
       if (qErr) toast.error(qErr.message);
       else {
+        createActivityInAppNotification({
+          type: 'survey',
+          title: form.title.trim(),
+          message: form.description.trim() || 'A survey requires your response.',
+          actionUrl: '/dashboard/activity',
+          targetAudience: form.target_audience,
+          targetEmployeeIds: form.target_audience === 'selected' ? form.target_employee_ids : [],
+          metadata: { survey_id: editingId },
+          requiresAck: true,
+        }).catch(() => {});
         toast.success('Survey updated.');
         setCreateOpen(false);
         setEditingId(null);
@@ -345,6 +356,16 @@ const ActivitySurveyTab = () => {
         setSubmitting(false);
         return;
       }
+      createActivityInAppNotification({
+        type: 'survey',
+        title: form.title.trim(),
+        message: form.description.trim() || 'A survey requires your response.',
+        actionUrl: '/dashboard/activity',
+        targetAudience: form.target_audience,
+        targetEmployeeIds: form.target_audience === 'selected' ? form.target_employee_ids : [],
+        metadata: { survey_id: surveyRow.id },
+        requiresAck: true,
+      }).catch(() => {});
       toast.success('Survey created.');
       setCreateOpen(false);
       setForm({

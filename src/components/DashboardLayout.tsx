@@ -22,11 +22,22 @@ import { navDropdowns } from '@/lib/navConfig';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import ActivityPopup from '@/components/ActivityPopup';
 import { ActivityComplianceProvider } from '@/contexts/ActivityComplianceContext';
+import { useNotifications } from '@/hooks/useNotifications';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
 const DashboardLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading } = useCurrentUser();
+  const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(user?.id);
+  const [dismissedDropdownIds, setDismissedDropdownIds] = useState<Set<string>>(new Set());
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
@@ -67,6 +78,33 @@ const DashboardLayout = () => {
       )
       .slice(0, 10);
   }, [flattenedNavItems, searchQuery]);
+  const dropdownNotifications = useMemo(
+    () => notifications.filter((n) => !dismissedDropdownIds.has(n.id)),
+    [notifications, dismissedDropdownIds]
+  );
+
+  useEffect(() => {
+    if (!user?.id) return;
+    const raw = localStorage.getItem(`b1g_dismissed_dropdown_notifications_${user.id}`);
+    if (!raw) {
+      setDismissedDropdownIds(new Set());
+      return;
+    }
+    try {
+      const parsed = JSON.parse(raw) as string[];
+      setDismissedDropdownIds(new Set(Array.isArray(parsed) ? parsed : []));
+    } catch {
+      setDismissedDropdownIds(new Set());
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!user?.id) return;
+    localStorage.setItem(
+      `b1g_dismissed_dropdown_notifications_${user.id}`,
+      JSON.stringify(Array.from(dismissedDropdownIds))
+    );
+  }, [dismissedDropdownIds, user?.id]);
 
   useEffect(() => {
     if (!loading && !user) navigate('/');
@@ -173,6 +211,26 @@ const DashboardLayout = () => {
   if (loading || !user) return null;
 
   const initials = getAvatarFallback(user.first_name, user.last_name);
+  const formatNotificationTime = (iso: string) => {
+    const created = new Date(iso).getTime();
+    const now = Date.now();
+    const diffMins = Math.max(1, Math.floor((now - created) / 60000));
+    if (diffMins < 60) return `${diffMins} minute${diffMins === 1 ? '' : 's'} ago`;
+    const diffHours = Math.floor(diffMins / 60);
+    if (diffHours < 24) return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
+    const diffDays = Math.floor(diffHours / 24);
+    return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
+  };
+
+  const getNotificationAvatarFallback = (type: string) => {
+    if (type === 'leave') return 'LV';
+    if (type === 'business_trip') return 'BT';
+    if (type === 'overtime') return 'OT';
+    if (type === 'survey') return 'SV';
+    if (type === 'announcement') return 'AN';
+    if (type === 'policy') return 'PL';
+    return 'NT';
+  };
 
   return (
     <ActivityComplianceProvider userId={user?.id}>
@@ -332,10 +390,93 @@ const DashboardLayout = () => {
               </div>
             </div>
 
-            <Button variant="ghost" size="icon" className="relative text-gray-300 hover:text-white hover:bg-white/10">
-              <Bell className="h-5 w-5" />
-              <span className="absolute top-1.5 right-1.5 h-2 w-2 bg-primary rounded-full" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="ghost" size="icon" className="relative text-gray-300 hover:text-white hover:bg-white/10">
+                  <Bell className="h-5 w-5" />
+                  {unreadCount > 0 && (
+                    <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-[10px] text-white flex items-center justify-center">
+                      {unreadCount > 99 ? '99+' : unreadCount}
+                    </span>
+                  )}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-[360px] p-0 rounded-xl overflow-hidden shadow-xl border border-border/70">
+                <div className="flex items-center justify-between px-3 py-2 border-b bg-background/95">
+                  <button
+                    type="button"
+                    className="text-xs text-primary font-medium hover:underline disabled:opacity-50 disabled:no-underline transition-colors"
+                    onClick={() =>
+                      setDismissedDropdownIds((prev) => {
+                        const next = new Set(prev);
+                        dropdownNotifications.forEach((n) => next.add(n.id));
+                        return next;
+                      })
+                    }
+                    disabled={dropdownNotifications.length === 0}
+                  >
+                    Clear all
+                  </button>
+                  <button
+                    type="button"
+                    className="text-xs text-primary font-medium hover:underline disabled:opacity-50 disabled:no-underline transition-colors"
+                    onClick={() => markAllAsRead()}
+                    disabled={unreadCount === 0}
+                  >
+                    Mark as read
+                  </button>
+                </div>
+                <div className="max-h-[380px] overflow-y-auto bg-background">
+                  {dropdownNotifications.length === 0 ? (
+                    <div className="px-3 py-6 text-sm text-muted-foreground text-center">
+                      No notifications yet
+                    </div>
+                  ) : (
+                    dropdownNotifications.slice(0, 20).map((n) => (
+                      <DropdownMenuItem
+                        key={n.id}
+                        className={cn(
+                          'px-3 py-2.5 cursor-pointer border-b last:border-b-0 items-start transition-colors rounded-none focus:bg-muted/70',
+                          !n.is_read ? 'bg-primary/5 hover:bg-primary/10' : 'hover:bg-muted/60'
+                        )}
+                        onClick={() => {
+                          if (!n.is_read) markAsRead(n.id);
+                          if (n.action_url) navigate(n.action_url);
+                        }}
+                      >
+                        <div className="flex items-start gap-3 w-full">
+                          <Avatar className="h-9 w-9 shrink-0 mt-0.5 ring-1 ring-border/50">
+                            <AvatarImage src={undefined} alt="" />
+                            <AvatarFallback className="bg-muted text-muted-foreground text-[10px]">
+                              {getNotificationAvatarFallback(n.type)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold leading-snug text-foreground line-clamp-1">
+                              {n.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5 leading-snug line-clamp-2">
+                              {n.message}
+                            </p>
+                            <p className="text-[11px] text-primary font-medium mt-1.5 leading-none">
+                              {formatNotificationTime(n.created_at)}
+                            </p>
+                          </div>
+                          {!n.is_read && <span className="mt-1 h-2 w-2 rounded-full bg-primary shrink-0" />}
+                        </div>
+                      </DropdownMenuItem>
+                    ))
+                  )}
+                </div>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  className="justify-start px-3 py-2.5 text-xs text-foreground font-medium bg-background rounded-none border-t transition-colors cursor-pointer hover:bg-muted/70 hover:text-foreground data-[highlighted]:bg-muted/70 data-[highlighted]:text-foreground"
+                  onClick={() => navigate('/dashboard/notifications')}
+                >
+                  View all Notifications
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
 
             {/* Profile */}
             <div className="relative">

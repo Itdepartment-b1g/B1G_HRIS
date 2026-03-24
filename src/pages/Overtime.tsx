@@ -25,6 +25,7 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getWeekdayForDate } from '@/lib/attendanceStatus';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
+import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { OvertimeRequest } from '@/types';
 import OvertimeApprovals from './OvertimeApprovals';
 
@@ -353,6 +354,7 @@ const Overtime = () => {
         toast.success('Overtime request submitted successfully');
         if (result.id) {
           sendRequestNotification({ event: 'submitted', requestType: 'overtime', requestId: result.id }).catch(() => {});
+          createRequestInAppNotification({ event: 'submitted', requestType: 'overtime', requestId: result.id }).catch(() => {});
         }
         setFileDialogOpen(false);
         setForm({ ot_date: '', reason: '' });

@@ -25,6 +25,7 @@ import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
+import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { BusinessTrip, TripType } from '@/types';
 import BusinessTripApprovals from './BusinessTripApprovals';
 
@@ -179,6 +180,7 @@ const BusinessTrip = () => {
         toast.success('Business trip request submitted successfully');
         if (result.id) {
           sendRequestNotification({ event: 'submitted', requestType: 'business_trip', requestId: result.id }).catch(() => {});
+          createRequestInAppNotification({ event: 'submitted', requestType: 'business_trip', requestId: result.id }).catch(() => {});
         }
         setFileDialogOpen(false);
         setForm({
