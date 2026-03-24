@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { exportAcknowledgements } from '@/lib/exportAcknowledgements';
 import { isImageUrl } from '@/lib/attachmentUtils';
+import { createActivityInAppNotification } from '@/lib/inAppNotifications';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -235,6 +236,16 @@ const ActivityAnnouncementsTab = () => {
       const { error } = await supabase.from('announcements').update(payload).eq('id', editingId);
       if (error) toast.error(error.message);
       else {
+        createActivityInAppNotification({
+          type: 'announcement',
+          title: form.title.trim(),
+          message: form.content.trim(),
+          actionUrl: '/dashboard/activity',
+          targetAudience: form.target_audience,
+          targetEmployeeIds: form.target_audience === 'selected' ? form.target_employee_ids : [],
+          metadata: { announcement_id: editingId },
+          requiresAck: true,
+        }).catch(() => {});
         toast.success('Announcement updated.');
         setCreateOpen(false);
         setEditingId(null);
@@ -245,9 +256,19 @@ const ActivityAnnouncementsTab = () => {
       }
     } else {
       (payload as any).author_id = currentUser.id;
-      const { error } = await supabase.from('announcements').insert(payload);
+      const { data: createdRow, error } = await supabase.from('announcements').insert(payload).select('id').single();
       if (error) toast.error(error.message);
       else {
+        createActivityInAppNotification({
+          type: 'announcement',
+          title: form.title.trim(),
+          message: form.content.trim(),
+          actionUrl: '/dashboard/activity',
+          targetAudience: form.target_audience,
+          targetEmployeeIds: form.target_audience === 'selected' ? form.target_employee_ids : [],
+          metadata: { announcement_id: createdRow?.id ?? null },
+          requiresAck: true,
+        }).catch(() => {});
         toast.success('Announcement created.');
         setCreateOpen(false);
         setForm({ title: '', content: '', publish_date: format(new Date(), 'yyyy-MM-dd'), expiration_date: '', is_pinned: false, target_audience: 'all', target_employee_ids: [] });

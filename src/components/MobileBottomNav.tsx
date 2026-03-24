@@ -5,8 +5,11 @@ import {
   Rss,
   Briefcase,
   User,
+  Bell,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNotifications } from '@/hooks/useNotifications';
 
 export interface MobileNavItem {
   id: string;
@@ -19,6 +22,7 @@ export const mobileNavItems: MobileNavItem[] = [
   { id: 'home', label: 'Home', path: '/dashboard', icon: Home },
   { id: 'features', label: 'Features', path: '/dashboard/features', icon: LayoutGrid },
   { id: 'feeds', label: 'Feeds', path: '/dashboard/feeds', icon: Rss },
+  { id: 'notifications', label: 'Notif', path: '/dashboard/notifications', icon: Bell },
   { id: 'workspace', label: 'Workspace', path: '/dashboard/workspace', icon: Briefcase },
   { id: 'profile', label: 'Profile', path: '/dashboard/profile', icon: User },
 ];
@@ -26,10 +30,12 @@ export const mobileNavItems: MobileNavItem[] = [
 const MobileBottomNav = () => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useCurrentUser();
+  const { unreadCount } = useNotifications(user?.id);
 
   return (
     <nav className="lg:hidden fixed bottom-0 left-0 right-0 z-40 bg-black border-t border-white/10 pb-[env(safe-area-inset-bottom)]">
-      <div className="grid grid-cols-5 gap-0 w-full max-w-[100vw]">
+      <div className="grid grid-cols-6 gap-0 w-full max-w-[100vw]">
         {mobileNavItems.map((item) => {
           const Icon = item.icon;
           const isActive =
@@ -46,7 +52,14 @@ const MobileBottomNav = () => {
                 isActive ? 'text-primary' : 'text-gray-400 active:text-white'
               )}
             >
-              <Icon className="h-6 w-6 shrink-0" />
+              <span className="relative">
+                <Icon className="h-6 w-6 shrink-0" />
+                {item.id === 'notifications' && unreadCount > 0 && (
+                  <span className="absolute -top-1.5 -right-2 min-w-[16px] h-[16px] px-1 rounded-full bg-primary text-[9px] text-white flex items-center justify-center leading-none">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                )}
+              </span>
               <span className="text-[11px] font-medium leading-tight text-center truncate w-full px-0.5">
                 {item.label}
               </span>

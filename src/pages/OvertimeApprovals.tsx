@@ -18,6 +18,7 @@ import {
 import { RequireRole } from '@/components/RequireRole';
 import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
+import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { OvertimeRequest } from '@/types';
 
 function formatDate(dateStr: string) {
@@ -127,6 +128,7 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
       const result = data as { success: boolean; error?: string };
       if (result?.success) {
         sendRequestNotification({ event: action, requestType: 'overtime', requestId: id, approverId: currentUser?.id }).catch(() => {});
+        createRequestInAppNotification({ event: action, requestType: 'overtime', requestId: id, approverId: currentUser?.id }).catch(() => {});
         toast.success(action === 'approved' ? 'Overtime approved' : 'Overtime rejected');
         fetchRequests();
       } else {

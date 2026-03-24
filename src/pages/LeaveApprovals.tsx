@@ -19,6 +19,7 @@ import {
 import { RequireRole } from '@/components/RequireRole';
 import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
+import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { LeaveRequest, LeaveTypeConfigForBalance } from '@/types';
 
 function formatDate(dateStr: string) {
@@ -188,6 +189,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
       const result = data as { success: boolean; error?: string };
       if (result?.success) {
         sendRequestNotification({ event: action, requestType: 'leave', requestId: id, approverId: currentUser?.id }).catch(() => {});
+        createRequestInAppNotification({ event: action, requestType: 'leave', requestId: id, approverId: currentUser?.id }).catch(() => {});
         toast.success(action === 'approved' ? 'Leave approved' : 'Leave rejected');
         fetchRequests();
       } else {

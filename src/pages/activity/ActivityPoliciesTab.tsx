@@ -34,6 +34,7 @@ import { toast } from 'sonner';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { exportAcknowledgements } from '@/lib/exportAcknowledgements';
 import { isImageUrl } from '@/lib/attachmentUtils';
+import { createActivityInAppNotification } from '@/lib/inAppNotifications';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -219,6 +220,16 @@ const ActivityPoliciesTab = () => {
       const { error } = await supabase.from('policies').update(payload).eq('id', editingId);
       if (error) toast.error(error.message);
       else {
+        createActivityInAppNotification({
+          type: 'policy',
+          title: form.title.trim(),
+          message: form.description.trim(),
+          actionUrl: '/dashboard/activity',
+          targetAudience: form.target_audience,
+          targetEmployeeIds: form.target_audience === 'selected' ? form.target_employee_ids : [],
+          metadata: { policy_id: editingId },
+          requiresAck: true,
+        }).catch(() => {});
         toast.success('Policy updated.');
         setCreateOpen(false);
         setEditingId(null);
@@ -229,9 +240,19 @@ const ActivityPoliciesTab = () => {
       }
     } else {
       (payload as any).author_id = currentUser.id;
-      const { error } = await supabase.from('policies').insert(payload);
+      const { data: createdRow, error } = await supabase.from('policies').insert(payload).select('id').single();
       if (error) toast.error(error.message);
       else {
+        createActivityInAppNotification({
+          type: 'policy',
+          title: form.title.trim(),
+          message: form.description.trim(),
+          actionUrl: '/dashboard/activity',
+          targetAudience: form.target_audience,
+          targetEmployeeIds: form.target_audience === 'selected' ? form.target_employee_ids : [],
+          metadata: { policy_id: createdRow?.id ?? null },
+          requiresAck: true,
+        }).catch(() => {});
         toast.success('Policy published.');
         setCreateOpen(false);
         setForm({ title: '', description: '', effective_date: format(new Date(), 'yyyy-MM-dd'), target_audience: 'all', target_employee_ids: [] });
