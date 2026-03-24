@@ -4,7 +4,8 @@ import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallback } from '@/lib/utils';
 import { Search } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 
@@ -106,8 +107,9 @@ const SupervisorTeam = () => {
                       <TableCell>
                         <div className="flex items-center gap-3">
                           <Avatar className="h-8 w-8">
+                            <AvatarImage src={emp.avatar_url ?? undefined} alt="" />
                             <AvatarFallback className="bg-primary/10 text-primary text-xs">
-                              {emp.first_name[0]}{emp.last_name[0]}
+                              {getAvatarFallback(emp.first_name, emp.last_name)}
                             </AvatarFallback>
                           </Avatar>
                           <div>

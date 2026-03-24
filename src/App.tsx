@@ -7,32 +7,40 @@ import Login from "./pages/Login";
 import DashboardLayout from "./components/DashboardLayout";
 import EmployeeLayout from "./components/EmployeeLayout";
 import MasterDataLayout from "./components/MasterDataLayout";
+import CompanyLayout from "./components/CompanyLayout";
 import { RequireRole } from "./components/RequireRole";
 import Dashboard from "./pages/Dashboard";
 import Attendance from "./pages/Attendance";
-import Leave from "./pages/Leave";
 import Employees from "./pages/Employees";
+import Leave from "./pages/Leave";
+import MyLeaveBalance from "./pages/MyLeaveBalance";
+import AllEmployeeLeaveBalances from "./pages/AllEmployeeLeaveBalances";
+import Overtime from "./pages/Overtime";
+import BusinessTrip from "./pages/BusinessTrip";
+import SurveyPage from "./pages/activity/SurveyPage";
+import AnnouncementsPage from "./pages/activity/AnnouncementsPage";
+import PoliciesPage from "./pages/activity/PoliciesPage";
+import SurveyAnalyticsPage from "./pages/activity/SurveyAnalyticsPage";
+import EmployeeOfMonthPage from "./pages/activity/EmployeeOfMonthPage";
 import {
-  Overtime,
-  BusinessTrip,
   Correction,
-  Announcements,
   TaskFeedback,
   DailyActivity,
   EventScheduling,
-  EmployeeSurvey,
   Reports,
   MyPayslip,
-  SettingsPage,
 } from "./pages/PlaceholderPages";
 import Settings from "./pages/Settings";
 import Departments from "./pages/Departments";
+import OrgStructure from "./pages/OrgStructure";
+import CompanyProfile from "./pages/CompanyProfile";
 import Shifts from "./pages/Shifts";
 import EmploymentStatus from "./pages/EmploymentStatus";
 import WorkLocations from "./pages/WorkLocations";
 import Holidays from "./pages/Holidays";
 import Positions from "./pages/Positions";
 import CostCenters from "./pages/CostCenters";
+import LeaveBalances from "./pages/LeaveBalances";
 import PersonalData from "./pages/employee/PersonalData";
 import EmployeeRequests from "./pages/employee/EmployeeRequests";
 import FeaturesPage from "./pages/mobile/FeaturesPage";
@@ -59,15 +67,23 @@ const App = () => (
             <Route index element={<Dashboard />} />
             <Route path="attendance" element={<Attendance />} />
             <Route path="leave" element={<Leave />} />
+            <Route path="leave-balance" element={<MyLeaveBalance />} />
+            <Route path="employee-leave-balances" element={<RequireRole roles={['admin', 'super_admin']}><AllEmployeeLeaveBalances /></RequireRole>} />
             <Route path="overtime" element={<Overtime />} />
             <Route path="business-trip" element={<BusinessTrip />} />
             <Route path="correction" element={<Correction />} />
             <Route path="task-feedback" element={<TaskFeedback />} />
             <Route path="daily-activity" element={<DailyActivity />} />
-            <Route path="chat" element={<Announcements />} />
-            <Route path="announcements" element={<Announcements />} />
+            <Route path="activity" element={<Navigate to="/dashboard/activity/survey" replace />} />
+            <Route path="activity/survey" element={<SurveyPage />} />
+            <Route path="activity/announcements" element={<AnnouncementsPage />} />
+            <Route path="activity/policies" element={<PoliciesPage />} />
+            <Route path="activity/survey-analytics" element={<RequireRole roles={['admin', 'super_admin']}><SurveyAnalyticsPage /></RequireRole>} />
+            <Route path="activity/employee-of-month" element={<RequireRole roles={['admin', 'super_admin']}><EmployeeOfMonthPage /></RequireRole>} />
+            <Route path="chat" element={<Navigate to="/dashboard/activity/announcements" replace />} />
+            <Route path="announcements" element={<Navigate to="/dashboard/activity/announcements" replace />} />
             <Route path="events" element={<EventScheduling />} />
-            <Route path="survey" element={<EmployeeSurvey />} />
+            <Route path="survey" element={<Navigate to="/dashboard/activity/survey" replace />} />
             <Route path="claims" element={<Reports />} />
             <Route path="payslip" element={<MyPayslip />} />
             <Route path="employees" element={<RequireRole roles={['admin', 'super_admin']}><Employees /></RequireRole>} />
@@ -77,11 +93,13 @@ const App = () => (
               <Route index element={<Navigate to="employees" replace />} />
               <Route path="employees" element={<Employees />} />
               <Route path="departments" element={<Departments />} />
+              <Route path="org-structure" element={<OrgStructure />} />
               <Route path="employment-status" element={<EmploymentStatus />} />
               <Route path="positions" element={<Positions />} />
               <Route path="shifts" element={<Shifts />} />
               <Route path="work-locations" element={<WorkLocations />} />
               <Route path="holidays" element={<Holidays />} />
+              <Route path="leave-balances" element={<LeaveBalances />} />
               <Route path="cost-centers" element={<CostCenters />} />
             </Route>
             <Route path="employee" element={<EmployeeLayout />}>
@@ -89,7 +107,11 @@ const App = () => (
               <Route path="personal-data" element={<PersonalData />} />
               <Route path="requests" element={<EmployeeRequests />} />
             </Route>
-            <Route path="company" element={<SettingsPage />} />
+            <Route path="company" element={<CompanyLayout />}>
+              <Route index element={<Navigate to="org-structure" replace />} />
+              <Route path="org-structure" element={<OrgStructure />} />
+              <Route path="profile" element={<CompanyProfile />} />
+            </Route>
             <Route path="settings" element={<Settings />} />
             <Route path="features" element={<FeaturesPage />} />
             <Route path="feeds" element={<FeedsPage />} />

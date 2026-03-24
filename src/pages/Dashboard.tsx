@@ -1,10 +1,11 @@
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { format } from 'date-fns';
 import { useNavigate } from 'react-router-dom';
-import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { MapPin, ChevronDown, Clock, FileText, Building2, ChevronLeft, ChevronRight, Calendar, Briefcase, CalendarDays, Loader2, Award, Pin, ExternalLink } from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   Dialog,
@@ -13,10 +14,15 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/components/ui/dialog';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useActivityCompliance } from '@/hooks/useActivityCompliance';
+import { SurveyAnswerDialog } from '@/components/SurveyAnswerDialog';
 import { supabase } from '@/lib/supabase';
-import { cn, timeTo12Hour } from '@/lib/utils';
+import { cn, timeTo12Hour, getAvatarFallback, getAvatarFallbackFromFullName } from '@/lib/utils';
+import { isImageUrl } from '@/lib/attachmentUtils';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import type { AttendanceRecord } from '@/types';
 import type { Employee } from '@/types';
@@ -40,9 +46,26 @@ function formatTime(t: string | null): string {
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
 }
 
+/** Expand a date range into working-day YYYY-MM-DD strings (excludes Sundays, non-working day). */
+function getWorkingDatesInRange(startStr: string, endStr: string): string[] {
+  const start = new Date(startStr + 'T12:00:00');
+  const end = new Date(endStr + 'T12:00:00');
+  const dates: string[] = [];
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const d = new Date(start);
+  while (d <= end) {
+    if (d.getDay() !== 0) {
+      dates.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`);
+    }
+    d.setDate(d.getDate() + 1);
+  }
+  return dates;
+}
+
 const Dashboard = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useCurrentUser();
+  const { canTimeOut, pending, refetch: refetchCompliance } = useActivityCompliance();
   const [currentTime, setCurrentTime] = useState(new Date());
   const [clockedIn, setClockedIn] = useState(false);
   const [clockInTime, setClockInTime] = useState<string | null>(null);
@@ -55,10 +78,61 @@ const Dashboard = () => {
 
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
-  const [leaveRequests, setLeaveRequests] = useState<Array<{ id: string; employee_id: string; employee_name: string; leave_type: string; start_date: string; end_date: string; status: string; reason?: string | null }>>([]);
-  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; created_at: string }>>([]);
+  const [announcements, setAnnouncements] = useState<Array<{ id: string; title: string; content: string; author: string; author_avatar_url?: string | null; attachment_url?: string | null; is_pinned?: boolean; created_at: string }>>([]);
+  const [employeeOfMonth, setEmployeeOfMonth] = useState<{ id: string; name: string; avatar_url: string | null } | null>(null);
+  const [pendingSurveys, setPendingSurveys] = useState<Array<{ id: string; title: string; description?: string | null }>>([]);
+  const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
+  const [surveyDialogId, setSurveyDialogId] = useState<string | null>(null);
+  const [calendarLeaveData, setCalendarLeaveData] = useState<{
+    myLeaveDates: Set<string>;
+    myBusinessTripDates: Set<string>;
+    teamLeaveByDate: Map<string, string[]>;
+    teamBusinessTripByDate: Map<string, string[]>;
+    myLeaveDetailsByDate: Map<string, Array<{ leave_type: string; start_date: string; end_date: string; number_of_days?: number; reason?: string }>>;
+    myBusinessTripDetailsByDate: Map<string, Array<{ trip_type: string; destination: string; purpose?: string; start_date: string; end_date: string }>>;
+    teamLeaveDetailsByDate: Map<string, Array<{ name: string; leave_type: string; start_date: string; end_date: string }>>;
+    teamBusinessTripDetailsByDate: Map<string, Array<{ name: string; trip_type: string; destination: string; start_date: string; end_date: string }>>;
+  }>({
+    myLeaveDates: new Set(),
+    myBusinessTripDates: new Set(),
+    teamLeaveByDate: new Map(),
+    teamBusinessTripByDate: new Map(),
+    myLeaveDetailsByDate: new Map(),
+    myBusinessTripDetailsByDate: new Map(),
+    teamLeaveDetailsByDate: new Map(),
+    teamBusinessTripDetailsByDate: new Map(),
+  });
+  const [feedLoadingMore, setFeedLoadingMore] = useState(false);
+  const [hasMoreFeed, setHasMoreFeed] = useState(true);
+  const feedBottomRef = useRef<HTMLDivElement>(null);
+  const [leaveFeedItems, setLeaveFeedItems] = useState<Array<{
+    id: string;
+    type: 'leave_request';
+    employee_name: string;
+    employee_avatar_url?: string | null;
+    leave_type: string;
+    start_date: string;
+    end_date: string;
+    number_of_days?: number;
+    status: string;
+    reason?: string;
+    created_at: string;
+    approver_name?: string | null;
+  }>>([]);
   const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string; roles: string[] }>>([]);
   const [companyProfile, setCompanyProfile] = useState<{ name: string; address?: string; work_start_time?: string; work_end_time?: string } | null>(null);
+  const [calendarDateDialog, setCalendarDateDialog] = useState<{
+    dateStr: string;
+    dateLabel: string;
+    isMyLeave: boolean;
+    isMyBusinessTrip: boolean;
+    teamOnLeave: string[];
+    teamOnBusinessTrip: string[];
+    myLeaveDetails: Array<{ leave_type: string; start_date: string; end_date: string; number_of_days?: number; reason?: string }>;
+    myBusinessTripDetails: Array<{ trip_type: string; destination: string; purpose?: string; start_date: string; end_date: string }>;
+    teamLeaveDetails: Array<{ name: string; leave_type: string; start_date: string; end_date: string }>;
+    teamBusinessTripDetails: Array<{ name: string; trip_type: string; destination: string; start_date: string; end_date: string }>;
+  } | null>(null);
 
   const fetchAttendanceLog = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -78,29 +152,284 @@ const Dashboard = () => {
     setAttendanceLog(withName as AttendanceRecord[]);
   }, [currentUser?.id, currentUser?.first_name, currentUser?.last_name]);
 
-  const fetchLeaveAndAnnouncements = useCallback(async () => {
-    const [leaveRes, annRes] = await Promise.all([
-      supabase.from('leave_requests').select('*, employee:employees!employee_id(first_name, last_name)').order('created_at', { ascending: false }).limit(20),
-      supabase.from('announcements').select('*, author:employees!author_id(first_name, last_name)').order('created_at', { ascending: false }).limit(10),
-    ]);
-    setLeaveRequests((leaveRes.data || []).map((l: any) => ({
-      id: l.id,
-      employee_id: l.employee_id,
-      employee_name: l.employee ? `${l.employee.first_name} ${l.employee.last_name}` : 'Unknown',
-      leave_type: l.leave_type,
-      start_date: l.start_date,
-      end_date: l.end_date,
-      status: l.status,
-      reason: l.reason,
-    })));
-    setAnnouncements((annRes.data || []).map((a: any) => ({
+  const fetchAnnouncements = useCallback(async (before?: string) => {
+    let query = supabase
+      .from('announcements')
+      .select('*, author:employees!author_id(first_name, last_name, avatar_url)')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    if (before) query = query.lt('created_at', before);
+    const { data } = await query;
+    const mapped = (data || []).map((a: any) => ({
       id: a.id,
       title: a.title,
       content: a.content,
       author: a.author ? `${a.author.first_name} ${a.author.last_name}` : 'Unknown',
+      author_avatar_url: a.author?.avatar_url ?? null,
+      attachment_url: a.attachment_url ?? null,
+      is_pinned: a.is_pinned ?? false,
       created_at: a.created_at,
-    })));
+    }));
+    if (!before) setAnnouncements(mapped);
+    return mapped;
   }, []);
+
+  const fetchEmployeeOfMonth = useCallback(async () => {
+    const now = new Date();
+    const firstOfMonth = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+    const { data } = await supabase
+      .from('employee_of_the_month')
+      .select('employee:employees!employee_id(id, first_name, last_name, avatar_url)')
+      .eq('for_month', firstOfMonth)
+      .maybeSingle();
+    if (data?.employee) {
+      const raw = data.employee;
+      const emp = Array.isArray(raw) ? raw[0] : raw;
+      if (emp && typeof emp === 'object' && 'id' in emp) {
+        const e = emp as unknown as { id: string; first_name: string; last_name: string; avatar_url: string | null };
+        setEmployeeOfMonth({
+          id: e.id,
+          name: `${e.first_name} ${e.last_name}`,
+          avatar_url: e.avatar_url,
+        });
+      } else {
+        setEmployeeOfMonth(null);
+      }
+    } else {
+      setEmployeeOfMonth(null);
+    }
+  }, []);
+
+  const fetchPendingSurveys = useCallback(async () => {
+    if (!currentUser?.id || currentUser?.login_exempted) {
+      setPendingSurveys([]);
+      return;
+    }
+    const todayStr = format(new Date(), 'yyyy-MM-dd');
+    const { data: surveyRes } = await supabase
+      .from('surveys')
+      .select('id, title, description, start_date, end_date, target_audience, target_employee_ids')
+      .lte('start_date', todayStr)
+      .gte('end_date', todayStr);
+    const { data: respData } = await supabase
+      .from('survey_responses')
+      .select('survey_id')
+      .eq('employee_id', currentUser.id);
+    const { data: compData } = await supabase
+      .from('survey_completions')
+      .select('survey_id')
+      .eq('employee_id', currentUser.id);
+    const completedIds = new Set([
+      ...(respData || []).map((r) => r.survey_id),
+      ...(compData || []).map((r) => r.survey_id),
+    ]);
+    const userId = currentUser.id.toLowerCase();
+    const isTargeted = (a?: string, ids?: string[]) =>
+      a !== 'selected' || !ids?.length || ids.some((id) => id?.toLowerCase() === userId);
+    const pending = (surveyRes || []).filter(
+      (s) => !completedIds.has(s.id) && isTargeted(s.target_audience, s.target_employee_ids)
+    );
+    setPendingSurveys(pending.map((s) => ({ id: s.id, title: s.title, description: s.description })));
+  }, [currentUser?.id, currentUser?.login_exempted]);
+
+  const fetchLeaveFeed = useCallback(async (before?: string) => {
+    if (!currentUser?.id) return [];
+    let query = supabase
+      .from('leave_requests')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)')
+      .order('created_at', { ascending: false })
+      .limit(before ? 10 : 15);
+    if (before) query = query.lt('created_at', before);
+    const isSuperAdmin = currentUser.roles?.includes('super_admin');
+    const isAdminOrSupervisor = currentUser.roles?.includes('admin') || currentUser.roles?.includes('supervisor') || currentUser.roles?.includes('manager');
+    if (isSuperAdmin) {
+    } else if (isAdminOrSupervisor) {
+      const { data: esData } = await supabase.from('employee_supervisors').select('employee_id').eq('supervisor_id', currentUser.id);
+      const supervisedIds = new Set((esData || []).map((r) => r.employee_id));
+      const { data: empData } = await supabase.from('employees').select('id').eq('supervisor_id', currentUser.id).eq('is_active', true);
+      (empData || []).forEach((r) => supervisedIds.add(r.id));
+      if (currentUser.roles?.includes('admin')) {
+        const { data: allEmps } = await supabase.from('employees').select('id').eq('is_active', true);
+        (allEmps || []).forEach((r) => supervisedIds.add(r.id));
+      }
+      const ids = Array.from(supervisedIds);
+      if (ids.length === 0) {
+        if (!before) setLeaveFeedItems([]);
+        return [];
+      }
+      query = query.in('employee_id', ids);
+    } else {
+      query = query.eq('employee_id', currentUser.id);
+    }
+    const { data } = await query;
+    const mapped = (data || []).map((r: any) => ({
+      id: r.id,
+      type: 'leave_request' as const,
+      employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
+      employee_avatar_url: r.employee?.avatar_url ?? null,
+      leave_type: r.leave_type || '',
+      start_date: r.start_date,
+      end_date: r.end_date,
+      number_of_days: r.number_of_days,
+      status: r.status || 'pending',
+      reason: r.reason,
+      created_at: r.created_at,
+      approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
+    }));
+    if (!before) setLeaveFeedItems(mapped);
+    return mapped;
+  }, [currentUser?.id, currentUser?.roles]);
+
+  const loadMoreFeed = useCallback(async () => {
+    if (feedLoadingMore || !hasMoreFeed) return;
+    const feedItems = [
+      ...announcements.map((a) => ({ ...a, type: 'announcement' as const })),
+      ...leaveFeedItems.map((l) => ({ ...l, type: 'leave_request' as const })),
+    ].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    const cursor = feedItems[feedItems.length - 1]?.created_at;
+    if (!cursor) return;
+    setFeedLoadingMore(true);
+    try {
+      const [annData, leaveData] = await Promise.all([
+        fetchAnnouncements(cursor),
+        fetchLeaveFeed(cursor),
+      ]);
+      setAnnouncements((prev) => [...prev, ...annData]);
+      setLeaveFeedItems((prev) => [...prev, ...leaveData]);
+      setHasMoreFeed((annData.length === 10) || (leaveData.length === 10));
+    } finally {
+      setFeedLoadingMore(false);
+    }
+  }, [feedLoadingMore, hasMoreFeed, announcements, leaveFeedItems, fetchAnnouncements, fetchLeaveFeed]);
+
+  const fetchApprovedLeavesForCalendar = useCallback(async () => {
+    if (!currentUser?.id) return;
+    const year = new Date().getFullYear();
+    const rangeStart = `${year}-01-01`;
+    const rangeEnd = `${year}-12-31`;
+
+    let employeeIds: string[] = [currentUser.id];
+    const isSuperAdmin = currentUser.roles?.includes('super_admin');
+    const isAdminOrSupervisor = currentUser.roles?.includes('admin') || currentUser.roles?.includes('supervisor') || currentUser.roles?.includes('manager');
+    if (isSuperAdmin || isAdminOrSupervisor) {
+      const { data: esData } = await supabase.from('employee_supervisors').select('employee_id').eq('supervisor_id', currentUser.id);
+      const supervisedIds = new Set((esData || []).map((r) => r.employee_id));
+      const { data: empData } = await supabase.from('employees').select('id').eq('supervisor_id', currentUser.id).eq('is_active', true);
+      (empData || []).forEach((r) => supervisedIds.add(r.id));
+      if (isSuperAdmin || currentUser.roles?.includes('admin')) {
+        const { data: allEmps } = await supabase.from('employees').select('id').eq('is_active', true);
+        (allEmps || []).forEach((r) => supervisedIds.add(r.id));
+      }
+      employeeIds = Array.from(supervisedIds);
+    }
+
+    const [leaveRes, tripRes] = await Promise.all([
+      supabase
+        .from('leave_requests')
+        .select('employee_id, leave_type, start_date, end_date, number_of_days, reason, employee:employees!employee_id(first_name, last_name)')
+        .in('employee_id', employeeIds)
+        .eq('status', 'approved')
+        .gte('end_date', rangeStart)
+        .lte('start_date', rangeEnd),
+      supabase
+        .from('business_trips')
+        .select('employee_id, trip_type, destination, purpose, start_date, end_date, employee:employees!employee_id(first_name, last_name)')
+        .in('employee_id', employeeIds)
+        .eq('status', 'approved')
+        .gte('end_date', rangeStart)
+        .lte('start_date', rangeEnd),
+    ]);
+
+    const myLeaveDates = new Set<string>();
+    const myBusinessTripDates = new Set<string>();
+    const teamLeaveByDate = new Map<string, string[]>();
+    const teamBusinessTripByDate = new Map<string, string[]>();
+    const myLeaveDetailsByDate = new Map<string, Array<{ leave_type: string; start_date: string; end_date: string; number_of_days?: number; reason?: string }>>();
+    const myBusinessTripDetailsByDate = new Map<string, Array<{ trip_type: string; destination: string; purpose?: string; start_date: string; end_date: string }>>();
+    const teamLeaveDetailsByDate = new Map<string, Array<{ name: string; leave_type: string; start_date: string; end_date: string }>>();
+    const teamBusinessTripDetailsByDate = new Map<string, Array<{ name: string; trip_type: string; destination: string; start_date: string; end_date: string }>>();
+
+    (leaveRes.data || []).forEach((r: any) => {
+      const dates = getWorkingDatesInRange(r.start_date, r.end_date);
+      const name = r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown';
+      const isMe = r.employee_id === currentUser.id;
+      const detail = {
+        leave_type: r.leave_type || '',
+        start_date: r.start_date,
+        end_date: r.end_date,
+        number_of_days: r.number_of_days,
+        reason: r.reason,
+      };
+      dates.forEach((dateStr) => {
+        if (isMe) {
+          myLeaveDates.add(dateStr);
+          const arr = myLeaveDetailsByDate.get(dateStr) || [];
+          if (!arr.some((d) => d.start_date === detail.start_date && d.end_date === detail.end_date)) {
+            arr.push(detail);
+            myLeaveDetailsByDate.set(dateStr, arr);
+          }
+        } else {
+          const arr = teamLeaveByDate.get(dateStr) || [];
+          if (!arr.includes(name)) arr.push(name);
+          teamLeaveByDate.set(dateStr, arr);
+          const detailArr = teamLeaveDetailsByDate.get(dateStr) || [];
+          if (!detailArr.some((d) => d.name === name && d.start_date === detail.start_date)) {
+            detailArr.push({ name, leave_type: detail.leave_type, start_date: detail.start_date, end_date: detail.end_date });
+            teamLeaveDetailsByDate.set(dateStr, detailArr);
+          }
+        }
+      });
+    });
+
+    const TRIP_TYPE_LABELS: Record<string, string> = {
+      work_visit_domestic: 'Work Visit (Domestic)',
+      work_visit_overseas: 'Work Visit (Overseas)',
+      training: 'Training',
+    };
+
+    (tripRes.data || []).forEach((r: any) => {
+      const dates = getWorkingDatesInRange(r.start_date, r.end_date);
+      const name = r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown';
+      const isMe = r.employee_id === currentUser.id;
+      const detail = {
+        trip_type: TRIP_TYPE_LABELS[r.trip_type ?? ''] ?? r.trip_type ?? '',
+        destination: r.destination || '',
+        purpose: r.purpose,
+        start_date: r.start_date,
+        end_date: r.end_date,
+      };
+      dates.forEach((dateStr) => {
+        if (isMe) {
+          myBusinessTripDates.add(dateStr);
+          const arr = myBusinessTripDetailsByDate.get(dateStr) || [];
+          if (!arr.some((d) => d.start_date === detail.start_date && d.end_date === detail.end_date)) {
+            arr.push(detail);
+            myBusinessTripDetailsByDate.set(dateStr, arr);
+          }
+        } else {
+          const arr = teamBusinessTripByDate.get(dateStr) || [];
+          if (!arr.includes(name)) arr.push(name);
+          teamBusinessTripByDate.set(dateStr, arr);
+          const detailArr = teamBusinessTripDetailsByDate.get(dateStr) || [];
+          if (!detailArr.some((d) => d.name === name && d.start_date === detail.start_date)) {
+            detailArr.push({ name, trip_type: detail.trip_type, destination: detail.destination, start_date: detail.start_date, end_date: detail.end_date });
+            teamBusinessTripDetailsByDate.set(dateStr, detailArr);
+          }
+        }
+      });
+    });
+
+    setCalendarLeaveData({
+      myLeaveDates,
+      myBusinessTripDates,
+      teamLeaveByDate,
+      teamBusinessTripByDate,
+      myLeaveDetailsByDate,
+      myBusinessTripDetailsByDate,
+      teamLeaveDetailsByDate,
+      teamBusinessTripDetailsByDate,
+    });
+  }, [currentUser?.id, currentUser?.roles]);
 
   const fetchEmployeesAndCompany = useCallback(async () => {
     const [empRes, roleRes, companyRes] = await Promise.all([
@@ -189,11 +518,54 @@ const Dashboard = () => {
   useEffect(() => {
     if (!currentUser) return;
     fetchAttendanceLog();
-    fetchLeaveAndAnnouncements();
+    fetchAnnouncements();
+    fetchLeaveFeed();
+    fetchPendingSurveys();
+    fetchApprovedLeavesForCalendar();
     fetchEmployeesAndCompany();
     fetchWorkLocations();
     fetchAssignedShift();
-  }, [currentUser, fetchAttendanceLog, fetchLeaveAndAnnouncements, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift]);
+    fetchEmployeeOfMonth();
+  }, [currentUser, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar, fetchEmployeesAndCompany, fetchWorkLocations, fetchAssignedShift, fetchEmployeeOfMonth]);
+
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    const channel = supabase
+      .channel('dashboard-realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance_records', filter: `employee_id=eq.${currentUser.id}` },
+        () => fetchAttendanceLog()
+      )
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'announcements' }, () => fetchAnnouncements())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'employee_of_the_month' }, () => fetchEmployeeOfMonth())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_requests' }, () => {
+        fetchLeaveFeed();
+        fetchApprovedLeavesForCalendar();
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, () => fetchPendingSurveys())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'survey_responses', filter: `employee_id=eq.${currentUser.id}` }, () => fetchPendingSurveys())
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'survey_completions', filter: `employee_id=eq.${currentUser.id}` }, () => fetchPendingSurveys())
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentUser?.id, fetchAttendanceLog, fetchAnnouncements, fetchLeaveFeed, fetchPendingSurveys, fetchApprovedLeavesForCalendar, fetchEmployeeOfMonth]);
+
+  useEffect(() => {
+    const el = feedBottomRef.current;
+    if (!el) return;
+    const obs = new IntersectionObserver(
+      (entries) => {
+        if (!entries[0]?.isIntersecting) return;
+        loadMoreFeed();
+      },
+      { root: null, rootMargin: '100px', threshold: 0 }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [loadMoreFeed]);
 
   useEffect(() => {
     const today = new Date().toISOString().split('T')[0];
@@ -382,9 +754,11 @@ const Dashboard = () => {
   const shiftName = assignedShift?.name ?? 'REG';
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 min-h-0 lg:h-full lg:overflow-hidden items-stretch">
       {/* LEFT COLUMN */}
-      <div className="lg:col-span-3 space-y-5">
+      <div className="lg:col-span-3 flex flex-col min-h-0">
+        <ScrollArea className="flex-1 min-h-0 lg:h-[calc(100vh-10rem)] overscroll-contain pr-2">
+          <div className="space-y-5">
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-base font-semibold">Attendance</CardTitle>
@@ -392,8 +766,9 @@ const Dashboard = () => {
           <CardContent className="space-y-4">
             <div className="flex items-center gap-3 min-w-0">
               <Avatar className="h-10 w-10 shrink-0">
+                <AvatarImage src={currentUser.avatar_url} alt="" />
                 <AvatarFallback className="bg-primary/10 text-primary font-semibold text-sm">
-                  {currentUser.first_name[0]}{currentUser.last_name[0]}
+                  {getAvatarFallback(currentUser.first_name, currentUser.last_name)}
                 </AvatarFallback>
               </Avatar>
               <div className="min-w-0 flex-1">
@@ -413,9 +788,12 @@ const Dashboard = () => {
 
               <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4">
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-primary">{currentUser.first_name[0]}{currentUser.last_name[0]}</span>
-                  </div>
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarImage src={currentUser.avatar_url ?? undefined} alt="" />
+                    <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
+                      {getAvatarFallback(currentUser.first_name, currentUser.last_name)}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">Start Time</p>
                     <div className="flex items-center gap-1">
@@ -425,9 +803,12 @@ const Dashboard = () => {
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <div className="h-8 w-8 shrink-0 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span className="text-[10px] font-bold text-primary">{currentUser.first_name[0]}{currentUser.last_name[0]}</span>
-                  </div>
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarImage src={currentUser.avatar_url ?? undefined} alt="" />
+                    <AvatarFallback className="bg-primary/10 text-primary text-[10px] font-bold">
+                      {getAvatarFallback(currentUser.first_name, currentUser.last_name)}
+                    </AvatarFallback>
+                  </Avatar>
                   <div className="min-w-0">
                     <p className="text-xs text-muted-foreground">End Time</p>
                     <div className="flex items-center gap-1">
@@ -452,14 +833,29 @@ const Dashboard = () => {
                   >
                     {loadingLocation ? '...' : 'Time In'}
                   </Button>
-                  <Button
-                    className="w-full sm:flex-1"
-                    onClick={() => navigate('/dashboard/time-in-out?mode=out')}
-                    disabled={loadingLocation || hasTimeOut || !hasTimeIn}
-                    variant={hasTimeOut || !hasTimeIn ? 'outline' : 'default'}
-                  >
-                    {loadingLocation ? '...' : 'Time Out'}
-                  </Button>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="w-full sm:flex-1 flex">
+                        <Button
+                          className="w-full"
+                          onClick={() => navigate('/dashboard/time-in-out?mode=out')}
+                          disabled={loadingLocation || hasTimeOut || !hasTimeIn || !canTimeOut}
+                          variant={hasTimeOut || !hasTimeIn || !canTimeOut ? 'outline' : 'default'}
+                        >
+                          {loadingLocation ? '...' : 'Time Out'}
+                        </Button>
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                      {!canTimeOut
+                        ? 'Complete pending acknowledgements and surveys to time out.'
+                        : hasTimeOut
+                          ? 'Already timed out.'
+                          : !hasTimeIn
+                            ? 'Time in first.'
+                            : 'Record time out'}
+                    </TooltipContent>
+                  </Tooltip>
                 </div>
               )}
 
@@ -481,6 +877,8 @@ const Dashboard = () => {
           </CardContent>
         </Card>
 
+  
+
         <Card>
           <CardContent className="pt-5 space-y-4">
             <div>
@@ -492,8 +890,9 @@ const Dashboard = () => {
                 <p className="text-xs font-semibold text-foreground mb-2">Supervisor</p>
                 <div className="flex flex-col items-center">
                   <Avatar className="h-14 w-14 border-2 border-primary/20">
+                    <AvatarImage src={supervisor.avatar_url} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                      {supervisor.first_name[0]}{supervisor.last_name[0]}
+                      {getAvatarFallback(supervisor.first_name, supervisor.last_name)}
                     </AvatarFallback>
                   </Avatar>
                   <p className="text-xs font-medium text-foreground mt-1.5 text-center">
@@ -508,8 +907,9 @@ const Dashboard = () => {
                 {coworkers.slice(0, 4).map((cw) => (
                   <div key={cw.id} className="flex flex-col items-center shrink-0">
                     <Avatar className="h-10 w-10">
+                      <AvatarImage src={cw.avatar_url} alt="" />
                       <AvatarFallback className="bg-muted text-muted-foreground text-xs">
-                        {cw.first_name[0]}{cw.last_name[0]}
+                        {getAvatarFallback(cw.first_name, cw.last_name)}
                       </AvatarFallback>
                     </Avatar>
                     <p className="text-[10px] text-muted-foreground mt-1 text-center max-w-[60px] truncate">{cw.first_name}</p>
@@ -519,74 +919,150 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+          </div>
+        </ScrollArea>
       </div>
 
-      {/* CENTER COLUMN */}
-      <div className="lg:col-span-6 space-y-5">
-        <div>
-          <h3 className="font-semibold text-lg text-foreground mb-3">All Feeds</h3>
-          <div className="space-y-3">
-            {leaveRequests.map((leave) => (
-              <Card key={leave.id}>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                          {leave.employee_name.split(' ').map((n) => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{leave.employee_name.toUpperCase()}</p>
-                        <p className="text-xs text-muted-foreground">{leave.start_date}</p>
+      {/* CENTER COLUMN - hidden on mobile */}
+      <div className="hidden lg:flex lg:col-span-6 flex-col min-h-0">
+        {employeeOfMonth && (
+          <Card className="mb-4 shrink-0">
+            <CardContent className="pt-4 pb-4 flex items-center gap-4">
+              <Avatar className="h-16 w-16">
+                <AvatarImage src={employeeOfMonth.avatar_url ?? undefined} alt="" />
+                <AvatarFallback className="bg-primary/10 text-primary text-lg font-semibold">
+                  {getAvatarFallbackFromFullName(employeeOfMonth.name)}
+                </AvatarFallback>
+              </Avatar>
+              <div>
+                <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+                  <Award className="h-3.5 w-3.5" />
+                  Employee of the Month
+                </p>
+                <p className="text-lg font-semibold text-foreground">{employeeOfMonth.name}</p>
+                <p className="text-xs text-muted-foreground">{new Date().toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}</p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+        <h3 className="font-semibold text-lg text-foreground mb-3 shrink-0">All Feeds</h3>
+        <ScrollArea className="flex-1 min-h-0 lg:h-[calc(100vh-10rem)] overscroll-contain">
+          <div className="space-y-3 pr-2">
+            {[
+              ...announcements.map((a) => ({ ...a, type: 'announcement' as const })),
+              ...leaveFeedItems.map((l) => ({ ...l, type: 'leave_request' as const })),
+            ]
+              .sort((a, b) => {
+                const aPinned = a.type === 'announcement' && (a as any).is_pinned;
+                const bPinned = b.type === 'announcement' && (b as any).is_pinned;
+                if (aPinned && !bPinned) return -1;
+                if (!aPinned && bPinned) return 1;
+                return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+              })
+              .map((item) =>
+                item.type === 'announcement' ? (
+                  <Card key={`ann-${item.id}`}>
+                    <CardContent className="pt-4 pb-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={item.author_avatar_url} alt="" />
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                              {getAvatarFallbackFromFullName(item.author)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                              {(item as any).is_pinned && <Pin className="h-3.5 w-3.5 text-muted-foreground shrink-0" />}
+                              {item.title}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{new Date(item.created_at).toLocaleDateString()}</p>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <Badge
-                      variant="outline"
-                      className={
-                        leave.status === 'approved'
-                          ? 'bg-success text-success-foreground border-success'
-                          : leave.status === 'pending'
-                          ? 'bg-warning text-warning-foreground border-warning'
-                          : 'bg-destructive text-destructive-foreground border-destructive'
-                      }
-                    >
-                      {leave.status === 'approved' ? 'Fully Approved' : leave.status === 'pending' ? 'Pending' : 'Rejected'}
-                    </Badge>
-                  </div>
-                  <div className="ml-[52px] mt-1">
-                    <p className="text-sm text-foreground capitalize">{leave.leave_type} Leave Request</p>
-                    <p className="text-xs text-muted-foreground font-mono">LR-{leave.id.slice(0, 8)}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-            {announcements.map((a) => (
-              <Card key={a.id}>
-                <CardContent className="pt-4 pb-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <Avatar className="h-10 w-10">
-                        <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
-                          {a.author.split(' ').map((n) => n[0]).join('')}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">{a.title}</p>
-                        <p className="text-xs text-muted-foreground">{new Date(a.created_at).toLocaleDateString()}</p>
+                      <p className="ml-[52px] mt-1 text-sm text-muted-foreground">{item.content}</p>
+                      {item.attachment_url && (
+                        isImageUrl(item.attachment_url) ? (
+                          <div className="ml-[52px] mt-3">
+                            <img src={item.attachment_url} alt="Attachment" className="max-w-full max-h-64 rounded-lg border object-contain" />
+                          </div>
+                        ) : (
+                          <a
+                            href={item.attachment_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="ml-[52px] mt-3 inline-flex items-center gap-2 px-3 py-2 rounded-lg border bg-muted/50 hover:bg-muted text-sm font-medium transition-colors"
+                          >
+                            <ExternalLink className="h-4 w-4" />
+                            View attachment
+                          </a>
+                        )
+                      )}
+                    </CardContent>
+                  </Card>
+                ) : (
+                  <Card
+                    key={`leave-${item.id}`}
+                    className="cursor-pointer hover:border-primary/50 transition-colors"
+                    onClick={() => navigate(currentUser?.roles?.some((r) => ['super_admin', 'admin', 'supervisor', 'manager'].includes(r)) ? '/dashboard/leave?tab=approval' : '/dashboard/leave')}
+                  >
+                    <CardContent className="pt-4 pb-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-center gap-3">
+                          <Avatar className="h-10 w-10">
+                            <AvatarImage src={item.employee_avatar_url} alt="" />
+                            <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
+                              {getAvatarFallbackFromFullName(item.employee_name)}
+                            </AvatarFallback>
+                          </Avatar>
+                          <div>
+                            <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                              {item.employee_name} — {item.leave_type}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(item.start_date).toLocaleDateString()} – {new Date(item.end_date).toLocaleDateString()}
+                              {item.number_of_days != null ? ` • ${item.number_of_days} day${item.number_of_days !== 1 ? 's' : ''}` : ''}
+                            </p>
+                          </div>
+                        </div>
+                        <Badge
+                          variant="outline"
+                          className={
+                            item.status === 'approved'
+                              ? 'bg-green-100 text-green-700 border-green-200'
+                              : item.status === 'rejected'
+                                ? 'bg-red-100 text-red-700 border-red-200'
+                                : 'bg-yellow-100 text-yellow-700 border-yellow-200'
+                          }
+                        >
+                          {item.status}
+                        </Badge>
                       </div>
-                    </div>
-                  </div>
-                  <p className="ml-[52px] mt-1 text-sm text-muted-foreground">{a.content}</p>
-                </CardContent>
-              </Card>
-            ))}
+                      {item.reason && <p className="ml-[52px] mt-1 text-sm text-muted-foreground line-clamp-2">{item.reason}</p>}
+                      {(item.status === 'approved' || item.status === 'rejected') && item.approver_name && (
+                        <p className="ml-[52px] mt-1 text-xs text-muted-foreground">
+                          {item.status === 'approved' ? 'Approved' : 'Rejected'} by {item.approver_name}
+                        </p>
+                      )}
+                    </CardContent>
+                  </Card>
+                )
+              )}
+            <div ref={feedBottomRef} className="h-4" />
+            {feedLoadingMore && (
+              <div className="flex justify-center py-4">
+                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+              </div>
+            )}
           </div>
-        </div>
+        </ScrollArea>
       </div>
 
       {/* RIGHT COLUMN */}
-      <div className="lg:col-span-3 space-y-5">
+      <div className="lg:col-span-3 flex flex-col min-h-0">
+        <ScrollArea className="flex-1 min-h-0 lg:h-[calc(100vh-10rem)] overscroll-contain pr-2">
+          <div className="space-y-5">
         {/* Calendar - system date */}
         <Card>
           <CardHeader className="pb-3">
@@ -630,21 +1106,97 @@ const Dashboard = () => {
                 const todayDate = new Date();
                 const isToday = (d: number) =>
                   todayDate.getFullYear() === year && todayDate.getMonth() === month && todayDate.getDate() === d;
+                const pad = (n: number) => String(n).padStart(2, '0');
                 const cells: React.ReactNode[] = [];
                 for (let i = 0; i < startPad; i++) cells.push(<div key={`pad-${i}`} className="aspect-square" />);
                 for (let d = 1; d <= daysInMonth; d++) {
-                  cells.push(
+                  const dateStr = `${year}-${pad(month + 1)}-${pad(d)}`;
+                  const isMyLeave = calendarLeaveData.myLeaveDates.has(dateStr);
+                  const isMyBusinessTrip = calendarLeaveData.myBusinessTripDates.has(dateStr);
+                  const teamOnLeave = calendarLeaveData.teamLeaveByDate.get(dateStr) || [];
+                  const teamOnBusinessTrip = calendarLeaveData.teamBusinessTripByDate.get(dateStr) || [];
+                  const hasTeamLeave = teamOnLeave.length > 0;
+                  const hasTeamBusinessTrip = teamOnBusinessTrip.length > 0;
+                  const hasLeave = isMyLeave || isMyBusinessTrip || hasTeamLeave || hasTeamBusinessTrip;
+                  const tooltipText = isMyBusinessTrip
+                    ? `You're on business trip`
+                    : isMyLeave
+                      ? `You're on leave`
+                      : hasTeamBusinessTrip || hasTeamLeave
+                        ? [
+                            hasTeamLeave ? `${teamOnLeave.length} on leave: ${teamOnLeave.join(', ')}` : null,
+                            hasTeamBusinessTrip ? `${teamOnBusinessTrip.length} on business trip: ${teamOnBusinessTrip.join(', ')}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ')
+                        : null;
+                  const handleCellClick = hasLeave
+                    ? () =>
+                        setCalendarDateDialog({
+                          dateStr,
+                          dateLabel: new Date(dateStr + 'T12:00:00').toLocaleDateString('en-US', {
+                            weekday: 'long',
+                            month: 'long',
+                            day: 'numeric',
+                            year: 'numeric',
+                          }),
+                          isMyLeave,
+                          isMyBusinessTrip,
+                          teamOnLeave,
+                          teamOnBusinessTrip,
+                          myLeaveDetails: calendarLeaveData.myLeaveDetailsByDate.get(dateStr) || [],
+                          myBusinessTripDetails: calendarLeaveData.myBusinessTripDetailsByDate.get(dateStr) || [],
+                          teamLeaveDetails: calendarLeaveData.teamLeaveDetailsByDate.get(dateStr) || [],
+                          teamBusinessTripDetails: calendarLeaveData.teamBusinessTripDetailsByDate.get(dateStr) || [],
+                        })
+                    : undefined;
+                  const cell = (
                     <div
-                      key={d}
+                      role={hasLeave ? 'button' : undefined}
+                      tabIndex={hasLeave ? 0 : undefined}
+                      onClick={handleCellClick}
+                      onKeyDown={
+                        hasLeave
+                          ? (e) => {
+                              if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                handleCellClick?.();
+                              }
+                            }
+                          : undefined
+                      }
                       className={cn(
-                        'aspect-square flex items-center justify-center text-sm rounded-md',
+                        'aspect-square flex flex-col items-center justify-center text-sm rounded-md transition-colors',
+                        hasLeave && 'cursor-pointer',
                         isToday(d)
                           ? 'bg-primary text-primary-foreground font-semibold'
-                          : 'text-foreground hover:bg-muted'
+                          : hasLeave
+                            ? isMyLeave || isMyBusinessTrip
+                              ? 'bg-primary/15 text-primary border border-primary/30 font-medium hover:bg-primary/20'
+                              : 'bg-amber-100/80 dark:bg-amber-950/50 border border-amber-200/60 text-amber-800 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-950/70'
+                            : 'text-foreground hover:bg-muted'
                       )}
                     >
-                      {d}
+                      <span>{d}</span>
+                      {hasLeave && !isToday(d) && (
+                        <span className="mt-0.5 h-1 w-1 rounded-full bg-current opacity-60" aria-hidden />
+                      )}
                     </div>
+                  );
+                  cells.push(
+                    tooltipText ? (
+                      <Tooltip key={d}>
+                        <TooltipTrigger asChild>{cell}</TooltipTrigger>
+                        <TooltipContent side="top" className="max-w-[220px]">
+                          {tooltipText}
+                          {hasLeave && (
+                            <span className="block mt-1 text-[10px] opacity-80">Click for details</span>
+                          )}
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <React.Fragment key={d}>{cell}</React.Fragment>
+                    )
                   );
                 }
                 return cells;
@@ -652,6 +1204,135 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+
+        <Dialog
+          open={!!calendarDateDialog}
+          onOpenChange={(open) => !open && setCalendarDateDialog(null)}
+        >
+          <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="text-base">
+                {calendarDateDialog?.dateLabel}
+              </DialogTitle>
+              <DialogDescription>
+                {calendarDateDialog?.isMyBusinessTrip && calendarDateDialog?.isMyLeave
+                  ? "You're on leave and business trip"
+                  : calendarDateDialog?.isMyBusinessTrip
+                    ? "You're on business trip"
+                    : calendarDateDialog?.isMyLeave
+                      ? "You're on leave"
+                      : (calendarDateDialog?.teamOnLeave.length ?? 0) + (calendarDateDialog?.teamOnBusinessTrip.length ?? 0) > 0
+                        ? 'Team members on leave or business trip'
+                        : ''}
+              </DialogDescription>
+            </DialogHeader>
+            {calendarDateDialog && (
+              <div className="space-y-4 py-2">
+                {calendarDateDialog.myLeaveDetails.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      Your leave
+                    </p>
+                    <div className="space-y-3 rounded-lg border p-3 bg-muted/30">
+                      {calendarDateDialog.myLeaveDetails.map((l, i) => (
+                        <div key={i} className="text-sm space-y-1">
+                          <p className="font-medium capitalize">{l.leave_type.replace('_', ' ')}</p>
+                          <p className="text-muted-foreground text-xs">
+                            {new Date(l.start_date).toLocaleDateString()} – {new Date(l.end_date).toLocaleDateString()}
+                            {l.number_of_days != null ? ` • ${l.number_of_days} day${l.number_of_days !== 1 ? 's' : ''}` : ''}
+                          </p>
+                          {l.reason && <p className="text-xs text-muted-foreground line-clamp-2">{l.reason}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {calendarDateDialog.myBusinessTripDetails.length > 0 && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                      <Briefcase className="h-3.5 w-3.5" />
+                      Your business trip
+                    </p>
+                    <div className="space-y-3 rounded-lg border p-3 bg-muted/30">
+                      {calendarDateDialog.myBusinessTripDetails.map((t, i) => (
+                        <div key={i} className="text-sm space-y-1">
+                          <p className="font-medium">{t.trip_type || 'Business trip'}</p>
+                          <p className="text-muted-foreground text-xs">{t.destination}</p>
+                          <p className="text-muted-foreground text-xs">
+                            {new Date(t.start_date).toLocaleDateString()} – {new Date(t.end_date).toLocaleDateString()}
+                          </p>
+                          {t.purpose && <p className="text-xs text-muted-foreground line-clamp-2">{t.purpose}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {(calendarDateDialog.teamLeaveDetails.length > 0 || calendarDateDialog.teamBusinessTripDetails.length > 0) && (
+                  <div className="space-y-2 pt-2 border-t">
+                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Team</p>
+                    {calendarDateDialog.teamLeaveDetails.length > 0 && (
+                      <div className="space-y-2 rounded-lg border p-3 bg-muted/30">
+                        {calendarDateDialog.teamLeaveDetails.map((l, i) => (
+                          <div key={i} className="text-sm space-y-0.5">
+                            <p className="font-medium">{l.name}</p>
+                            <p className="text-muted-foreground text-xs capitalize">{l.leave_type.replace('_', ' ')}</p>
+                            <p className="text-muted-foreground text-xs">
+                              {new Date(l.start_date).toLocaleDateString()} – {new Date(l.end_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {calendarDateDialog.teamBusinessTripDetails.length > 0 && (
+                      <div className="space-y-2 rounded-lg border p-3 bg-muted/30 mt-2">
+                        {calendarDateDialog.teamBusinessTripDetails.map((t, i) => (
+                          <div key={i} className="text-sm space-y-0.5">
+                            <p className="font-medium">{t.name}</p>
+                            <p className="text-muted-foreground text-xs">{t.trip_type || 'Business trip'} • {t.destination}</p>
+                            <p className="text-muted-foreground text-xs">
+                              {new Date(t.start_date).toLocaleDateString()} – {new Date(t.end_date).toLocaleDateString()}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex flex-wrap gap-2 pt-2 border-t">
+                  {(calendarDateDialog.isMyLeave || calendarDateDialog.teamOnLeave.length > 0) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setCalendarDateDialog(null);
+                        navigate(currentUser?.roles?.some((r) => ['super_admin', 'admin', 'supervisor', 'manager'].includes(r)) ? '/dashboard/leave?tab=approval' : '/dashboard/leave');
+                      }}
+                    >
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      Go to Leave
+                    </Button>
+                  )}
+                  {(calendarDateDialog.isMyBusinessTrip || calendarDateDialog.teamOnBusinessTrip.length > 0) && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="gap-1.5"
+                      onClick={() => {
+                        setCalendarDateDialog(null);
+                        navigate('/dashboard/business-trip');
+                      }}
+                    >
+                      <Briefcase className="h-3.5 w-3.5" />
+                      Go to Business Trips
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         <Card>
           <CardHeader className="pb-2">
@@ -672,12 +1353,40 @@ const Dashboard = () => {
                 </div>
               </TabsContent>
               <TabsContent value="survey" className="pt-6">
-                <div className="flex flex-col items-center text-center py-4">
-                  <div className="h-20 w-20 bg-muted rounded-lg flex items-center justify-center mb-3">
-                    <FileText className="h-8 w-8 text-muted-foreground/40" />
+                {pendingSurveys.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground mb-2">Complete these surveys to unlock Time Out.</p>
+                    {pendingSurveys.map((s) => (
+                      <div
+                        key={s.id}
+                        className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/50 hover:border-primary/50 transition-colors"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="font-medium text-sm text-foreground truncate">{s.title}</p>
+                          {s.description && (
+                            <p className="text-xs text-muted-foreground truncate mt-0.5">{s.description}</p>
+                          )}
+                        </div>
+                        <Button
+                          size="sm"
+                          onClick={() => {
+                            setSurveyDialogId(s.id);
+                            setSurveyDialogOpen(true);
+                          }}
+                        >
+                          Take Survey
+                        </Button>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-sm text-muted-foreground">No records to display</p>
-                </div>
+                ) : (
+                  <div className="flex flex-col items-center text-center py-4">
+                    <div className="h-20 w-20 bg-muted rounded-lg flex items-center justify-center mb-3">
+                      <FileText className="h-8 w-8 text-muted-foreground/40" />
+                    </div>
+                    <p className="text-sm text-muted-foreground">No surveys to complete</p>
+                  </div>
+                )}
               </TabsContent>
             </Tabs>
           </CardContent>
@@ -705,7 +1414,22 @@ const Dashboard = () => {
             </div>
           </CardContent>
         </Card>
+          </div>
+        </ScrollArea>
       </div>
+
+      <SurveyAnswerDialog
+        surveyId={surveyDialogId}
+        open={surveyDialogOpen}
+        onOpenChange={(o) => {
+          setSurveyDialogOpen(o);
+          if (!o) setSurveyDialogId(null);
+        }}
+        onSuccess={() => {
+          fetchPendingSurveys();
+          refetchCompliance();
+        }}
+      />
 
       <Dialog open={attendanceLogOpen} onOpenChange={setAttendanceLogOpen}>
         <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">

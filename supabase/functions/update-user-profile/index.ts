@@ -13,6 +13,17 @@ serve(async (req) => {
 
   try {
     const auth = await verifyUserJwt(req)
+    if (!auth) {
+      const authHeader = req.headers.get('Authorization')
+      if (!authHeader?.startsWith('Bearer ')) {
+        console.error('[update-user-profile] Missing or invalid Authorization header')
+        return new Response(JSON.stringify({ error: 'Missing or invalid Authorization header' }), {
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+          status: 401,
+        })
+      }
+      console.error('[update-user-profile] JWT verification failed - token may be expired or invalid')
+    }
     const forbidden = requireAdmin(auth, req)
     if (forbidden) return forbidden
 
@@ -48,6 +59,7 @@ serve(async (req) => {
       department,
       position,
       supervisor_id,
+      employment_status_id,
       is_active,
       hired_date,
       avatar_url,
@@ -87,6 +99,10 @@ serve(async (req) => {
     if (department !== undefined) updateData.department = department
     if (position !== undefined) updateData.position = position
     if (supervisor_id !== undefined) updateData.supervisor_id = supervisor_id
+    // Only set employment_status_id when provided (valid UUID); never set to null - would overwrite existing value
+    if (employment_status_id != null && typeof employment_status_id === 'string' && employment_status_id.trim() !== '') {
+      updateData.employment_status_id = employment_status_id;
+    }
     if (is_active !== undefined) updateData.is_active = is_active
     if (hired_date !== undefined) updateData.hired_date = hired_date
     if (avatar_url !== undefined) updateData.avatar_url = avatar_url

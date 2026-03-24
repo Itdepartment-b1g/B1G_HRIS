@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useLocation, Outlet } from 'react-router-dom';
 import {
   ChevronDown,
@@ -12,28 +12,80 @@ import {
   X,
   Building2,
 } from 'lucide-react';
-import type { Employee } from '@/types';
+import type { Employee, UserRole } from '@/types';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { cn } from '@/lib/utils';
+import { cn, getAvatarFallback } from '@/lib/utils';
 import { navDropdowns } from '@/lib/navConfig';
-import type { NavDropdown } from '@/lib/navConfig';
 import MobileBottomNav from '@/components/MobileBottomNav';
+import ActivityPopup from '@/components/ActivityPopup';
+import { ActivityComplianceProvider } from '@/contexts/ActivityComplianceContext';
 
 const DashboardLayout = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, loading } = useCurrentUser();
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const flattenedNavItems = useMemo(() => {
+    const items: Array<{ label: string; path: string; description?: string; dropdownLabel: string; icon: typeof Building2; iconBg?: string; iconColor?: string }> = [];
+    navDropdowns.forEach((d) => {
+      d.items
+        .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r as UserRole))))
+        .forEach((item) => {
+          items.push({
+            label: item.label,
+            path: item.path,
+            description: item.description,
+            dropdownLabel: d.label,
+            icon: item.icon,
+            iconBg: item.iconBg,
+            iconColor: item.iconColor,
+          });
+        });
+    });
+    return items;
+  }, [user?.roles]);
+
+  const searchResults = useMemo(() => {
+    if (!searchQuery.trim()) return flattenedNavItems.slice(0, 10);
+    const q = searchQuery.toLowerCase();
+    return flattenedNavItems
+      .filter(
+        (item) =>
+          item.label.toLowerCase().includes(q) ||
+          item.description?.toLowerCase().includes(q) ||
+          item.path.toLowerCase().includes(q)
+      )
+      .slice(0, 10);
+  }, [flattenedNavItems, searchQuery]);
 
   useEffect(() => {
     if (!loading && !user) navigate('/');
   }, [loading, user, navigate]);
+
+  // When user returns from idle (tab visible), proactively validate session so edge function calls use fresh token
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === 'visible' && user) {
+        import('@/lib/supabase').then(({ supabase }) =>
+          supabase.auth.refreshSession().catch(() => {
+            // Refresh failed - global onAuthStateChange will handle redirect
+          })
+        );
+      }
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, [user]);
 
   // Record / refresh current session for Active Sessions tracking
   useEffect(() => {
@@ -93,11 +145,24 @@ const DashboardLayout = () => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpenDropdown(null);
+        setSearchOpen(false);
         setProfileOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+        setSearchOpen(true);
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
   }, []);
 
   const handleLogout = async () => {
@@ -107,10 +172,17 @@ const DashboardLayout = () => {
 
   if (loading || !user) return null;
 
-  const initials = `${user.first_name[0]}${user.last_name[0]}`;
+  const initials = getAvatarFallback(user.first_name, user.last_name);
 
   return (
-    <div className="flex flex-col min-h-screen bg-background" ref={dropdownRef}>
+    <ActivityComplianceProvider userId={user?.id}>
+    <div
+      className={cn(
+        'flex flex-col min-h-screen bg-background',
+        location.pathname === '/dashboard' && 'lg:h-screen lg:overflow-hidden'
+      )}
+      ref={dropdownRef}
+    >
       {/* Top Navbar - hidden on mobile, visible on desktop */}
       <header className="hidden lg:block sticky top-0 z-50 border-b border-white/10 bg-black" style={{ boxShadow: 'var(--shadow-sm)' }}>
         <div className="flex items-center justify-between h-16 lg:h-[72px] px-4 lg:px-6 max-w-[1440px] mx-auto w-full">
@@ -154,38 +226,38 @@ const DashboardLayout = () => {
                           dropdown.grid ? "grid grid-cols-2 gap-3" : "flex flex-col"
                         )}>
                           {dropdown.items
-                            .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r))))
+                            .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r as UserRole))))
                             .map((item) => {
-                            const Icon = item.icon;
-                            return (
-                              <button
-                                key={item.path}
-                                onClick={() => {
-                                  navigate(item.path);
-                                  setOpenDropdown(null);
-                                }}
-                                className={cn(
-                                  "flex items-start gap-3 rounded-lg text-left transition-colors border border-transparent hover:border-gray-200 hover:bg-gray-50 w-full",
-                                  dropdown.grid ? "p-4" : "p-3",
-                                  location.pathname === item.path && "bg-primary/5 border-primary/20"
-                                )}
-                              >
-                                <div className={cn(
-                                  "shrink-0 rounded-lg flex items-center justify-center",
-                                  item.iconBg || "bg-gray-100",
-                                  dropdown.grid ? "w-10 h-10" : "w-9 h-9"
-                                )}>
-                                  <Icon className={cn("h-5 w-5", item.iconColor || "text-gray-600")} />
-                                </div>
-                                <div className="min-w-0 flex-1">
-                                  <p className="font-semibold text-gray-900 text-sm">{item.label}</p>
-                                  {item.description && (
-                                    <p className="text-xs text-gray-500 mt-0.5">{item.description}</p>
+                              const Icon = item.icon;
+                              return (
+                                <button
+                                  key={item.path}
+                                  onClick={() => {
+                                    navigate(item.path);
+                                    setOpenDropdown(null);
+                                  }}
+                                  className={cn(
+                                    "flex items-start gap-3 rounded-lg text-left transition-colors border border-transparent hover:border-gray-200 hover:bg-gray-50 w-full",
+                                    dropdown.grid ? "p-4" : "p-3",
+                                    location.pathname === item.path && "bg-primary/5 border-primary/20"
                                   )}
-                                </div>
-                              </button>
-                            );
-                          })}
+                                >
+                                  <div className={cn(
+                                    "shrink-0 rounded-lg flex items-center justify-center",
+                                    item.iconBg || "bg-gray-100",
+                                    dropdown.grid ? "w-10 h-10" : "w-9 h-9"
+                                  )}>
+                                    <Icon className={cn("h-5 w-5", item.iconColor || "text-gray-600")} />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <p className="font-semibold text-gray-900 text-sm">{item.label}</p>
+                                    {item.description && (
+                                      <p className="text-xs text-gray-500 mt-0.5">{item.description}</p>
+                                    )}
+                                  </div>
+                                </button>
+                              );
+                            })}
                         </div>
                       </div>
                     </div>
@@ -198,12 +270,66 @@ const DashboardLayout = () => {
           {/* Right: Search + Notifications + Profile */}
           <div className="flex items-center gap-3">
             <div className="hidden md:flex items-center relative">
-              <Search className="absolute left-3 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search"
-                className="pl-9 w-48 h-9 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus-visible:bg-white/15 focus-visible:border-white/30 focus-visible:ring-0"
-              />
-              <kbd className="absolute right-3 text-[10px] text-gray-400 bg-white/10 px-1.5 py-0.5 rounded font-mono">Ctrl+/</kbd>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  ref={searchInputRef}
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onFocus={() => setSearchOpen(true)}
+                  onBlur={() => setTimeout(() => setSearchOpen(false), 180)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Escape') {
+                      setSearchOpen(false);
+                      searchInputRef.current?.blur();
+                    } else if (e.key === 'Enter' && searchResults.length > 0) {
+                      e.preventDefault();
+                      navigate(searchResults[0].path);
+                      setSearchQuery('');
+                      setSearchOpen(false);
+                    }
+                  }}
+                  placeholder="Search"
+                  className="pl-9 pr-16 w-48 h-9 bg-white/10 border-white/20 text-white placeholder:text-gray-400 focus-visible:bg-white/15 focus-visible:border-white/30 focus-visible:ring-0"
+                />
+                <kbd className="absolute right-3 top-1/2 -translate-y-1/2 text-[10px] text-gray-400 bg-white/10 px-1.5 py-0.5 rounded font-mono">Ctrl+/</kbd>
+                {(searchOpen && (searchQuery.trim() || searchResults.length > 0)) && (
+                  <div
+                    className="absolute top-full left-0 mt-1 w-64 bg-gray-900 border border-white/20 rounded-lg py-2 shadow-xl z-50 max-h-[320px] overflow-y-auto"
+                    onMouseDown={(e) => e.preventDefault()}
+                  >
+                    {searchResults.length === 0 ? (
+                      <p className="px-4 py-3 text-sm text-gray-400">No results</p>
+                    ) : (
+                      searchResults.map((item) => {
+                        const Icon = item.icon;
+                        return (
+                          <button
+                            key={item.path}
+                            type="button"
+                            onClick={() => {
+                              navigate(item.path);
+                              setSearchQuery('');
+                              setSearchOpen(false);
+                            }}
+                            className="flex items-center gap-3 w-full px-4 py-2.5 text-left hover:bg-white/10 transition-colors"
+                          >
+                            <div className={cn('shrink-0 rounded-lg flex items-center justify-center w-9 h-9', item.iconBg || 'bg-white/10')}>
+                              <Icon className={cn('h-4 w-4', item.iconColor || 'text-gray-400')} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium text-white text-sm">{item.label}</p>
+                              {item.description && (
+                                <p className="text-xs text-gray-400 truncate">{item.description}</p>
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
 
             <Button variant="ghost" size="icon" className="relative text-gray-300 hover:text-white hover:bg-white/10">
@@ -218,6 +344,7 @@ const DashboardLayout = () => {
                 className="flex items-center gap-2"
               >
                 <Avatar className="h-8 w-8 border-2 border-white/30">
+                  <AvatarImage src={user?.avatar_url ?? undefined} alt="" />
                   <AvatarFallback className="bg-primary text-white text-xs font-semibold">
                     {initials}
                   </AvatarFallback>
@@ -257,7 +384,7 @@ const DashboardLayout = () => {
               <div key={dropdown.label}>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider px-2 py-1.5">{dropdown.label}</p>
                 {dropdown.items
-                  .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r))))
+                  .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r as UserRole))))
                   .map((item) => {
                   const Icon = item.icon;
                   return (
@@ -288,13 +415,22 @@ const DashboardLayout = () => {
       </header>
 
       {/* Page Content - extra padding on mobile for bottom nav */}
-      <main className="flex-1 p-4 lg:p-6 max-w-[1440px] mx-auto w-full pb-20 lg:pb-6">
+      <main
+        className={cn(
+          'flex-1 min-h-0 flex flex-col p-4 lg:p-6 max-w-[1440px] mx-auto w-full pb-20 lg:pb-6',
+          location.pathname === '/dashboard' && 'lg:overflow-hidden'
+        )}
+      >
         <Outlet />
       </main>
 
       {/* Mobile Bottom Navigation */}
       <MobileBottomNav />
+
+      {/* Activity pop-up: unacknowledged announcements and policies on login */}
+      <ActivityPopup />
     </div>
+    </ActivityComplianceProvider>
   );
 };
 

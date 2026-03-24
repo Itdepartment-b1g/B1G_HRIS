@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Camera, MapPin, Loader2, CheckCircle2, XCircle } from 'lucide-react';
+import { ArrowLeft, Camera, MapPin, Loader2, CheckCircle2, XCircle, MessageCircle, FileText, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { supabase } from '@/lib/supabase';
 import { isWithinWorkLocation, type WorkLocation } from '@/lib/geoUtils';
 import { LocationMap } from '@/components/LocationMap';
@@ -16,6 +17,7 @@ const TimeInOutPage = () => {
   const mode = (searchParams.get('mode') === 'out' ? 'out' : 'in') as 'in' | 'out';
 
   const { user: currentUser } = useCurrentUser();
+  const { canTimeOut, pending, loading: complianceLoading } = useActivityCompliance();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -355,6 +357,78 @@ const TimeInOutPage = () => {
   const showMap = !!location || (hasWorkLocationsWithCoords && !!locationError);
 
   if (!currentUser) return null;
+
+  if (mode === 'out' && !complianceLoading && !canTimeOut) {
+    const hasAnn = pending.announcements > 0;
+    const hasPol = pending.policies > 0;
+    const hasSurv = pending.surveys > 0;
+    return (
+      <div className="min-h-screen flex flex-col bg-background pb-[env(safe-area-inset-bottom)]">
+        <header className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 border-b bg-background">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="shrink-0">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <h1 className="text-lg font-semibold flex-1">Time Out</h1>
+        </header>
+        <div className="flex-1 flex flex-col items-center justify-center p-6 text-center gap-6 max-w-md mx-auto">
+          <XCircle className="h-16 w-16 text-amber-500" />
+          <h2 className="text-xl font-semibold text-foreground">Complete Required Items First</h2>
+          <p className="text-muted-foreground">
+            You must acknowledge all announcements and policies, and complete any pending surveys before you can time out.
+          </p>
+          <div className="w-full space-y-3 text-left">
+            {hasAnn && (
+              <div className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <MessageCircle className="h-5 w-5 text-violet-600 shrink-0" />
+                  <span className="text-sm font-medium">
+                    {pending.announcements} announcement{pending.announcements !== 1 ? 's' : ''} to acknowledge
+                  </span>
+                </div>
+                <Button size="sm" onClick={() => navigate('/dashboard/activity/announcements')}>
+                  Complete
+                </Button>
+              </div>
+            )}
+            {hasPol && (
+              <div className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <FileText className="h-5 w-5 text-violet-600 shrink-0" />
+                  <span className="text-sm font-medium">
+                    {pending.policies} polic{pending.policies !== 1 ? 'ies' : 'y'} to acknowledge
+                  </span>
+                </div>
+                <Button size="sm" onClick={() => navigate('/dashboard/activity/policies')}>
+                  Complete
+                </Button>
+              </div>
+            )}
+            {hasSurv && (
+              <div className="flex items-center justify-between gap-4 p-3 rounded-lg border bg-muted/50">
+                <div className="flex items-center gap-3">
+                  <ClipboardList className="h-5 w-5 text-violet-600 shrink-0" />
+                  <span className="text-sm font-medium">
+                    {pending.surveys} survey{pending.surveys !== 1 ? 's' : ''} to complete
+                  </span>
+                </div>
+                <Button size="sm" onClick={() => navigate('/dashboard/activity/survey')}>
+                  Complete
+                </Button>
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 w-full">
+            <Button variant="outline" className="flex-1" onClick={() => navigate(-1)}>
+              Go Back
+            </Button>
+            <Button className="flex-1" onClick={() => navigate('/dashboard/activity/survey')}>
+              Go to Activity
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (scheduleError) {
     return (

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getAvatarFallback } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import type { Employee } from '@/types';
@@ -59,6 +60,7 @@ const TeammatesPage = () => {
                   <p className="text-xs font-semibold text-gray-600 mb-2">Supervisor</p>
                   <div className="flex items-center gap-3 p-3 rounded-lg bg-gray-50">
                     <Avatar className="h-14 w-14 border-2 border-primary/20">
+                      <AvatarImage src={supervisor.avatar_url ?? undefined} alt="" />
                       <AvatarFallback className="bg-primary/10 text-primary font-semibold">
                         {supervisor.first_name[0]}
                         {supervisor.last_name[0]}
@@ -86,9 +88,9 @@ const TeammatesPage = () => {
                         className="flex flex-col items-center p-3 rounded-lg bg-gray-50 min-w-[80px]"
                       >
                         <Avatar className="h-12 w-12">
+                          <AvatarImage src={cw.avatar_url ?? undefined} alt="" />
                           <AvatarFallback className="bg-gray-200 text-gray-700 text-sm font-medium">
-                            {cw.first_name[0]}
-                            {cw.last_name[0]}
+                            {getAvatarFallback(cw.first_name, cw.last_name)}
                           </AvatarFallback>
                         </Avatar>
                         <p className="text-xs font-medium text-black mt-2 text-center truncate w-full">

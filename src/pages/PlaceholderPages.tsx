@@ -16,6 +16,9 @@ import {
 } from 'lucide-react';
 
 // Time Attendance
+export const Leave = () => (
+  <ComingSoon title="Leave" description="File and manage leave requests. Track your vacation, sick, and personal time off." icon={Calendar} />
+);
 export const Overtime = () => (
   <ComingSoon title="Overtime" description="Manage overtime requests and approvals." icon={Timer} />
 );

@@ -28,6 +28,21 @@ VALUES
   ('d5555555-5555-5555-5555-555555555555', 'Marketing', NULL),
   ('d6666666-6666-6666-6666-666666666666', 'Finance', NULL);
 
+-- 2b. EMPLOYMENT STATUSES (for leave eligibility: Probationary = LWOP only, Regular = VL/SL/PTO)
+-- ============================================================
+-- Run after leave-management migration (adds is_regular column). Safe to re-run.
+INSERT INTO public.employment_statuses (name, duration_months, is_regular, description)
+SELECT 'Probationary', 6, false, 'Initial period; LWOP only until regularization'
+WHERE NOT EXISTS (SELECT 1 FROM public.employment_statuses WHERE name = 'Probationary');
+
+INSERT INTO public.employment_statuses (name, duration_months, is_regular, description)
+SELECT 'Regular', NULL, true, 'Full leave eligibility: VL 15, SL 15, PTO 7'
+WHERE NOT EXISTS (SELECT 1 FROM public.employment_statuses WHERE name = 'Regular');
+
+INSERT INTO public.employment_statuses (name, duration_months, is_regular, description)
+SELECT 'Internship', 3, false, 'Intern; LWOP only until regularization'
+WHERE NOT EXISTS (SELECT 1 FROM public.employment_statuses WHERE name = 'Internship');
+
 -- 3. CREATE USERS IN AUTH (You'll need to do this via Supabase Auth UI or API)
 -- ============================================================
 -- Note: Users must be created in auth.users first before we can add to employees table
@@ -168,37 +183,7 @@ BEGIN
   END LOOP;
 END $$;
 
--- 8. SAMPLE LEAVE REQUESTS
--- ============================================================
-INSERT INTO public.leave_requests (employee_id, leave_type, start_date, end_date, reason, status)
-SELECT 
-  id,
-  'vacation'::leave_type,
-  CURRENT_DATE + 7,
-  CURRENT_DATE + 9,
-  'Family vacation',
-  'pending'::leave_status
-FROM public.employees WHERE employee_code = 'EMP-004'
-UNION ALL
-SELECT 
-  id,
-  'sick'::leave_type,
-  CURRENT_DATE - 2,
-  CURRENT_DATE - 2,
-  'Not feeling well',
-  'approved'::leave_status
-FROM public.employees WHERE employee_code = 'EMP-005'
-UNION ALL
-SELECT 
-  id,
-  'personal'::leave_type,
-  CURRENT_DATE + 14,
-  CURRENT_DATE + 16,
-  'Personal matters',
-  'pending'::leave_status
-FROM public.employees WHERE employee_code = 'EMP-006';
-
--- 9. SAMPLE OVERTIME REQUESTS
+-- 8. SAMPLE OVERTIME REQUESTS
 -- ============================================================
 INSERT INTO public.overtime_requests (employee_id, date, start_time, end_time, hours, reason, status)
 SELECT 

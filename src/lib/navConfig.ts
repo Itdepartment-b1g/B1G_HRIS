@@ -3,13 +3,16 @@ import {
   Users,
   Clock,
   Calendar,
+  ClipboardList,
   Timer,
   Briefcase,
   MessageCircle,
   FileText,
   Banknote,
-  Network,
+  BarChart3,
   Settings,
+  Layers,
+  Award,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -45,15 +48,20 @@ export const navDropdowns: NavDropdown[] = [
     label: 'Time Attendance',
     items: [
       { label: 'Attendance', path: '/dashboard/attendance', description: 'Attendance related data', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', icon: Clock },
-      { label: 'Leave', path: '/dashboard/leave', description: 'Leave related data', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Calendar },
-      { label: 'Overtime', path: '/dashboard/overtime', description: 'Overtime related data', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', icon: Timer },
+      { label: 'Leave', path: '/dashboard/leave', description: 'Leave and approvals', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Calendar },
+      { label: 'Overtime', path: '/dashboard/overtime', description: 'Overtime and approvals', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', icon: Timer },
       { label: 'Business Trip', path: '/dashboard/business-trip', description: 'Business trip related data', iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', icon: Briefcase },
+      { label: 'Number Of Leaves', path: '/dashboard/employee-leave-balances', description: 'All employees leave balances', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: Layers, roles: ['super_admin', 'admin'] },
     ],
   },
   {
     label: 'Activity',
     items: [
-      { label: 'Announcements', path: '/dashboard/announcements', description: 'Company announcements and updates', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: MessageCircle },
+      { label: 'Employee Survey', path: '/dashboard/activity/survey', description: 'Surveys and feedback', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: ClipboardList },
+      { label: 'Announcements', path: '/dashboard/activity/announcements', description: 'Company announcements and updates', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: MessageCircle },
+      { label: 'Policy Updates', path: '/dashboard/activity/policies', description: 'Company policies', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: FileText },
+      { label: 'Survey Analytics', path: '/dashboard/activity/survey-analytics', description: 'View survey responses and analytics', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: BarChart3, roles: ['super_admin', 'admin'] },
+      { label: 'Employee of the Month', path: '/dashboard/activity/employee-of-month', description: 'Set featured employee for the feed', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: Award, roles: ['super_admin', 'admin'] },
     ],
   },
   {
