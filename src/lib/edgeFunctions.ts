@@ -19,6 +19,12 @@ function checkCredentials() {
 export interface CallEdgeFunctionOptions {
   /** When true, sends the current user's JWT instead of anon key (required for admin functions) */
   useUserAuth?: boolean;
+  /**
+   * Controls behavior when user auth is invalid during edge calls.
+   * - 'logout' (default): sign out and redirect to login
+   * - 'throw': throw an error without forcing logout
+   */
+  onAuthFailure?: 'logout' | 'throw';
 }
 
 /**
@@ -33,21 +39,25 @@ async function callEdgeFunction<T>(
   options?: CallEdgeFunctionOptions
 ): Promise<T> {
   checkCredentials();
+  const onAuthFailure = options?.onAuthFailure ?? 'logout';
 
   if (options?.useUserAuth) {
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     if (sessionError || !session?.access_token) {
       throw new Error('You must be logged in to perform this action.');
     }
+    let token = session.access_token;
     const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
     if (refreshError) {
-      await supabase.auth.signOut();
-      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
-        window.location.href = '/?session_expired=1';
+      if (onAuthFailure === 'logout') {
+        await supabase.auth.signOut();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+          window.location.href = '/?session_expired=1';
+        }
       }
       throw new Error('Session expired. Please sign in again.');
     }
-    const token = refreshed?.session?.access_token ?? session.access_token;
+    token = refreshed?.session?.access_token ?? token;
     const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
       method: 'POST',
       headers: {
@@ -57,9 +67,11 @@ async function callEdgeFunction<T>(
       body: body ? JSON.stringify(body) : undefined,
     });
     if (response.status === 401) {
-      await supabase.auth.signOut();
-      if (typeof window !== 'undefined' && window.location.pathname !== '/') {
-        window.location.href = '/?session_expired=1';
+      if (onAuthFailure === 'logout') {
+        await supabase.auth.signOut();
+        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+          window.location.href = '/?session_expired=1';
+        }
       }
       throw new Error('Session expired. Please sign in again.');
     }
@@ -215,7 +227,10 @@ export interface SendRequestNotificationPayload {
  * Call after successful submit or approve/reject. Fire-and-forget: catch errors to avoid blocking UI.
  */
 export async function sendRequestNotification(payload: SendRequestNotificationPayload): Promise<void> {
-  return callEdgeFunction<{ success: boolean }>('send-request-notifications', payload, { useUserAuth: true });
+  return callEdgeFunction<{ success: boolean }>('send-request-notifications', payload, {
+    useUserAuth: true,
+    onAuthFailure: 'throw',
+  });
 }
 
 /**
