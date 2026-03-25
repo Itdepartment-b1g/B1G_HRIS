@@ -11,6 +11,8 @@
 
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
+// NOTE: We intentionally do not rely on `computeAttendanceStatusFromTimeIn()` for recomputing
+// minutes late in the export because it zeroes out minutes late for flexible shifts.
 import { computeFlexNetWorkedHours, computeFlexUndertimeMinutes } from '@/lib/flexAttendance';
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -35,6 +37,12 @@ function getMinutesFromMidnightManila(isoTimestamp: string): number {
   const m = Number(parts.find((p) => p.type === 'minute')?.value ?? 0);
   const s = Number(parts.find((p) => p.type === 'second')?.value ?? 0);
   return h * 60 + m + s / 60;
+}
+
+/** Get minutes from midnight using the browser/server local timezone */
+function getMinutesFromMidnightLocal(isoTimestamp: string): number {
+  const d = new Date(isoTimestamp);
+  return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
 }
 
 /** Compute net working hours for a shift (gross hours minus break) */
@@ -151,12 +159,23 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   // 3. Fetch employee shifts (to compute net hours per working day)
   const { data: shiftData, error: shiftError } = await supabase
     .from('employee_shifts')
-    .select('employee_id, shift:shifts(start_time, end_time, break_total_hours, days, is_flexible, required_daily_hours)');
+    .select('employee_id, shift:shifts(start_time, end_time, break_total_hours, days, is_flexible, required_daily_hours, grace_period_minutes)');
 
   if (shiftError) throw new Error(`Failed to fetch shifts: ${shiftError.message}`);
 
   // Build shift lookup: employee_id → array of shifts
-  const shiftsByEmp = new Map<string, Array<{ start_time: string; end_time: string; break_total_hours: number; days?: string[]; is_flexible?: boolean; required_daily_hours?: number }>>();
+  const shiftsByEmp = new Map<
+    string,
+    Array<{
+      start_time: string;
+      end_time: string;
+      break_total_hours: number;
+      days?: string[];
+      is_flexible?: boolean;
+      required_daily_hours?: number;
+      grace_period_minutes?: number;
+    }>
+  >();
   for (const s of shiftData || []) {
     const sh = (s as any).shift;
     if (!sh) continue;
@@ -181,7 +200,21 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
     // Look up shift for this day (used by NoOfHours, Undertime, and on_leave paid hours)
     const empShifts = shiftsByEmp.get(empId) || [];
     const weekday = getWeekday(r.date);
-    const shiftForDay = empShifts.find((s) => !s.days?.length || s.days.includes(weekday)) || empShifts[0];
+    // Pick a deterministic shift for this weekday:
+    // 1) Prefer shifts whose `days` includes this weekday.
+    // 2) Otherwise prefer shifts with no `days` restriction.
+    // 3) Prefer non-flexible shifts (is_flexible=false) to keep late-minute logic consistent.
+    // 4) Tie-break by earliest start_time.
+    const dayMatches = empShifts.filter((s) => s.days?.includes(weekday));
+    const noDayRestriction = empShifts.filter((s) => !s.days?.length);
+    const shiftCandidates = (dayMatches.length ? dayMatches : noDayRestriction.length ? noDayRestriction : empShifts).filter((s) => !!s.start_time);
+    shiftCandidates.sort((a, b) => {
+      const aFlex = a.is_flexible ? 1 : 0;
+      const bFlex = b.is_flexible ? 1 : 0;
+      if (aFlex !== bFlex) return aFlex - bFlex; // non-flex first
+      return parseTimeToMinutes(a.start_time) - parseTimeToMinutes(b.start_time);
+    });
+    const shiftForDay = shiftCandidates[0];
     const breakHrs = shiftForDay?.break_total_hours ?? 0;
     const isFlexibleShift = !!shiftForDay?.is_flexible;
     const requiredDailyHours = shiftForDay?.required_daily_hours ?? 8;
@@ -245,10 +278,11 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
     const isHalfDay = durationForUndertime === 'first_half' || durationForUndertime === 'second_half';
 
     // Late:
-    // - Normal day: keep existing minutes_late as-is
-    // - Half-day only: recompute late minutes from the half-day working start, applying grace period
+    // - Half-day: recompute from half-day working start + grace (matches Attendance grid).
+    // - Normal shift: use DB minutes_late when set; if null/0, recompute from time_in vs shift
+    //   start using the same logic as the Attendance grid.
     if (isHalfDay && r.time_in && shiftForDay?.start_time && shiftForDay?.end_time && leaveCodeForUndertime) {
-      const grace = Math.max(0, (shiftForDay as any).grace_period_minutes ?? 0);
+      const grace = Math.max(0, shiftForDay.grace_period_minutes ?? 0);
       const workingStart = durationForUndertime === 'first_half'
         ? computeHalfDayMidpointTime({
             start_time: shiftForDay.start_time,
@@ -256,12 +290,25 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
             break_total_hours: breakHrs,
           })
         : shiftForDay.start_time;
-      const timeInM = getMinutesFromMidnightManila(r.time_in);
+      const timeInM = getMinutesFromMidnightLocal(r.time_in);
       const startM = parseTimeToMinutes(workingStart);
       const late = timeInM > startM + grace ? Math.floor(timeInM - (startM + grace)) : 0;
       undertimeMinutes += late;
-    } else if (r.minutes_late && r.minutes_late > 0) {
-      undertimeMinutes += r.minutes_late;
+    } else if (!isHalfDay && r.time_in && shiftForDay?.start_time) {
+      const storedLate = r.minutes_late != null ? Number(r.minutes_late) : 0;
+      if (storedLate > 0) {
+        undertimeMinutes += Math.floor(storedLate);
+      } else {
+        // Attendance grid behavior for normal-day late:
+        // when DB minutes_late is null/0, recompute from time_in vs shift start (local time).
+        // We recompute directly here to avoid flexible-shift short-circuiting.
+        const timeInM = getMinutesFromMidnightLocal(r.time_in);
+        const startM = parseTimeToMinutes(shiftForDay.start_time);
+        const recomputedLate = timeInM > startM ? Math.floor(timeInM - startM) : 0;
+        if (recomputedLate > 0) undertimeMinutes += recomputedLate;
+      }
+    } else if (r.minutes_late != null && Number(r.minutes_late) > 0) {
+      undertimeMinutes += Math.floor(Number(r.minutes_late));
     }
 
     // Early out:
@@ -275,7 +322,15 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
       }
     }
 
-    curr.sumUndertimeMinutes += undertimeMinutes;
+    // Missing time_out rule:
+    // Export requirement: if employee timed in but has no time out,
+    // deduct half of the shift (net for fixed, required for flex).
+    if (r.time_in && !r.time_out && shiftForDay) {
+      const halfShiftMinutes = isFlexibleShift
+        ? Math.floor(((requiredDailyHours ?? 8) / 2) * 60)
+        : Math.floor((computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs) / 2) * 60);
+      undertimeMinutes += halfShiftMinutes;
+    }
 
     // NoOfHours: actual hours worked = (time_out − time_in) minus break (only when span covers the full shift), capped at net shift hours
     if (!skipWorkedHoursFromTimeInOut && r.time_in && r.time_out) {
@@ -295,12 +350,47 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
             ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
             : rawHours;
           const grossShiftHrs = shiftForDay ? computeGrossShiftHours(shiftForDay.start_time, shiftForDay.end_time) : rawHours;
-          // Only deduct break if the employee worked a span that roughly covers the whole shift
-          const breakDeduction = rawHours >= grossShiftHrs * 0.9 ? breakHrs : 0;
-          const actualHrs = Math.min(Math.max(0, rawHours - breakDeduction), netShiftHrs);
-          curr.totalWorkedHours += actualHrs;
+          // Fixed-shift rule:
+          // Late employees should still be counted as a full net workday (NoOfHours),
+          // as long as they timed out at/after the scheduled shift end.
+          //
+          // Late affects `Undertime` via `minutes_late`, not reduced `NoOfHours` (export-only behavior).
+          let isCompletedShift = false;
+          if (shiftForDay) {
+            const timeOutM = getMinutesFromMidnightManila(r.time_out);
+            const startM = parseTimeToMinutes(shiftForDay.start_time);
+            const endM = parseTimeToMinutes(shiftForDay.end_time);
+
+            if (endM >= startM) {
+              // Same-day shift
+              isCompletedShift = timeOutM >= endM;
+            } else {
+              // Overnight shift: end is on next day (smaller endM)
+              isCompletedShift = timeOutM >= endM && timeOutM < startM;
+            }
+          }
+
+          if (isCompletedShift) {
+            curr.totalWorkedHours += netShiftHrs;
+          } else {
+            // For incomplete days (early-out), fall back to previous timestamp-based calculation.
+            // Only deduct break if the employee worked a span that roughly covers the whole shift.
+            const breakDeduction = rawHours >= grossShiftHrs * 0.9 ? breakHrs : 0;
+            const actualHrs = Math.min(Math.max(0, rawHours - breakDeduction), netShiftHrs);
+            curr.totalWorkedHours += actualHrs;
+          }
         }
       }
+    }
+
+    // No time out rule for NoOfHours (export-only):
+    // If employee timed in but forgot to time out, do NOT reduce credited hours.
+    // Only `Undertime` should be populated for the missing time_out.
+    if (!skipWorkedHoursFromTimeInOut && r.time_in && !r.time_out && shiftForDay) {
+      const fullShiftHours = isFlexibleShift
+        ? requiredDailyHours ?? 8
+        : computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs);
+      curr.totalWorkedHours += fullShiftHours;
     }
 
     if (isFlexibleShift) {
@@ -319,6 +409,8 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
         storedFlex != null ? storedFlex : computedFlex
       );
     }
+
+    curr.sumUndertimeMinutes += undertimeMinutes;
   }
 
   const EMPTY_PREMIUM = '0';
@@ -327,9 +419,12 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   const rows: AttendanceReportRow[] = (employees || []).map((emp) => {
     const a = agg.get(emp.id) ?? { totalWorkedHours: 0, sumUndertimeMinutes: 0, absences: 0 };
     const undertimeHours = a.sumUndertimeMinutes / 60;
+    const employeeName = emp.last_name
+      ? `${emp.last_name}, ${emp.first_name ?? ''}`.trim().replace(/,\s*$/, '')
+      : emp.first_name ?? '';
     return {
       employeeNumber: emp.employee_code || '',
-      employeeName: [emp.first_name, emp.last_name].filter(Boolean).join(' ') || '',
+      employeeName,
       noOfHours: a.totalWorkedHours.toFixed(2),
       undertime: undertimeHours.toFixed(2),
       absences: a.absences % 1 === 0 ? String(a.absences) : a.absences.toFixed(1),
