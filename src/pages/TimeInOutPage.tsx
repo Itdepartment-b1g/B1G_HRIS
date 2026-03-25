@@ -9,6 +9,7 @@ import { isWithinWorkLocation, type WorkLocation } from '@/lib/geoUtils';
 import { LocationMap } from '@/components/LocationMap';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { detectFaceInCanvas } from '@/lib/faceDetection';
+import { computeFlexUndertimeMinutes } from '@/lib/flexAttendance';
 import { toast } from 'sonner';
 
 const TimeInOutPage = () => {
@@ -145,7 +146,7 @@ const TimeInOutPage = () => {
       const weekday = getWeekdayForDate(new Date());
       const { data: esData } = await supabase
         .from('employee_shifts')
-        .select('shift:shifts(id, name, start_time, end_time, days, grace_period_minutes, work_location_id)')
+        .select('shift:shifts(id, name, start_time, end_time, days, grace_period_minutes, work_location_id, break_total_hours, is_flexible, required_daily_hours)')
         .eq('employee_id', currentUser.id);
 
       const shifts = (esData || []).map((s: any) => s.shift).filter(Boolean);
@@ -269,13 +270,19 @@ const TimeInOutPage = () => {
       if (mode === 'in') {
         const weekday = getWeekdayForDate(today);
         const [shiftRes, empRes] = await Promise.all([
-          supabase.from('employee_shifts').select('shift:shifts(start_time, grace_period_minutes, days)').eq('employee_id', currentUser.id),
+          supabase.from('employee_shifts').select('shift:shifts(start_time, grace_period_minutes, days, is_flexible, required_daily_hours)').eq('employee_id', currentUser.id),
           supabase.from('employees').select('late_exempted, grace_period_exempted').eq('id', currentUser.id).single(),
         ]);
         const shifts = (shiftRes.data || []).map((s: any) => s.shift).filter(Boolean);
         const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
         const shiftInfo = shiftForToday
-          ? { start_time: shiftForToday.start_time || '08:00:00', grace_period_minutes: shiftForToday.grace_period_minutes ?? 15, days: shiftForToday.days }
+          ? {
+              start_time: shiftForToday.start_time || '08:00:00',
+              grace_period_minutes: shiftForToday.grace_period_minutes ?? 15,
+              days: shiftForToday.days,
+              is_flexible: !!shiftForToday.is_flexible,
+              required_daily_hours: shiftForToday.required_daily_hours ?? 8,
+            }
           : null;
         const exemptions = empRes.data
           ? { late_exempted: empRes.data.late_exempted, grace_period_exempted: empRes.data.grace_period_exempted }
@@ -307,12 +314,19 @@ const TimeInOutPage = () => {
         const statusMsg = status === 'late' ? ` (Late — ${(minutesLate / 60).toFixed(2)} hrs past start)` : '';
         toast.success(`Time in at ${now.toLocaleTimeString()}${statusMsg}`);
       } else {
-        const { data: existing } = await supabase
+        const [existingRes, shiftRes] = await Promise.all([
+          supabase
           .from('attendance_records')
           .select('id')
           .eq('employee_id', currentUser.id)
           .eq('date', today)
-          .single();
+          .single(),
+          supabase
+            .from('employee_shifts')
+            .select('shift:shifts(start_time, end_time, break_total_hours, required_daily_hours, is_flexible, days)')
+            .eq('employee_id', currentUser.id),
+        ]);
+        const existing = existingRes.data;
         if (!existing) {
           toast.error('No time-in record found for today');
           setSubmitting(false);
@@ -331,6 +345,20 @@ const TimeInOutPage = () => {
         if (updateError) {
           console.error('Time out update error:', updateError);
           throw new Error(updateError.message);
+        }
+        const weekday = getWeekdayForDate(today);
+        const shifts = (shiftRes.data || []).map((s: any) => s.shift).filter(Boolean);
+        const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
+        if (shiftForToday?.is_flexible && todayRecord?.time_in) {
+          const undertime = computeFlexUndertimeMinutes({
+            timeInIso: todayRecord.time_in,
+            timeOutIso: now.toISOString(),
+            breakTotalHours: shiftForToday.break_total_hours ?? 0,
+            requiredDailyHours: shiftForToday.required_daily_hours ?? 8,
+          });
+          if (undertime > 0) {
+            toast.info(`Undertime recorded: ${(undertime / 60).toFixed(2)}h`);
+          }
         }
         toast.success(`Time out at ${now.toLocaleTimeString()}`);
       }

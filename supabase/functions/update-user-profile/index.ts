@@ -88,6 +88,25 @@ serve(async (req) => {
       targetUserId = userData.id
     }
 
+    // Get current email before update so we can detect email changes correctly.
+    const { data: existingEmployee, error: existingEmployeeError } = await supabaseClient
+      .from('employees')
+      .select('email')
+      .eq('id', targetUserId)
+      .single()
+
+    if (existingEmployeeError || !existingEmployee) {
+      return new Response(
+        JSON.stringify({ error: 'User not found' }),
+        {
+          headers: { ...corsHeaders(req), 'Content-Type': 'application/json' },
+          status: 404
+        }
+      )
+    }
+
+    const previousEmail = existingEmployee.email
+
     // Build update object (only include provided fields)
     const updateData: any = { updated_at: new Date().toISOString() }
     
@@ -127,7 +146,7 @@ serve(async (req) => {
     }
 
     // Update auth user email if changed
-    if (email && email !== employeeData.email) {
+    if (email && email !== previousEmail) {
       const { error: authError } = await supabaseClient.auth.admin.updateUserById(
         targetUserId,
         { email }

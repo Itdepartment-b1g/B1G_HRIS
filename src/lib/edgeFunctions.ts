@@ -227,7 +227,7 @@ export interface SendRequestNotificationPayload {
  * Call after successful submit or approve/reject. Fire-and-forget: catch errors to avoid blocking UI.
  */
 export async function sendRequestNotification(payload: SendRequestNotificationPayload): Promise<void> {
-  return callEdgeFunction<{ success: boolean }>('send-request-notifications', payload, {
+  await callEdgeFunction<{ success: boolean }>('send-request-notifications', payload, {
     useUserAuth: true,
     onAuthFailure: 'throw',
   });
@@ -347,7 +347,7 @@ export async function resetPassword(
  */
 export async function updateUserProfile(
   identifier: { email?: string; user_id?: string },
-  updates: Omit<UpdateUserProfileData, 'email' | 'user_id'>
+  updates: Omit<UpdateUserProfileData, 'user_id'>
 ): Promise<UpdateUserProfileResponse> {
   if (!identifier.email && !identifier.user_id) {
     throw new Error('Must provide either email or user_id');
@@ -369,7 +369,7 @@ export async function deleteUser(userId: string): Promise<DeleteUserResponse> {
   if (!userId) {
     throw new Error('user_id is required');
   }
-  return callEdgeFunction<DeleteUserResponse>('delete-user', { user_id: userId }, { useUserAuth: true });
+  return callEdgeFunction<DeleteUserResponse>('delete-user', { user_id: userId }, { useUserAuth: true, onAuthFailure: 'throw' });
 }
 
 // ============================================================

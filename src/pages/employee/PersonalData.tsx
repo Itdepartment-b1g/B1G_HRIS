@@ -24,6 +24,24 @@ interface ShiftInfo {
   days: string[];
   start_time: string;
   end_time: string;
+  is_flexible?: boolean;
+  required_daily_hours?: number;
+  work_location?: { name: string } | null;
+}
+
+function normalizeWorkLocation(raw: unknown): { name: string } | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) {
+    const first = raw[0];
+    if (first && typeof first === 'object' && 'name' in first && typeof (first as { name: unknown }).name === 'string') {
+      return { name: (first as { name: string }).name };
+    }
+    return null;
+  }
+  if (typeof raw === 'object' && raw !== null && 'name' in raw && typeof (raw as { name: unknown }).name === 'string') {
+    return { name: (raw as { name: string }).name };
+  }
+  return null;
 }
 
 interface SupervisorInfo {
@@ -135,7 +153,9 @@ const PersonalData = () => {
       const [shiftsRes, supervisorRes] = await Promise.all([
         supabase
           .from('employee_shifts')
-          .select('shifts(name, days, start_time, end_time)')
+          .select(
+            'shift:shifts(name, days, start_time, end_time, is_flexible, required_daily_hours, work_location:work_locations(name))'
+          )
           .eq('employee_id', user.id),
         user.supervisor_id
           ? supabase
@@ -147,7 +167,22 @@ const PersonalData = () => {
       ]);
 
       const shiftData = (shiftsRes.data || [])
-        .map((r: any) => r.shifts)
+        .map((r: any) => {
+          const s = r.shift ?? r.shifts;
+          if (!s || typeof s !== 'object') return null;
+          return {
+            name: String((s as { name?: string }).name ?? ''),
+            days: Array.isArray((s as { days?: string[] }).days) ? (s as { days: string[] }).days : [],
+            start_time: String((s as { start_time?: string }).start_time ?? ''),
+            end_time: String((s as { end_time?: string }).end_time ?? ''),
+            is_flexible: Boolean((s as { is_flexible?: boolean }).is_flexible),
+            required_daily_hours:
+              (s as { required_daily_hours?: number | null }).required_daily_hours != null
+                ? Number((s as { required_daily_hours: number }).required_daily_hours)
+                : undefined,
+            work_location: normalizeWorkLocation((s as { work_location?: unknown }).work_location),
+          } satisfies ShiftInfo;
+        })
         .filter(Boolean) as ShiftInfo[];
       setShifts(shiftData);
       setSupervisor((supervisorRes as any).data || null);
@@ -436,10 +471,17 @@ const PersonalData = () => {
                     <div className="h-8 w-8 rounded-md bg-primary/10 flex items-center justify-center shrink-0">
                       <Clock className="h-4 w-4 text-primary" />
                     </div>
-                    <div>
-                      <p className="text-sm font-medium text-foreground">{shift.name}</p>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {shift.name}
+                        {shift.work_location?.name && (
+                          <span className="text-xs text-blue-600 font-normal ml-1.5">• {shift.work_location.name}</span>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">
-                        {formatDays(shift.days)} · {formatTime(shift.start_time)} – {formatTime(shift.end_time)}
+                        {shift.is_flexible
+                          ? `${formatDays(shift.days)} · — · ${shift.required_daily_hours ?? 8}h required`
+                          : `${formatDays(shift.days)} · ${formatTime(shift.start_time)} – ${formatTime(shift.end_time)}`}
                       </p>
                     </div>
                   </div>

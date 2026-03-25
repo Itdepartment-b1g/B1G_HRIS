@@ -46,6 +46,9 @@ interface RecordRow {
   remarks: string | null;
   status: string;
   minutes_late: number | null;
+  flex_undertime_minutes: number | null;
+  is_flexible_shift: boolean;
+  required_daily_hours: number | null;
   leave_type_code: string | null; // e.g. 'vl', 'sl', 'lwop' — only set when status='on_leave'
   leave_duration_type: 'fullday' | 'first_half' | 'second_half' | null;
   business_trip_id: string | null;
@@ -182,7 +185,7 @@ const Attendance = () => {
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
       let query = supabase
         .from('attendance_records')
-        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, last_name)')
+        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, last_name)')
         .gte('date', dateFrom)
         .lte('date', dateTo);
       if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
@@ -208,7 +211,7 @@ const Attendance = () => {
     if (empIds.length > 0) {
       const { data: sd } = await supabase
         .from('employee_shifts')
-        .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days)')
+        .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days, is_flexible, required_daily_hours)')
         .in('employee_id', empIds);
       shiftData = sd || [];
     }
@@ -218,7 +221,7 @@ const Attendance = () => {
     const shiftNetHoursMap = new Map<string, number>();
     const shiftListByEmployee = new Map<
       string,
-      Array<{ start_time: string; end_time?: string; break_total_hours?: number; grace_period_minutes?: number; days?: string[] }>
+      Array<{ start_time: string; end_time?: string; break_total_hours?: number; grace_period_minutes?: number; days?: string[]; is_flexible?: boolean; required_daily_hours?: number }>
     >();
     shiftData.forEach((s: any) => {
       const sh = s.shift;
@@ -245,6 +248,8 @@ const Attendance = () => {
           break_total_hours: sh.break_total_hours ?? 0,
           grace_period_minutes: sh.grace_period_minutes ?? 0,
           days: sh.days,
+          is_flexible: !!sh.is_flexible,
+          required_daily_hours: sh.required_daily_hours ?? 8,
         });
         shiftListByEmployee.set(s.employee_id, arr);
       }
@@ -259,10 +264,11 @@ const Attendance = () => {
       // Recompute minutes_late from shift start when missing/wrong (null or 0) but time_in exists
       // Use the shift that applies to this record's weekday
       let minutesLate = r.minutes_late ?? null;
+      const shiftList = shiftListByEmployee.get(r.employee_id) || [];
+      const weekday = getWeekdayForDate(r.date);
+      const shiftForDay = shiftList.find((s) => !s.days?.length || s.days.includes(weekday)) || shiftList[0];
+      const isFlexibleShift = !!shiftForDay?.is_flexible;
       if (r.time_in) {
-        const shiftList = shiftListByEmployee.get(r.employee_id) || [];
-        const weekday = getWeekdayForDate(r.date);
-        const shiftForDay = shiftList.find((s) => !s.days?.length || s.days.includes(weekday)) || shiftList[0];
         // If this day is tagged as HALF-DAY leave, the "working shift start" changes:
         // - first_half  => work starts at midpoint
         // - second_half => work starts at shift start
@@ -279,7 +285,9 @@ const Attendance = () => {
 
         // IMPORTANT: Do not change normal-day logic.
         // For HALF-DAY only, apply grace period to the late counter so that late minutes start AFTER grace.
-        if (isHalfDay && workingStart) {
+        if (isFlexibleShift) {
+          minutesLate = 0;
+        } else if (isHalfDay && workingStart) {
           const timeInM = parseTimeToMinutes(new Date(r.time_in).toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' }));
           const startM = parseTimeToMinutes(workingStart);
           const graceM = Math.max(0, grace);
@@ -289,7 +297,7 @@ const Attendance = () => {
           const { minutesLate: computed } = computeAttendanceStatusFromTimeIn({
             timeInIso: r.time_in,
             date: r.date,
-            shift: { start_time: workingStart, grace_period_minutes: 0 },
+            shift: { start_time: workingStart, grace_period_minutes: 0, is_flexible: isFlexibleShift },
           });
           minutesLate = computed > 0 ? computed : null;
         }
@@ -318,6 +326,9 @@ const Attendance = () => {
         remarks: r.remarks,
         status: r.status,
         minutes_late: minutesLate,
+        flex_undertime_minutes: r.flex_undertime_minutes ?? null,
+        is_flexible_shift: isFlexibleShift,
+        required_daily_hours: shiftForDay?.required_daily_hours ?? null,
         leave_type_code: r.leave_type_code || null,
         leave_duration_type: (r.leave_duration_type as any) || null,
         business_trip_id: r.business_trip_id || null,
@@ -343,7 +354,7 @@ const Attendance = () => {
         .select('employee_id, shift:shifts(name, start_time, end_time, break_total_hours, days)');
 
       // Build shift info per employee
-      const allShiftsByEmp = new Map<string, Array<{ name: string; start_time: string; end_time: string; break_total_hours: number; days?: string[] }>>();
+      const allShiftsByEmp = new Map<string, Array<{ name: string; start_time: string; end_time: string; break_total_hours: number; days?: string[]; is_flexible?: boolean; required_daily_hours?: number }>>();
       (allShiftData || []).forEach((s: any) => {
         const sh = s.shift;
         if (!sh) return;
@@ -400,6 +411,9 @@ const Attendance = () => {
           remarks: null,
           status,
           minutes_late: null,
+          flex_undertime_minutes: null,
+          is_flexible_shift: !!shiftForDay.is_flexible,
+          required_daily_hours: shiftForDay.required_daily_hours ?? null,
           leave_type_code: null,
           leave_duration_type: null,
           business_trip_id: null,
@@ -583,7 +597,16 @@ const Attendance = () => {
   const statusBadge = (
     status: string,
     minutesLate?: number | null,
-    opts?: { timeIn?: string | null; timeOut?: string | null; leaveTypeCode?: string | null; leaveDurationType?: 'fullday' | 'first_half' | 'second_half' | null; businessTripId?: string | null }
+    opts?: {
+      timeIn?: string | null;
+      timeOut?: string | null;
+      leaveTypeCode?: string | null;
+      leaveDurationType?: 'fullday' | 'first_half' | 'second_half' | null;
+      businessTripId?: string | null;
+      isFlexibleShift?: boolean;
+      flexUndertimeMinutes?: number | null;
+      requiredDailyHours?: number | null;
+    }
   ) => {
     const displayStatus = status === 'eti' ? 'present' : status === 'lti' ? 'late' : status; // legacy mapping
     const styles: Record<string, string> = {
@@ -597,6 +620,10 @@ const Attendance = () => {
       ? formatMinutesLateVisual(minutesLate)
       : null;
     const missingTimeOut = opts?.timeIn && !opts?.timeOut && !opts?.businessTripId;
+    const flexUndertimeText =
+      opts?.isFlexibleShift && (opts?.flexUndertimeMinutes ?? 0) > 0
+        ? `${((opts.flexUndertimeMinutes || 0) / 60).toFixed(2)}h undertime vs ${(opts.requiredDailyHours ?? 8)}h requirement`
+        : null;
     const leaveDuration = opts?.leaveDurationType;
     const durationLabel =
       leaveDuration === 'first_half' ? '1st half' : leaveDuration === 'second_half' ? '2nd half' : null;
@@ -618,6 +645,9 @@ const Attendance = () => {
         )}
         {lateLabel && lateLabel !== '—' && (
           <span className="text-xs text-muted-foreground">{lateLabel} past shift start</span>
+        )}
+        {flexUndertimeText && (
+          <span className="text-xs text-muted-foreground">{flexUndertimeText}</span>
         )}
         {missingTimeOut && (
           <span className="text-xs text-orange-600 flex items-center gap-0.5">
@@ -761,7 +791,7 @@ const Attendance = () => {
                     </div>
 
                     <div className="mt-3">
-                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id })}
+                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id, isFlexibleShift: r.is_flexible_shift, flexUndertimeMinutes: r.flex_undertime_minutes, requiredDailyHours: r.required_daily_hours })}
                     </div>
                   </CardContent>
                 </Card>
@@ -860,7 +890,7 @@ const Attendance = () => {
                             <TableCell className="font-mono text-sm">{formatTime(r.time_out) || '—'}</TableCell>
                             <TableCell className="font-mono text-sm">{formatMinutesLate(r.minutes_late)}</TableCell>
                             <TableCell>
-                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id })}
+                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id, isFlexibleShift: r.is_flexible_shift, flexUndertimeMinutes: r.flex_undertime_minutes, requiredDailyHours: r.required_daily_hours })}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
@@ -1007,7 +1037,7 @@ const Attendance = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-sm">Attendance Status</span>
-                 <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out, leaveTypeCode: viewingRecord.leave_type_code, leaveDurationType: viewingRecord.leave_duration_type, businessTripId: viewingRecord.business_trip_id })}</div>
+                 <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out, leaveTypeCode: viewingRecord.leave_type_code, leaveDurationType: viewingRecord.leave_duration_type, businessTripId: viewingRecord.business_trip_id, isFlexibleShift: viewingRecord.is_flexible_shift, flexUndertimeMinutes: viewingRecord.flex_undertime_minutes, requiredDailyHours: viewingRecord.required_daily_hours })}</div>
                 {isAdmin && <Button variant="outline" size="sm" className="mt-2" onClick={() => { setViewingRecord(null); openEditStatus(viewingRecord); }}><Pencil className="h-3 w-3 mr-1" /> Edit status</Button>}
               </div>
               {(viewingRecord.remarks || isAdmin) && (

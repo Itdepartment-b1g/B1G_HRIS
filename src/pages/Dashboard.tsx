@@ -24,6 +24,7 @@ import { supabase } from '@/lib/supabase';
 import { cn, timeTo12Hour, getAvatarFallback, getAvatarFallbackFromFullName } from '@/lib/utils';
 import { isImageUrl } from '@/lib/attachmentUtils';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
+import { computeFlexUndertimeMinutes } from '@/lib/flexAttendance';
 import type { AttendanceRecord } from '@/types';
 import type { Employee } from '@/types';
 import { toast } from 'sonner';
@@ -74,7 +75,13 @@ const Dashboard = () => {
   const [loadingLocation, setLoadingLocation] = useState(false);
   const [attendanceLogOpen, setAttendanceLogOpen] = useState(false);
   const [workLocations, setWorkLocations] = useState<Array<{ id: string; name: string; latitude: number | null; longitude: number | null; radius_meters: number | null; allow_anywhere: boolean }>>([]);
-  const [assignedShift, setAssignedShift] = useState<{ name: string; start_time: string; end_time: string } | null>(null);
+  const [assignedShift, setAssignedShift] = useState<{
+    name: string;
+    start_time: string;
+    end_time: string;
+    is_flexible?: boolean;
+    required_daily_hours?: number;
+  } | null>(null);
 
   const [attendanceLog, setAttendanceLog] = useState<AttendanceRecord[]>([]);
   const [calendarMonth, setCalendarMonth] = useState(() => new Date());
@@ -502,14 +509,20 @@ const Dashboard = () => {
     const weekday = getWeekdayForDate(new Date());
     const { data } = await supabase
       .from('employee_shifts')
-      .select('shift:shifts(name, start_time, end_time, days)')
+      .select('shift:shifts(name, start_time, end_time, days, is_flexible, required_daily_hours)')
       .eq('employee_id', currentUser.id);
     const shifts = (data || []).map((s: any) => s.shift).filter(Boolean);
     const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
     if (shiftForToday) {
       const st = (shiftForToday.start_time || '08:00:00').toString();
       const et = (shiftForToday.end_time || '17:00:00').toString();
-      setAssignedShift({ name: shiftForToday.name || 'REG', start_time: st, end_time: et });
+      setAssignedShift({
+        name: shiftForToday.name || 'REG',
+        start_time: st,
+        end_time: et,
+        is_flexible: !!shiftForToday.is_flexible,
+        required_daily_hours: shiftForToday.required_daily_hours ?? 8,
+      });
     } else {
       setAssignedShift(null);
     }
@@ -663,12 +676,20 @@ const Dashboard = () => {
 
       const weekday = getWeekdayForDate(today);
       const [shiftRes, empRes] = await Promise.all([
-        supabase.from('employee_shifts').select('shift:shifts(start_time, grace_period_minutes, days)').eq('employee_id', currentUser.id),
+        supabase.from('employee_shifts').select('shift:shifts(start_time, grace_period_minutes, days, is_flexible, required_daily_hours)').eq('employee_id', currentUser.id),
         supabase.from('employees').select('late_exempted, grace_period_exempted').eq('id', currentUser.id).single(),
       ]);
       const shifts = (shiftRes.data || []).map((s: any) => s.shift).filter(Boolean);
       const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
-      const shiftInfo = shiftForToday ? { start_time: shiftForToday.start_time || '08:00:00', grace_period_minutes: shiftForToday.grace_period_minutes ?? 15, days: shiftForToday.days } : null;
+      const shiftInfo = shiftForToday
+        ? {
+            start_time: shiftForToday.start_time || '08:00:00',
+            grace_period_minutes: shiftForToday.grace_period_minutes ?? 15,
+            days: shiftForToday.days,
+            is_flexible: !!shiftForToday.is_flexible,
+            required_daily_hours: shiftForToday.required_daily_hours ?? 8,
+          }
+        : null;
       const exemptions = empRes.data ? { late_exempted: empRes.data.late_exempted, grace_period_exempted: empRes.data.grace_period_exempted } : undefined;
       const { status, minutesLate } = computeAttendanceStatusFromTimeIn({ timeInIso, date: today, shift: shiftInfo, exemptions });
 
@@ -711,7 +732,15 @@ const Dashboard = () => {
 
       const photoUrl = await uploadPhoto(data.photoBlob, currentUser.id, today, 'out');
 
-      const { data: existing } = await supabase.from('attendance_records').select('id').eq('employee_id', currentUser.id).eq('date', today).single();
+      const weekday = getWeekdayForDate(today);
+      const [existingRes, shiftRes] = await Promise.all([
+        supabase.from('attendance_records').select('id, time_in').eq('employee_id', currentUser.id).eq('date', today).single(),
+        supabase
+          .from('employee_shifts')
+          .select('shift:shifts(start_time, end_time, break_total_hours, required_daily_hours, is_flexible, days)')
+          .eq('employee_id', currentUser.id),
+      ]);
+      const existing = existingRes.data;
       if (existing) {
         await supabase.from('attendance_records').update({
           time_out: now.toISOString(),
@@ -720,6 +749,19 @@ const Dashboard = () => {
           address_out: null,
           time_out_photo_url: photoUrl,
         }).eq('id', existing.id);
+        const shifts = (shiftRes.data || []).map((s: any) => s.shift).filter(Boolean);
+        const shiftForToday = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
+        if (shiftForToday?.is_flexible && existing.time_in) {
+          const undertime = computeFlexUndertimeMinutes({
+            timeInIso: existing.time_in,
+            timeOutIso: now.toISOString(),
+            breakTotalHours: shiftForToday.break_total_hours ?? 0,
+            requiredDailyHours: shiftForToday.required_daily_hours ?? 8,
+          });
+          if (undertime > 0) {
+            toast.info(`Undertime recorded: ${(undertime / 60).toFixed(2)}h`);
+          }
+        }
       }
       setClockedIn(false);
       setClockOutTime(now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' }));
@@ -747,7 +789,9 @@ const Dashboard = () => {
   const hasTimeOut = !!todayRecord?.time_out;
 
   const shiftLabel = assignedShift
-    ? `${timeTo12Hour(assignedShift.start_time)} - ${timeTo12Hour(assignedShift.end_time)}`
+    ? assignedShift.is_flexible
+      ? `— · ${assignedShift.required_daily_hours ?? 8}h required`
+      : `${timeTo12Hour(assignedShift.start_time)} - ${timeTo12Hour(assignedShift.end_time)}`
     : companyProfile?.work_start_time && companyProfile?.work_end_time
     ? `${timeTo12Hour(companyProfile.work_start_time)} - ${timeTo12Hour(companyProfile.work_end_time)}`
     : '8:00 AM - 5:00 PM';
