@@ -11,6 +11,7 @@
 
 import * as XLSX from 'xlsx';
 import { supabase } from '@/lib/supabase';
+import { computeFlexNetWorkedHours, computeFlexUndertimeMinutes } from '@/lib/flexAttendance';
 
 const WEEKDAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -130,7 +131,7 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   // 2. Fetch attendance records in date range (include time_in/time_out + leave_type_code)
   const { data: records, error: recError } = await supabase
     .from('attendance_records')
-    .select('employee_id, date, status, minutes_late, time_in, time_out, leave_type_code, leave_duration_type, leave_day_fraction, business_trip_id')
+    .select('employee_id, date, status, minutes_late, flex_undertime_minutes, time_in, time_out, leave_type_code, leave_duration_type, leave_day_fraction, business_trip_id')
     .gte('date', dateFrom)
     .lte('date', dateTo);
 
@@ -150,12 +151,12 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   // 3. Fetch employee shifts (to compute net hours per working day)
   const { data: shiftData, error: shiftError } = await supabase
     .from('employee_shifts')
-    .select('employee_id, shift:shifts(start_time, end_time, break_total_hours, days)');
+    .select('employee_id, shift:shifts(start_time, end_time, break_total_hours, days, is_flexible, required_daily_hours)');
 
   if (shiftError) throw new Error(`Failed to fetch shifts: ${shiftError.message}`);
 
   // Build shift lookup: employee_id → array of shifts
-  const shiftsByEmp = new Map<string, Array<{ start_time: string; end_time: string; break_total_hours: number; days?: string[] }>>();
+  const shiftsByEmp = new Map<string, Array<{ start_time: string; end_time: string; break_total_hours: number; days?: string[]; is_flexible?: boolean; required_daily_hours?: number }>>();
   for (const s of shiftData || []) {
     const sh = (s as any).shift;
     if (!sh) continue;
@@ -182,6 +183,8 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
     const weekday = getWeekday(r.date);
     const shiftForDay = empShifts.find((s) => !s.days?.length || s.days.includes(weekday)) || empShifts[0];
     const breakHrs = shiftForDay?.break_total_hours ?? 0;
+    const isFlexibleShift = !!shiftForDay?.is_flexible;
+    const requiredDailyHours = shiftForDay?.required_daily_hours ?? 8;
 
     // Business Trip: approved trip days are temporarily exempt from time_in/out
     // Treat as paid present day (full net shift hours), no undertime/late.
@@ -264,7 +267,7 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
     // Early out:
     // Keep normal-day logic, but for half-day leave we do NOT compute early-out against the full shift,
     // because the employee is expected to work only a half block.
-    if (!isHalfDay && r.time_out && shiftForDay) {
+    if (!isHalfDay && r.time_out && shiftForDay && !isFlexibleShift) {
       const timeOutMinutes = getMinutesFromMidnightManila(r.time_out);
       const shiftEndMinutes = parseTimeToMinutes(shiftForDay.end_time);
       if (timeOutMinutes < shiftEndMinutes) {
@@ -276,18 +279,45 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
 
     // NoOfHours: actual hours worked = (time_out − time_in) minus break (only when span covers the full shift), capped at net shift hours
     if (!skipWorkedHoursFromTimeInOut && r.time_in && r.time_out) {
-      const rawMs = new Date(r.time_out).getTime() - new Date(r.time_in).getTime();
-      if (rawMs > 0) {
-        const rawHours = rawMs / 3600000;
-        const netShiftHrs = shiftForDay
-          ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
-          : rawHours;
-        const grossShiftHrs = shiftForDay ? computeGrossShiftHours(shiftForDay.start_time, shiftForDay.end_time) : rawHours;
-        // Only deduct break if the employee worked a span that roughly covers the whole shift
-        const breakDeduction = rawHours >= grossShiftHrs * 0.9 ? breakHrs : 0;
-        const actualHrs = Math.min(Math.max(0, rawHours - breakDeduction), netShiftHrs);
-        curr.totalWorkedHours += actualHrs;
+      if (isFlexibleShift) {
+        const netWorked = computeFlexNetWorkedHours({
+          timeInIso: r.time_in,
+          timeOutIso: r.time_out,
+          breakTotalHours: breakHrs,
+          requiredDailyHours,
+        });
+        curr.totalWorkedHours += Math.min(netWorked, requiredDailyHours);
+      } else {
+        const rawMs = new Date(r.time_out).getTime() - new Date(r.time_in).getTime();
+        if (rawMs > 0) {
+          const rawHours = rawMs / 3600000;
+          const netShiftHrs = shiftForDay
+            ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
+            : rawHours;
+          const grossShiftHrs = shiftForDay ? computeGrossShiftHours(shiftForDay.start_time, shiftForDay.end_time) : rawHours;
+          // Only deduct break if the employee worked a span that roughly covers the whole shift
+          const breakDeduction = rawHours >= grossShiftHrs * 0.9 ? breakHrs : 0;
+          const actualHrs = Math.min(Math.max(0, rawHours - breakDeduction), netShiftHrs);
+          curr.totalWorkedHours += actualHrs;
+        }
       }
+    }
+
+    if (isFlexibleShift) {
+      const storedFlex = (r as any).flex_undertime_minutes as number | null;
+      const computedFlex =
+        r.time_in && r.time_out
+          ? computeFlexUndertimeMinutes({
+              timeInIso: r.time_in,
+              timeOutIso: r.time_out,
+              breakTotalHours: breakHrs,
+              requiredDailyHours,
+            })
+          : 0;
+      undertimeMinutes = Math.max(
+        undertimeMinutes,
+        storedFlex != null ? storedFlex : computedFlex
+      );
     }
   }
 

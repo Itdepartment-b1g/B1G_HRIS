@@ -61,7 +61,49 @@ interface Employee {
 
 interface LookupItem { id: string; name: string; }
 
-interface ShiftItem { id: string; name: string; start_time: string; end_time: string; days: string[]; work_location?: { name: string } | null; }
+interface ShiftItem {
+  id: string;
+  name: string;
+  start_time: string;
+  end_time: string;
+  days: string[];
+  is_flexible?: boolean;
+  required_daily_hours?: number;
+  work_location?: { name: string } | null;
+}
+
+function formatAssignedShiftDays(days: string[] | undefined): string {
+  if (!days?.length) return '(—)';
+  return `(${days.join(', ')})`;
+}
+
+function normalizeWorkLocation(raw: unknown): { name: string } | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) {
+    const first = raw[0];
+    if (first && typeof first === 'object' && 'name' in first && typeof (first as { name: unknown }).name === 'string') {
+      return { name: (first as { name: string }).name };
+    }
+    return null;
+  }
+  if (typeof raw === 'object' && 'name' in (raw as object) && typeof (raw as { name: unknown }).name === 'string') {
+    return { name: (raw as { name: string }).name };
+  }
+  return null;
+}
+
+function mapShiftRow(row: Record<string, unknown>): ShiftItem {
+  return {
+    id: String(row.id),
+    name: String(row.name ?? ''),
+    start_time: String(row.start_time ?? ''),
+    end_time: String(row.end_time ?? ''),
+    days: Array.isArray(row.days) ? (row.days as string[]) : [],
+    is_flexible: Boolean(row.is_flexible),
+    required_daily_hours: row.required_daily_hours != null ? Number(row.required_daily_hours) : undefined,
+    work_location: normalizeWorkLocation(row.work_location),
+  };
+}
 
 // ── Constants ──────────────────────────────────────────
 
@@ -155,7 +197,7 @@ const Employees = () => {
   const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null);
   const [viewingDepartments, setViewingDepartments] = useState<string[]>([]);
   const [viewingSupervisors, setViewingSupervisors] = useState<string[]>([]);
-  const [viewingShifts, setViewingShifts] = useState<string[]>([]);
+  const [viewingShiftIds, setViewingShiftIds] = useState<string[]>([]);
   const [employeeDepartmentNames, setEmployeeDepartmentNames] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
 
@@ -212,13 +254,17 @@ const Employees = () => {
       supabase.from('positions').select('id, name').order('name'),
       supabase.from('employment_statuses').select('id, name, is_active').order('name'),
       supabase.from('cost_centers').select('id, name').eq('is_active', true).order('name'),
-      supabase.from('shifts').select('id, name, start_time, end_time, days, work_location:work_locations(name)').eq('is_active', true).order('name'),
+      supabase
+        .from('shifts')
+        .select('id, name, start_time, end_time, days, is_flexible, required_daily_hours, work_location:work_locations(name)')
+        .eq('is_active', true)
+        .order('name'),
     ]);
     setDepartments(deptRes.data || []);
     setPositions(posRes.data || []);
     setEmploymentStatuses(esRes.data || []);
     setCostCenters(ccRes.data || []);
-    setShifts((shRes.data as ShiftItem[]) || []);
+    setShifts((shRes.data || []).map((row) => mapShiftRow(row as Record<string, unknown>)));
   }, []);
 
   useEffect(() => { fetchEmployees(); fetchLookups(); }, [fetchEmployees, fetchLookups]);
@@ -227,7 +273,7 @@ const Employees = () => {
     if (!viewingEmployee?.id) {
       setViewingDepartments([]);
       setViewingSupervisors([]);
-      setViewingShifts([]);
+      setViewingShiftIds([]);
       return;
     }
     const load = async () => {
@@ -244,7 +290,7 @@ const Employees = () => {
         const emp = employees.find((e) => e.id === id);
         return emp ? `${emp.first_name} ${emp.last_name}` : null;
       }).filter(Boolean) as string[]);
-      setViewingShifts(shIds.map((id) => shifts.find((s) => s.id === id)?.name).filter(Boolean) as string[]);
+      setViewingShiftIds(shIds);
     };
     load();
   }, [viewingEmployee?.id, departments, employees, shifts]);
@@ -812,8 +858,10 @@ const Employees = () => {
                   <span className="text-xs text-blue-600 ml-1.5">• {sh.work_location.name}</span>
                 )}
               </div>
-              <span className="text-xs text-muted-foreground shrink-0">
-                {timeTo12Hour(sh.start_time || '')}–{timeTo12Hour(sh.end_time || '')} ({sh.days?.join(', ')})
+              <span className="text-xs text-muted-foreground shrink-0 text-right max-w-[58%]">
+                {sh.is_flexible
+                  ? `— · ${sh.required_daily_hours ?? 8}h required ${formatAssignedShiftDays(sh.days)}`
+                  : `${timeTo12Hour(sh.start_time || '')}–${timeTo12Hour(sh.end_time || '')} ${formatAssignedShiftDays(sh.days)}`}
               </span>
             </label>
           ))}
@@ -1087,17 +1135,26 @@ const Employees = () => {
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Immediate Superior</span><p className="text-sm">{viewingSupervisors.length > 0 ? viewingSupervisors.join(', ') : '—'}</p></div>
                   <div className="col-span-2">
                     <span className="text-muted-foreground text-sm">Assigned Shifts & Work Locations</span>
-                    {viewingShifts.length > 0 ? (
-                      <div className="mt-1 space-y-1">
-                        {viewingShifts.map((shName, i) => {
-                          const sh = shifts.find((s) => s.name === shName);
+                    {viewingShiftIds.length > 0 ? (
+                      <div className="mt-1 space-y-2">
+                        {viewingShiftIds.map((sid) => {
+                          const sh = shifts.find((s) => s.id === sid);
                           return (
-                            <p key={i} className="text-sm">
-                              {shName}
-                              {sh?.work_location?.name && (
-                                <span className="text-blue-600 ml-1.5">• {sh.work_location.name}</span>
+                            <div key={sid}>
+                              <p className="text-sm">
+                                {sh?.name ?? '—'}
+                                {sh?.work_location?.name && (
+                                  <span className="text-blue-600 ml-1.5">• {sh.work_location.name}</span>
+                                )}
+                              </p>
+                              {sh && (
+                                <p className="text-xs text-muted-foreground">
+                                  {sh.is_flexible
+                                    ? `— · ${sh.required_daily_hours ?? 8}h required ${formatAssignedShiftDays(sh.days)}`
+                                    : `${timeTo12Hour(sh.start_time || '')}–${timeTo12Hour(sh.end_time || '')} ${formatAssignedShiftDays(sh.days)}`}
+                                </p>
                               )}
-                            </p>
+                            </div>
                           );
                         })}
                       </div>

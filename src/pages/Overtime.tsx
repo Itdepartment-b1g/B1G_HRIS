@@ -145,7 +145,7 @@ const Overtime = () => {
           .maybeSingle(),
         supabase
           .from('employee_shifts')
-          .select('shift:shifts(end_time, days)')
+          .select('shift:shifts(end_time, days, is_flexible)')
           .eq('employee_id', currentUser.id),
       ]);
 
@@ -154,6 +154,14 @@ const Overtime = () => {
         .map((s: any) => s.shift)
         .filter(Boolean);
       const shiftForDay = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
+      if (shiftForDay?.is_flexible) {
+        setOtPreview({
+          loading: false,
+          valid: false,
+          error: 'Automatic OT preview is disabled for flexible shifts.',
+        });
+        return;
+      }
       const shiftEnd = shiftForDay?.end_time ?? '19:00:00';
 
       if (!att?.time_in) {
@@ -223,7 +231,7 @@ const Overtime = () => {
           .not('time_out', 'is', null),
         supabase
           .from('employee_shifts')
-          .select('shift:shifts(end_time, days)')
+          .select('shift:shifts(end_time, days, is_flexible)')
           .eq('employee_id', currentUser.id),
         supabase
           .from('overtime_requests')
@@ -239,6 +247,7 @@ const Overtime = () => {
         if (att.status === 'absent' || existingDates.has(att.date)) continue;
         const weekday = getWeekdayForDate(att.date);
         const shiftForDay = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
+        if (shiftForDay?.is_flexible) continue;
         const shiftEnd = shiftForDay?.end_time ?? '19:00:00';
         const timeOutRaw = att.time_out;
         const timeOutStr =

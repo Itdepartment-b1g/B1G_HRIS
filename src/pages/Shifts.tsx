@@ -28,6 +28,8 @@ interface Shift {
   is_active: boolean;
   created_at: string;
   work_location_id: string | null;
+  is_flexible: boolean;
+  required_daily_hours: number;
   work_location?: { name: string } | null;
 }
 
@@ -109,6 +111,8 @@ const Shifts = () => {
   const [formDescription, setFormDescription] = useState('');
   const [formIsActive, setFormIsActive] = useState(true);
   const [formWorkLocationId, setFormWorkLocationId] = useState<string>('');
+  const [formIsFlexible, setFormIsFlexible] = useState(false);
+  const [formRequiredDailyHours, setFormRequiredDailyHours] = useState('8');
 
   const [editingShift, setEditingShift] = useState<Shift | null>(null);
   const [deletingShift, setDeletingShift] = useState<Shift | null>(null);
@@ -164,6 +168,8 @@ const Shifts = () => {
     setFormDescription('');
     setFormIsActive(true);
     setFormWorkLocationId('');
+    setFormIsFlexible(false);
+    setFormRequiredDailyHours('8');
   };
 
   const toggleDay = (day: string) => {
@@ -176,6 +182,10 @@ const Shifts = () => {
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formName.trim() || formDays.length === 0) return;
+    if (!formWorkLocationId.trim()) {
+      toast.error('Please select a work location.');
+      return;
+    }
     setSaving(true);
 
     try {
@@ -193,6 +203,8 @@ const Shifts = () => {
         description: formDescription.trim() || null,
         is_active: formIsActive,
         work_location_id: formWorkLocationId || null,
+        is_flexible: formIsFlexible,
+        required_daily_hours: Math.max(1, parseFloat(formRequiredDailyHours || '8')),
       });
 
       if (error) throw error;
@@ -221,12 +233,20 @@ const Shifts = () => {
     setFormDescription(shift.description || '');
     setFormIsActive(shift.is_active);
     setFormWorkLocationId(shift.work_location_id || '');
+    setFormIsFlexible(shift.is_flexible ?? false);
+    setFormRequiredDailyHours(
+      shift.required_daily_hours != null ? String(shift.required_daily_hours) : '8'
+    );
     setEditOpen(true);
   };
 
   const handleEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingShift || !formName.trim() || formDays.length === 0) return;
+    if (!formWorkLocationId.trim()) {
+      toast.error('Please select a work location.');
+      return;
+    }
     setSaving(true);
 
     try {
@@ -246,6 +266,8 @@ const Shifts = () => {
           description: formDescription.trim() || null,
           is_active: formIsActive,
           work_location_id: formWorkLocationId || null,
+          is_flexible: formIsFlexible,
+          required_daily_hours: Math.max(1, parseFloat(formRequiredDailyHours || '8')),
         })
         .eq('id', editingShift.id);
 
@@ -294,16 +316,61 @@ const Shifts = () => {
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <Label>Start Time <span className="text-red-500">*</span></Label>
-          <Input type="time" value={formStartTime} onChange={(e) => setFormStartTime(e.target.value)} required />
+          <Input
+            type="time"
+            value={formStartTime}
+            onChange={(e) => setFormStartTime(e.target.value)}
+            required
+            disabled={formIsFlexible}
+          />
         </div>
         <div className="space-y-2">
           <Label>End Time <span className="text-red-500">*</span></Label>
-          <Input type="time" value={formEndTime} onChange={(e) => setFormEndTime(e.target.value)} required />
+          <Input
+            type="time"
+            value={formEndTime}
+            onChange={(e) => setFormEndTime(e.target.value)}
+            required
+            disabled={formIsFlexible}
+          />
         </div>
+      </div>
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id="shift-flexible"
+          checked={formIsFlexible}
+          onChange={(e) => setFormIsFlexible(e.target.checked)}
+          className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
+        />
+        <Label htmlFor="shift-flexible" className="cursor-pointer">Flexible schedule</Label>
+      </div>
+      <div className="space-y-2">
+        <Label>Required daily hours</Label>
+        <Input
+          type="number"
+          min="1"
+          max="24"
+          step="0.25"
+          value={formRequiredDailyHours}
+          onChange={(e) => setFormRequiredDailyHours(e.target.value)}
+          placeholder="8"
+        />
+        <p className="text-xs text-muted-foreground">
+          Used for flex shifts to compute undertime. Employees can time in/out anytime, but rendered hours are measured against this value.
+        </p>
       </div>
       <div className="space-y-2">
         <Label>Grace Period (minutes allowed before marking late)</Label>
-        <Input type="number" min="0" max="120" value={formGracePeriodMinutes} onChange={(e) => setFormGracePeriodMinutes(e.target.value)} placeholder="15" />
+        <Input
+          type="number"
+          min="0"
+          max="120"
+          value={formGracePeriodMinutes}
+          onChange={(e) => setFormGracePeriodMinutes(e.target.value)}
+          placeholder="15"
+          disabled={formIsFlexible}
+        />
         <p className="text-xs text-muted-foreground">Minutes after shift start before marking late. E.g. 15 = time in up to start+15min is OK.</p>
       </div>
       <div className="text-sm text-muted-foreground">
@@ -325,18 +392,41 @@ const Shifts = () => {
         <div className="grid grid-cols-3 gap-4">
           <div className="space-y-1">
             <Label className="text-xs font-normal">Start Time</Label>
-            <Input type="time" value={formBreakStart} onChange={(e) => { const v = e.target.value; setFormBreakStart(v); if (v && formBreakEnd) setFormBreakTotalHours(computeBreakHours(v, formBreakEnd).toFixed(2)); }} />
+            <Input
+              type="time"
+              value={formBreakStart}
+              onChange={(e) => { const v = e.target.value; setFormBreakStart(v); if (v && formBreakEnd) setFormBreakTotalHours(computeBreakHours(v, formBreakEnd).toFixed(2)); }}
+              disabled={formIsFlexible}
+            />
           </div>
           <div className="space-y-1">
             <Label className="text-xs font-normal">End Time</Label>
-            <Input type="time" value={formBreakEnd} onChange={(e) => { const v = e.target.value; setFormBreakEnd(v); if (formBreakStart && v) setFormBreakTotalHours(computeBreakHours(formBreakStart, v).toFixed(2)); }} />
+            <Input
+              type="time"
+              value={formBreakEnd}
+              onChange={(e) => { const v = e.target.value; setFormBreakEnd(v); if (formBreakStart && v) setFormBreakTotalHours(computeBreakHours(formBreakStart, v).toFixed(2)); }}
+              disabled={formIsFlexible}
+            />
           </div>
           <div className="space-y-1">
             <Label className="text-xs font-normal">Total Hours</Label>
-            <Input type="number" step="0.25" min="0" max="24" placeholder="e.g. 1" value={formBreakTotalHours} onChange={(e) => setFormBreakTotalHours(e.target.value)} />
+            <Input
+              type="number"
+              step="0.25"
+              min="0"
+              max="24"
+              placeholder="e.g. 1"
+              value={formBreakTotalHours}
+              onChange={(e) => setFormBreakTotalHours(e.target.value)}
+              disabled={formIsFlexible}
+            />
           </div>
         </div>
-        <p className="text-xs text-muted-foreground">Optional. Set start/end to auto-calculate total, or enter total hours directly.</p>
+        <p className="text-xs text-muted-foreground">
+          {formIsFlexible
+            ? 'Disabled for flexible shifts to avoid fixed schedule confusion.'
+            : 'Optional. Set start/end to auto-calculate total, or enter total hours directly.'}
+        </p>
       </div>
 
       <div className="space-y-2">
@@ -373,13 +463,18 @@ const Shifts = () => {
       </div>
 
       <div className="space-y-2">
-        <Label>Work Location</Label>
+        <Label>
+          Work Location <span className="text-red-500">*</span>
+        </Label>
         <select
           value={formWorkLocationId}
           onChange={(e) => setFormWorkLocationId(e.target.value)}
+          required
           className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <option value="">— No location linked —</option>
+          <option value="" disabled>
+            Select a work location…
+          </option>
           {workLocations.map((wl) => (
             <option key={wl.id} value={wl.id}>
               {wl.name}{wl.allow_anywhere ? ' (Anywhere)' : ''}
@@ -387,7 +482,7 @@ const Shifts = () => {
           ))}
         </select>
         <p className="text-xs text-muted-foreground">
-          Link a work location to this shift. Employees will be validated against this location on shift days.
+          Required. Employees are validated against this location on shift days (use an &quot;anywhere&quot; location for remote flex).
         </p>
       </div>
 
@@ -470,17 +565,23 @@ const Shifts = () => {
                     <TableCell>
                       <span className="text-sm">{formatDays(shift.days)}</span>
                     </TableCell>
-                    <TableCell className="text-sm font-mono">{formatTime(shift.start_time)}</TableCell>
-                    <TableCell className="text-sm font-mono">{formatTime(shift.end_time)}</TableCell>
+                    <TableCell className="text-sm font-mono text-muted-foreground">
+                      {shift.is_flexible ? '—' : formatTime(shift.start_time)}
+                    </TableCell>
+                    <TableCell className="text-sm font-mono text-muted-foreground">
+                      {shift.is_flexible ? '—' : formatTime(shift.end_time)}
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
                       {shift.work_location?.name || '—'}
                     </TableCell>
                     <TableCell className="text-sm font-medium hidden lg:table-cell">
-                      {computeNetWorkingHours(
-                        shift.start_time.substring(0, 5),
-                        shift.end_time.substring(0, 5),
-                        shift.break_total_hours ?? 0
-                      )}h
+                      {shift.is_flexible
+                        ? `${shift.required_daily_hours ?? 8}h required`
+                        : `${computeNetWorkingHours(
+                            shift.start_time.substring(0, 5),
+                            shift.end_time.substring(0, 5),
+                            shift.break_total_hours ?? 0
+                          )}h`}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden lg:table-cell">
                       {shift.break_start_time && shift.break_end_time
@@ -489,8 +590,8 @@ const Shifts = () => {
                         ? `${shift.break_total_hours}h`
                         : '—'}
                     </TableCell>
-                    <TableCell className="text-sm hidden xl:table-cell">
-                      {shift.grace_period_minutes != null ? `${shift.grace_period_minutes}m` : '—'}
+                    <TableCell className="text-sm hidden xl:table-cell text-muted-foreground">
+                      {shift.is_flexible ? '—' : shift.grace_period_minutes != null ? `${shift.grace_period_minutes}m` : '—'}
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground hidden md:table-cell max-w-[200px] truncate">
                       {shift.description || '—'}
@@ -546,11 +647,13 @@ const Shifts = () => {
               <div className="grid grid-cols-2 gap-4">
                 <div><span className="text-muted-foreground text-sm">Name</span><p className="font-medium">{viewingShift.name}</p></div>
                 <div><span className="text-muted-foreground text-sm">Schedule</span><p>{formatDays(viewingShift.days)}</p></div>
-                <div><span className="text-muted-foreground text-sm">Start Time</span><p className="font-mono">{formatTime(viewingShift.start_time)}</p></div>
-                <div><span className="text-muted-foreground text-sm">End Time</span><p className="font-mono">{formatTime(viewingShift.end_time)}</p></div>
-                <div><span className="text-muted-foreground text-sm">Net Hours</span><p>{computeNetWorkingHours(viewingShift.start_time.substring(0, 5), viewingShift.end_time.substring(0, 5), viewingShift.break_total_hours ?? 0)}h</p></div>
+                <div><span className="text-muted-foreground text-sm">Mode</span><p>{viewingShift.is_flexible ? 'Flexible' : 'Fixed'}</p></div>
+                <div><span className="text-muted-foreground text-sm">Required hours</span><p>{viewingShift.required_daily_hours ?? 8}h</p></div>
+                <div><span className="text-muted-foreground text-sm">Start Time</span><p className="font-mono">{viewingShift.is_flexible ? '—' : formatTime(viewingShift.start_time)}</p></div>
+                <div><span className="text-muted-foreground text-sm">End Time</span><p className="font-mono">{viewingShift.is_flexible ? '—' : formatTime(viewingShift.end_time)}</p></div>
+                <div><span className="text-muted-foreground text-sm">Net Hours</span><p>{viewingShift.is_flexible ? `${viewingShift.required_daily_hours ?? 8}h required` : `${computeNetWorkingHours(viewingShift.start_time.substring(0, 5), viewingShift.end_time.substring(0, 5), viewingShift.break_total_hours ?? 0)}h`}</p></div>
                 <div><span className="text-muted-foreground text-sm">Break</span><p>{viewingShift.break_start_time && viewingShift.break_end_time ? `${formatTime(viewingShift.break_start_time)} – ${formatTime(viewingShift.break_end_time)}` : viewingShift.break_total_hours != null ? `${viewingShift.break_total_hours}h` : '—'}</p></div>
-                <div><span className="text-muted-foreground text-sm">Grace Period</span><p>{viewingShift.grace_period_minutes != null ? `${viewingShift.grace_period_minutes} min` : '—'}</p></div>
+                <div><span className="text-muted-foreground text-sm">Grace Period</span><p>{viewingShift.is_flexible ? '—' : viewingShift.grace_period_minutes != null ? `${viewingShift.grace_period_minutes} min` : '—'}</p></div>
                 <div><span className="text-muted-foreground text-sm">Work Location</span><p>{viewingShift.work_location?.name || '—'}</p></div>
                 <div><span className="text-muted-foreground text-sm">Status</span><p><Badge variant="outline" className={viewingShift.is_active ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-50 text-gray-500'}>{viewingShift.is_active ? 'Active' : 'Inactive'}</Badge></p></div>
               </div>

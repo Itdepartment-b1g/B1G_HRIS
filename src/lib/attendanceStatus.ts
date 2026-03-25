@@ -10,6 +10,8 @@ export interface ShiftInfo {
   start_time: string; // "08:00:00" or "08:00"
   grace_period_minutes: number;
   days?: string[]; // e.g. ['Mon','Tue','Wed','Thu','Fri']
+  is_flexible?: boolean;
+  required_daily_hours?: number;
 }
 
 export interface EmployeeExemptions {
@@ -76,6 +78,10 @@ export function computeAttendanceStatusFromTimeIn(params: {
 
   if (!shift) {
     return { status: currentStoredStatus ?? 'present', minutesLate: 0 };
+  }
+
+  if (shift.is_flexible) {
+    return { status: 'present', minutesLate: 0 };
   }
 
   const timeInMinutes = getMinutesFromMidnight(timeInIso);
