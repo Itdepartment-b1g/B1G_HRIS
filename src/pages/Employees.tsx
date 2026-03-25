@@ -286,10 +286,16 @@ const Employees = () => {
       setViewingDepartments(deptIds.map((id) => departments.find((d) => d.id === id)?.name).filter(Boolean) as string[]);
       const supIds = (supRes.data || []).map((r: { supervisor_id: string }) => r.supervisor_id);
       const shIds = (shRes.data || []).map((r: { shift_id: string }) => r.shift_id);
-      setViewingSupervisors(supIds.map((id) => {
-        const emp = employees.find((e) => e.id === id);
-        return emp ? `${emp.first_name} ${emp.last_name}` : null;
-      }).filter(Boolean) as string[]);
+      // Inactive superiors should not be shown in the "View" dialog.
+      setViewingSupervisors(
+        supIds
+          .map((id) => {
+            const emp = employees.find((e) => e.id === id);
+            if (!emp || emp.is_active === false) return null;
+            return `${emp.first_name} ${emp.last_name}`;
+          })
+          .filter(Boolean) as string[]
+      );
       setViewingShiftIds(shIds);
     };
     load();
@@ -310,7 +316,7 @@ const Employees = () => {
   );
 
   const filtered = employees.filter((emp) => {
-    const name = `${emp.first_name} ${emp.last_name} ${emp.email} ${emp.employee_code}`.toLowerCase();
+    const name = `${emp.first_name} ${emp.last_name} ${emp.company_email ?? ''} ${emp.employee_code}`.toLowerCase();
     const matchesSearch = name.includes(search.toLowerCase());
     const matchesRole = roleFilter === 'all' || getRoles(emp).includes(roleFilter);
     return matchesSearch && matchesRole;
@@ -359,10 +365,33 @@ const Employees = () => {
     }
 
     // Supervisors
-    await supabase.from('employee_supervisors').delete().eq('employee_id', employeeId);
-    if (selectedSupervisors.length > 0) {
+    const activeSelectedSupervisors = selectedSupervisors.filter((sId) => employees.find((e) => e.id === sId)?.is_active);
+    const { data: currentSupervisors } = await supabase
+      .from('employee_supervisors')
+      .select('supervisor_id')
+      .eq('employee_id', employeeId);
+
+    const currentSupervisorIds = (currentSupervisors || []).map((r) => r.supervisor_id);
+    const activeCurrentSupervisorIds = currentSupervisorIds.filter(
+      (sid) => employees.find((e) => e.id === sid)?.is_active
+    );
+
+    // Block-only: remove only ACTIVE supervisor relationships that are no longer selected.
+    // Preserve existing relationships where the supervisor is currently inactive.
+    const toDelete = activeCurrentSupervisorIds.filter((sid) => !activeSelectedSupervisors.includes(sid));
+    if (toDelete.length > 0) {
+      await supabase
+        .from('employee_supervisors')
+        .delete()
+        .eq('employee_id', employeeId)
+        .in('supervisor_id', toDelete);
+    }
+
+    // Insert missing ACTIVE supervisor relationships.
+    const toInsert = activeSelectedSupervisors.filter((sid) => !currentSupervisorIds.includes(sid));
+    if (toInsert.length > 0) {
       await supabase.from('employee_supervisors').insert(
-        selectedSupervisors.map((sId) => ({ employee_id: employeeId, supervisor_id: sId }))
+        toInsert.map((sid) => ({ employee_id: employeeId, supervisor_id: sid }))
       );
     }
 
@@ -376,6 +405,7 @@ const Employees = () => {
   };
 
   const buildEmployeeUpdate = (opts?: { includeEmploymentStatus?: boolean }) => {
+    const activeSelectedSupervisors = selectedSupervisors.filter((sId) => employees.find((e) => e.id === sId)?.is_active);
     const firstDeptId = selectedDepartments[0] || null;
     const firstDeptName = firstDeptId ? departments.find((d) => d.id === firstDeptId)?.name ?? null : null;
     const statusId = employment.employment_status_id?.trim();
@@ -397,8 +427,9 @@ const Employees = () => {
       department_id: firstDeptId,
       department: firstDeptName,
       cost_center_id: employment.cost_center_id || null,
-    company_email: employment.company_email || null,
-    supervisor_id: selectedSupervisors[0] || null,
+      company_email: employment.company_email || null,
+      // Block-only: ensure employees.supervisor_id only ever points to an ACTIVE supervisor.
+      supervisor_id: activeSelectedSupervisors[0] || null,
     overtime_exempted: employment.overtime_exempted,
     late_exempted: employment.late_exempted,
     undertime_exempted: employment.undertime_exempted,
@@ -512,7 +543,12 @@ const Employees = () => {
     ]);
     const deptIds = (edRes.data || []).map((r) => r.department_id);
     setSelectedDepartments(deptIds.length > 0 ? deptIds : (empToUse.department_id ? [empToUse.department_id] : []));
-    setSelectedSupervisors((supRes.data || []).map((r) => r.supervisor_id));
+    // Block-only: if a supervisor is inactive, don't keep it selected in the UI.
+    // This effectively "unchecks" inactive superiors for all employees when editing.
+    const inactiveFiltered = (supRes.data || [])
+      .map((r) => r.supervisor_id)
+      .filter((sid) => employees.find((e) => e.id === sid)?.is_active);
+    setSelectedSupervisors(inactiveFiltered);
     setSelectedShifts((shRes.data || []).map((r) => r.shift_id));
 
     setFormStep(1);
@@ -530,6 +566,10 @@ const Employees = () => {
       toast.error('Employment status is required');
       return;
     }
+    if (!employment.company_email?.trim()) {
+      toast.error('Company email is required');
+      return;
+    }
     if (personal.phone.trim() && !isValidPhonePH(personal.phone)) {
       toast.error('Please enter a valid Philippine mobile number (09XX XXX XXXX)');
       return;
@@ -544,6 +584,7 @@ const Employees = () => {
       await updateUserProfile(
         { user_id: editingEmployee.id },
         {
+          email: employment.company_email,
           employee_code: employment.employee_code,
           first_name: personal.first_name,
           last_name: personal.last_name,
@@ -588,6 +629,11 @@ const Employees = () => {
     if (!deletingEmployee) return;
     setSaving(true);
     try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData.user?.id === deletingEmployee.id) {
+        toast.error('You cannot delete your own account while logged in.');
+        return;
+      }
       await deleteUser(deletingEmployee.id);
       toast.success(`${deletingEmployee.first_name} ${deletingEmployee.last_name} deleted`);
       setDeleteOpen(false);
@@ -819,14 +865,22 @@ const Employees = () => {
           {supervisorCandidates.filter((s) => s.id !== editingEmployee?.id).length === 0 ? (
             <p className="text-sm text-muted-foreground">No supervisors available</p>
           ) : supervisorCandidates.filter((s) => s.id !== editingEmployee?.id).map((s) => (
-            <label key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+            <label
+              key={s.id}
+              className={cn(
+                'flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1',
+                !s.is_active && 'opacity-60 cursor-not-allowed'
+              )}
+            >
               <input
                 type="checkbox"
-                checked={selectedSupervisors.includes(s.id)}
+                checked={selectedSupervisors.includes(s.id) && s.is_active}
+                disabled={!s.is_active}
                 onChange={() => toggleMulti(selectedSupervisors, setSelectedSupervisors, s.id, 2)}
                 className="h-4 w-4 rounded border-gray-300 text-primary focus:ring-primary"
               />
               <span className="text-sm">{s.first_name} {s.last_name}</span>
+              {!s.is_active && <span className="text-[10px] text-muted-foreground ml-1">(inactive)</span>}
               <Badge variant="outline" className={cn('text-[10px] ml-auto', ROLE_STYLES[getRole(s)] || '')}>
                 {ROLE_LABELS[getRole(s)] || getRole(s)}
               </Badge>
@@ -1035,7 +1089,7 @@ const Employees = () => {
                       </Avatar>
                       <div>
                         <p className="font-medium text-sm">{emp.first_name} {emp.last_name}</p>
-                        <p className="text-xs text-muted-foreground">{emp.email}</p>
+                        <p className="text-xs text-muted-foreground">{emp.company_email || '—'}</p>
                       </div>
                     </div>
                   </TableCell>
@@ -1044,9 +1098,13 @@ const Employees = () => {
                     <TableCell className="text-sm hidden md:table-cell">{emp.position || '—'}</TableCell>
                     <TableCell>{rolesBadges(emp)}</TableCell>
                   <TableCell>
-                      <Badge variant={emp.is_active ? 'outline' : 'secondary'} className={emp.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : ''}>
-                      {emp.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
+                      <Badge
+                        variant={emp.is_active ? 'outline' : 'secondary'}
+                        className={emp.is_active ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : ''}
+                      >
+                        {employmentStatuses.find((s) => s.id === emp.employment_status_id)?.name ||
+                          (emp.is_active ? 'Active' : 'Inactive')}
+                      </Badge>
                   </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
@@ -1129,7 +1187,6 @@ const Employees = () => {
                     <Badge key={r} variant="outline" className={ROLE_STYLES[r] || ''}>{ROLE_LABELS[r] || r.replace('_', ' ')}</Badge>
                   ))}</div></div>
                   <div><span className="text-muted-foreground text-sm">Status</span><div><Badge variant={viewingEmployee.is_active ? 'outline' : 'secondary'}>{viewingEmployee.is_active ? 'Active' : 'Inactive'}</Badge></div></div>
-                  <div><span className="text-muted-foreground text-sm">Email</span><p>{viewingEmployee.email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Company Email</span><p>{viewingEmployee.company_email || '—'}</p></div>
                   <div><span className="text-muted-foreground text-sm">Cost Center</span><p>{costCenters.find((c) => c.id === viewingEmployee.cost_center_id)?.name || '—'}</p></div>
                   <div className="col-span-2"><span className="text-muted-foreground text-sm">Immediate Superior</span><p className="text-sm">{viewingSupervisors.length > 0 ? viewingSupervisors.join(', ') : '—'}</p></div>

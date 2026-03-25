@@ -30,6 +30,14 @@ export function useCurrentUser(): { user: CurrentUser | null; loading: boolean; 
       setError(empRes.error.message);
       setUser(null);
     } else if (empRes.data) {
+      if (empRes.data.is_active === false) {
+        // Inactive (AWOL/Resigned/Terminated) accounts are blocked from app access.
+        await supabase.auth.signOut();
+        setUser(null);
+        setError(null);
+        setLoading(false);
+        return;
+      }
       const roles = (roleRes.data || []).map((r) => r.role as UserRole);
       const roleList = roles.length > 0 ? roles : ['employee'];
       const primary = ROLE_HIERARCHY.find((r) => roleList.includes(r)) ?? 'employee';

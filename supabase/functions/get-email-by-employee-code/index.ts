@@ -1,13 +1,15 @@
 // Edge Function: Get email by employee code (for login)
 // Deploy: supabase functions deploy get-email-by-employee-code
 
+// @ts-nocheck
+
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from './auth.ts'
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders(req)(req) })
+    return new Response('ok', { headers: corsHeaders(req) })
   }
 
   try {
@@ -30,6 +32,7 @@ serve(async (req) => {
       .from('employees')
       .select('email')
       .eq('employee_code', employee_code.trim())
+      .eq('is_active', true)
       .limit(1)
       .maybeSingle()
 
