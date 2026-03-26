@@ -107,7 +107,10 @@ const DashboardLayout = () => {
   }, [dismissedDropdownIds, user?.id]);
 
   useEffect(() => {
-    if (!loading && !user) navigate('/');
+    if (!loading && !user) {
+      const suppressRedirect = typeof window !== 'undefined' ? (window as any).__B1G_SUPPRESS_AUTH_REDIRECT__ : false;
+      if (!suppressRedirect) navigate('/');
+    }
   }, [loading, user, navigate]);
 
   // When user returns from idle (tab visible), proactively validate session so edge function calls use fresh token

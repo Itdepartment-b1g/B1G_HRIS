@@ -7,8 +7,9 @@
 
 import { supabase } from '@/lib/supabase';
 
-const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL;
-const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Must match createClient() — trim so CRLF in .env does not break apikey / URL.
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL ?? '').trim();
+const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
 
 function checkCredentials() {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
@@ -30,8 +31,7 @@ export interface CallEdgeFunctionOptions {
 /**
  * Generic fetch wrapper for Edge Functions.
  * Pass useUserAuth: true for functions that require admin authorization.
- * Uses supabase.functions.invoke() when useUserAuth is true so the client
- * automatically attaches the user's JWT and handles session refresh.
+ * When useUserAuth is true, it attaches the current user's access token.
  */
 async function callEdgeFunction<T>(
   functionName: string,
@@ -39,53 +39,89 @@ async function callEdgeFunction<T>(
   options?: CallEdgeFunctionOptions
 ): Promise<T> {
   checkCredentials();
-  const onAuthFailure = options?.onAuthFailure ?? 'logout';
+  // Default to "throw" so we don't immediately sign the user out (which
+  // causes route reloads and clears the console while debugging).
+  const onAuthFailure = options?.onAuthFailure ?? 'throw';
 
   if (options?.useUserAuth) {
-    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-    if (sessionError || !session?.access_token) {
-      throw new Error('You must be logged in to perform this action.');
-    }
-    let token = session.access_token;
-    const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession();
-    if (refreshError) {
-      if (onAuthFailure === 'logout') {
-        await supabase.auth.signOut();
-        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
-          window.location.href = '/?session_expired=1';
-        }
+    const w = typeof window !== 'undefined' ? (window as any) : null;
+    const prevSuppress = w?.__B1G_SUPPRESS_AUTH_REDIRECT__;
+    if (w) w.__B1G_SUPPRESS_AUTH_REDIRECT__ = true;
+
+    try {
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (sessionError || !session?.access_token) {
+        throw new Error('You must be logged in to perform this action.');
       }
-      throw new Error('Session expired. Please sign in again.');
-    }
-    token = refreshed?.session?.access_token ?? token;
-    const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (response.status === 401) {
-      if (onAuthFailure === 'logout') {
-        await supabase.auth.signOut();
-        if (typeof window !== 'undefined' && window.location.pathname !== '/') {
-          window.location.href = '/?session_expired=1';
-        }
+
+      try {
+        await supabase.auth.refreshSession();
+      } catch (e) {
+        console.warn('[edgeFunctions] refreshSession failed (continuing)', e);
       }
-      throw new Error('Session expired. Please sign in again.');
+
+      const { data: { session: latest } } = await supabase.auth.getSession();
+      const accessToken = latest?.access_token ?? session.access_token;
+      if (!accessToken) {
+        throw new Error('You must be logged in to perform this action.');
+      }
+
+      // Explicit headers: ensures the gateway sees the user JWT + correct apikey together.
+      // (If Authorization were missing, fetchWithAuth could fall back to anon key as Bearer — some gateways reject that as "Invalid JWT".)
+      const invokeOpts: {
+        body?: Record<string, any>;
+        headers: Record<string, string>;
+      } = {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          apikey: SUPABASE_ANON_KEY,
+        },
+      };
+      if (body !== undefined) invokeOpts.body = body;
+
+      const { data, error: fnError } = await supabase.functions.invoke(functionName, invokeOpts);
+
+      if (fnError) {
+        const errAny = fnError as { message?: string; context?: unknown };
+        const ctx = errAny.context;
+        let message = errAny.message || 'Edge function request failed';
+        let status: number | undefined;
+
+        if (ctx instanceof Response) {
+          status = ctx.status;
+          try {
+            const b = await ctx.clone().json();
+            if (typeof (b as { error?: string })?.error === 'string') {
+              message = (b as { error: string }).error;
+            } else if (typeof (b as { message?: string })?.message === 'string') {
+              message = (b as { message: string }).message;
+            }
+          } catch {
+            /* ignore */
+          }
+        }
+
+        if (status === 401 && onAuthFailure === 'logout') {
+          await supabase.auth.signOut();
+          if (typeof window !== 'undefined' && window.location.pathname !== '/') {
+            window.location.href = '/?session_expired=1';
+          }
+        }
+
+        throw new Error(message);
+      }
+
+      return data as T;
+    } finally {
+      if (w) w.__B1G_SUPPRESS_AUTH_REDIRECT__ = prevSuppress;
     }
-    if (!response.ok) {
-      const errBody = await response.json().catch(() => ({ error: 'Unknown error' }));
-      throw new Error(errBody.error || `Failed to call ${functionName}`);
-    }
-    return response.json();
   }
 
   const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+      apikey: SUPABASE_ANON_KEY,
       'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
@@ -293,7 +329,7 @@ export async function createUser(data: CreateUserData): Promise<CreateUserRespon
     throw new Error('Missing required fields: email, employee_code, first_name, last_name');
   }
 
-  return callEdgeFunction<CreateUserResponse>('create-user', data, { useUserAuth: true });
+  return callEdgeFunction<CreateUserResponse>('create-user', data, { useUserAuth: true, onAuthFailure: 'throw' });
 }
 
 /**
