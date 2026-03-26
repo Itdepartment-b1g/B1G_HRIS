@@ -1,7 +1,11 @@
 # Supabase project config
 # See: https://supabase.com/docs/guides/functions/function-configuration
 #
-# After adding/editing this file, redeploy: supabase functions deploy update-user-profile
+# IMPORTANT: These settings apply only after you deploy from this repo, e.g.:
+#   supabase functions deploy create-user --project-ref <your-ref>
+# If you still see gateway 401 "Invalid JWT", the hosted function may still have
+# JWT verification ON — redeploy with this file, or turn off "Verify JWT" for
+# that function in the Supabase Dashboard (Edge Functions → function → details).
 
 # Disable gateway JWT verification for admin Edge Functions.
 # These functions perform their own JWT validation via verifyUserJwt + requireAdmin.

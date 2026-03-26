@@ -1,7 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+// Trim avoids CRLF (\r) from Windows .env files corrupting URL / anon key (breaks Edge Function JWT verification).
+const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL ?? '').trim();
+const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
 
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
@@ -22,10 +23,15 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
 if (typeof window !== 'undefined') {
   supabase.auth.onAuthStateChange((event, session) => {
     if (event === 'SIGNED_OUT' || (event === 'TOKEN_REFRESHED' && !session)) {
-      localStorage.removeItem('b1g_session_id');
-      if (window.location.pathname !== '/') {
-        window.location.href = '/?session_expired=1';
+      const suppressRedirect = (window as any).__B1G_SUPPRESS_AUTH_REDIRECT__;
+      if (!suppressRedirect) {
+        localStorage.removeItem('b1g_session_id');
       }
+      // Debug-friendly behavior:
+      // Don't force a redirect/sign-out reload during edge calls while diagnosing.
+      // UI will react to `session` being null, but the console will remain intact.
+      // (You can re-enable redirect once the root cause is confirmed.)
+      console.warn('[auth] Session ended:', { event, pathname: window.location.pathname, suppressRedirect });
     }
   });
 }
