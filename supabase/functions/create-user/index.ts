@@ -35,6 +35,8 @@
       auth: { user: gmailUser, pass: gmailPass },
     })
 
+    const appUrl = 'https://b1ghris.vercel.app/'
+
     const html = `
       <h2>Welcome to B1G HRIS</h2>
       <p>Hi ${firstName} ${lastName},</p>
@@ -43,6 +45,7 @@
         <li><strong>Employee Code:</strong> ${employeeCode}</li>
         <li><strong>Password:</strong> <code>${password}</code></li>
       </ul>
+      <p>Access the app: <a href="${appUrl}" target="_blank" rel="noopener noreferrer">${appUrl}</a></p>
       <p>Please sign in and change your password in Settings for security.</p>
       <p>— B1G HR Team</p>
     `
@@ -54,7 +57,7 @@
           to: toEmail,
           subject: 'Your B1G HRIS Login Credentials',
           html,
-          text: `Hi ${firstName} ${lastName},\n\nYour account has been created.\nEmployee Code: ${employeeCode}\nPassword: ${password}\n\nPlease sign in and change your password in Settings.\n— B1G HR Team`,
+          text: `Hi ${firstName} ${lastName},\n\nYour account has been created.\nEmployee Code: ${employeeCode}\nPassword: ${password}\n\nAccess the app: ${appUrl}\n\nPlease sign in and change your password in Settings.\n— B1G HR Team`,
         },
         (err) => (err ? reject(err) : resolve())
       )

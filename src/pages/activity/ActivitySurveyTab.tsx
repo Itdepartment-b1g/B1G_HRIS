@@ -478,8 +478,8 @@ const ActivitySurveyTab = () => {
                   </p>
                 </CardHeader>
                 <CardContent>
-                  <div className="flex items-center justify-between gap-4">
-                    <div>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="min-w-0">
                       {hasResponded ? (
                         <p className="text-sm text-emerald-600">You have already completed this survey.</p>
                       ) : (
@@ -487,7 +487,7 @@ const ActivitySurveyTab = () => {
                       )}
                     </div>
                     {isAdmin && (
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 w-full sm:w-auto sm:justify-end">
                         <Button variant="outline" size="sm" onClick={() => openCreate(s)}>
                           <Pencil className="h-4 w-4" />
                         </Button>

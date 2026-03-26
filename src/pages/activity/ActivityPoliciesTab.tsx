@@ -339,11 +339,11 @@ const ActivityPoliciesTab = () => {
           policies.map((p) => (
             <Card key={p.id}>
               <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-4">
-                  <CardTitle className="text-base">{p.title}</CardTitle>
-                  <div className="flex items-center gap-2 shrink-0">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <CardTitle className="text-base break-words">{p.title}</CardTitle>
+                  <div className="flex flex-wrap items-center gap-2 w-full sm:w-auto sm:justify-end">
                     {p.acknowledged ? (
-                      <span className="text-xs text-emerald-600 flex items-center gap-1">
+                      <span className="text-xs text-emerald-600 flex items-center gap-1 whitespace-nowrap">
                         <CheckCircle className="h-4 w-4" />
                         Acknowledged
                       </span>
@@ -392,10 +392,10 @@ const ActivityPoliciesTab = () => {
                     )}
                   </div>
                 </div>
-                <p className="text-xs text-muted-foreground flex items-center gap-2">
+                <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-2">
                   <CalendarIcon className="h-3 w-3" />
                   Effective {p.effective_date}
-                  <span className="ml-2">By {p.author}</span>
+                  <span className="sm:ml-2">By {p.author}</span>
                 </p>
               </CardHeader>
               <CardContent>
