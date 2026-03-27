@@ -10,7 +10,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { Search, Loader2, Download } from 'lucide-react';
+import { Search, Loader2, Download, Pencil, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { exportLeaveBalances } from '@/lib/exportLeaveBalances';
@@ -49,6 +49,22 @@ function getDisplayValue(lb: LeaveBalanceRow | null, code: string): string {
   return v != null ? String(v) : '---';
 }
 
+function getNumericValue(lb: LeaveBalanceRow | null, code: string): number | null {
+  if (!lb) return null;
+  if (code === 'lwop') return lb.lwop_days_used ?? null;
+  if (code === 'vl') return lb.vl_balance ?? null;
+  if (code === 'sl') return lb.sl_balance ?? null;
+  if (code === 'pto') return lb.pto_balance ?? null;
+  return lb.balances?.[code] ?? null;
+}
+
+function parseOptionalNumber(raw: string): number | null {
+  const v = raw.trim();
+  if (!v) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 const AllEmployeeLeaveBalances = () => {
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [leaveTypeConfigs, setLeaveTypeConfigs] = useState<LeaveTypeConfig[]>([]);
@@ -57,11 +73,17 @@ const AllEmployeeLeaveBalances = () => {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [exportLoading, setExportLoading] = useState(false);
+  const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
+  const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
+  const [savingEmployeeId, setSavingEmployeeId] = useState<string | null>(null);
 
   const currentYear = new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = useState<number>(currentYear);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    setEditingEmployeeId(null);
+    setDraftByCode({});
 
     const [empRes, lbRes, configRes] = await Promise.all([
       supabase
@@ -69,7 +91,7 @@ const AllEmployeeLeaveBalances = () => {
         .select('id, employee_code, first_name, last_name')
         .eq('is_active', true)
         .order('employee_code'),
-      supabase.from('leave_balances').select('*').eq('year', currentYear),
+      supabase.from('leave_balances').select('*').eq('year', selectedYear),
       supabase.from('leave_type_config').select('id, code, name, sort_order').order('sort_order'),
     ]);
 
@@ -94,7 +116,7 @@ const AllEmployeeLeaveBalances = () => {
     }
 
     setLoading(false);
-  }, [currentYear]);
+  }, [selectedYear]);
 
   useEffect(() => {
     fetchData();
@@ -126,7 +148,7 @@ const AllEmployeeLeaveBalances = () => {
         employees: filtered,
         balanceMap,
         leaveTypeConfigs,
-        year: currentYear,
+        year: selectedYear,
         format,
       });
       toast.success(`Leave balances exported as ${format.toUpperCase()}`);
@@ -142,7 +164,7 @@ const AllEmployeeLeaveBalances = () => {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Number Of Leaves of All Employees</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          View leave balances for all employees ({currentYear})
+          View leave balances for all employees ({selectedYear})
         </p>
       </div>
 
@@ -156,6 +178,17 @@ const AllEmployeeLeaveBalances = () => {
             className="pl-10"
           />
         </div>
+        <Input
+          type="number"
+          min={2000}
+          max={3000}
+          value={selectedYear}
+          onChange={(e) => {
+            const next = Number(e.target.value);
+            if (Number.isFinite(next)) setSelectedYear(next);
+          }}
+          className="w-full sm:w-32"
+        />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" disabled={exportLoading}>
@@ -178,7 +211,7 @@ const AllEmployeeLeaveBalances = () => {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Leave Balances ({filtered.length})</CardTitle>
-          <p className="text-sm text-muted-foreground">Year {currentYear}</p>
+          <p className="text-sm text-muted-foreground">Year {selectedYear}</p>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -195,27 +228,129 @@ const AllEmployeeLeaveBalances = () => {
                     {leaveTypeConfigs.map((c) => (
                       <TableHead key={c.id}>{c.name}</TableHead>
                     ))}
+                    <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paginated.map((e) => {
                     const lb = balanceMap.get(e.id) ?? null;
+                    const isEditing = editingEmployeeId === e.id;
+                    const isSaving = savingEmployeeId === e.id;
                     return (
                       <TableRow key={e.id}>
                         <TableCell className="font-mono text-sm">{e.employee_code || '—'}</TableCell>
                         <TableCell className="font-medium">{employeeName(e)}</TableCell>
                         {leaveTypeConfigs.map((c) => (
                           <TableCell key={c.id} className="font-mono text-sm">
-                            {getDisplayValue(lb, c.code)}
+                            {isEditing ? (
+                              <Input
+                                type="number"
+                                step="0.01"
+                                value={draftByCode[c.code] ?? ''}
+                                onChange={(ev) =>
+                                  setDraftByCode((prev) => ({ ...prev, [c.code]: ev.target.value }))
+                                }
+                                className="h-8 w-24"
+                              />
+                            ) : (
+                              getDisplayValue(lb, c.code)
+                            )}
                           </TableCell>
                         ))}
+                        <TableCell className="text-right">
+                          {isEditing ? (
+                            <div className="inline-flex items-center gap-2">
+                              <Button
+                                size="sm"
+                                onClick={async () => {
+                                  setSavingEmployeeId(e.id);
+                                  try {
+                                    const row = balanceMap.get(e.id) ?? null;
+                                    const existingBalances = row?.balances ?? {};
+                                    const nextBalances: Record<string, number> = {};
+                                    const dynamicCodes = leaveTypeConfigs
+                                      .map((cfg) => cfg.code)
+                                      .filter((code) => !['vl', 'sl', 'pto', 'lwop'].includes(code));
+
+                                    for (const code of dynamicCodes) {
+                                      const parsed = parseOptionalNumber(draftByCode[code] ?? '');
+                                      if (parsed != null) nextBalances[code] = parsed;
+                                    }
+
+                                    const payload: Record<string, unknown> = {
+                                      employee_id: e.id,
+                                      year: selectedYear,
+                                      vl_balance: parseOptionalNumber(draftByCode.vl ?? ''),
+                                      sl_balance: parseOptionalNumber(draftByCode.sl ?? ''),
+                                      pto_balance: parseOptionalNumber(draftByCode.pto ?? ''),
+                                      lwop_days_used: parseOptionalNumber(draftByCode.lwop ?? ''),
+                                      balances: { ...existingBalances, ...nextBalances },
+                                    };
+
+                                    const { data, error } = await supabase
+                                      .from('leave_balances')
+                                      .upsert(payload, { onConflict: 'employee_id,year' })
+                                      .select('*')
+                                      .single();
+
+                                    if (error) throw error;
+
+                                    setBalanceMap((prev) => {
+                                      const next = new Map(prev);
+                                      next.set(e.id, data as LeaveBalanceRow);
+                                      return next;
+                                    });
+                                    setEditingEmployeeId(null);
+                                    setDraftByCode({});
+                                    toast.success('Leave balances updated');
+                                  } catch (err) {
+                                    toast.error(err instanceof Error ? err.message : 'Failed to update leave balances');
+                                  } finally {
+                                    setSavingEmployeeId(null);
+                                  }
+                                }}
+                                disabled={isSaving}
+                              >
+                                {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setEditingEmployeeId(null);
+                                  setDraftByCode({});
+                                }}
+                                disabled={isSaving}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                const row = balanceMap.get(e.id) ?? null;
+                                const nextDraft: Record<string, string> = {};
+                                leaveTypeConfigs.forEach((cfg) => {
+                                  const v = getNumericValue(row, cfg.code);
+                                  nextDraft[cfg.code] = v == null ? '' : String(v);
+                                });
+                                setDraftByCode(nextDraft);
+                                setEditingEmployeeId(e.id);
+                              }}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </TableCell>
                       </TableRow>
                     );
                   })}
                   {filtered.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={2 + leaveTypeConfigs.length}
+                        colSpan={3 + leaveTypeConfigs.length}
                         className="text-center text-muted-foreground py-8"
                       >
                         No employees found
