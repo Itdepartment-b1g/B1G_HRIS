@@ -113,17 +113,25 @@ const CompanyProfile = () => {
       };
 
       if (profile?.id) {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('company_profile')
           .update(payload)
-          .eq('id', profile.id);
+          .eq('id', profile.id)
+          .select();
         if (error) throw error;
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          throw new Error('Update failed (no rows updated). Check permissions.');
+        }
         toast.success('Company profile updated');
       } else {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('company_profile')
-          .insert(payload);
+          .insert(payload)
+          .select();
         if (error) throw error;
+        if (!data || (Array.isArray(data) && data.length === 0)) {
+          throw new Error('Create failed (no rows inserted). Check permissions.');
+        }
         toast.success('Company profile created');
       }
       fetchProfile();
