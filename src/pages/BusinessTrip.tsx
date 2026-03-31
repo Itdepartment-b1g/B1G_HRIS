@@ -525,7 +525,9 @@ const BusinessTrip = () => {
                       onSelect={(d) =>
                         setForm((p) => ({
                           ...p,
-                          start_date: d ? d.toISOString().slice(0, 10) : '',
+                          start_date: d ? d.getFullYear() + '-' + 
+                            String(d.getMonth() + 1).padStart(2, '0') + '-' + 
+                            String(d.getDate()).padStart(2, '0') : '',
                         }))
                       }
                       disabled={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
@@ -556,7 +558,9 @@ const BusinessTrip = () => {
                       onSelect={(d) =>
                         setForm((p) => ({
                           ...p,
-                          end_date: d ? d.toISOString().slice(0, 10) : '',
+                          end_date: d ? d.getFullYear() + '-' + 
+                            String(d.getMonth() + 1).padStart(2, '0') + '-' + 
+                            String(d.getDate()).padStart(2, '0') : '',
                         }))
                       }
                       disabled={(d) => {
