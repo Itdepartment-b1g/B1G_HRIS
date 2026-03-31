@@ -26,6 +26,7 @@ import { getWeekdayForDate } from '@/lib/attendanceStatus';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
 import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { LeaveBalance, LeaveRequest, LeaveTypeConfigForBalance } from '@/types';
+import { useEmployeeLeaveBalance } from '@/hooks/useEmployeeLeaveBalance';
 import LeaveApprovals from './LeaveApprovals';
 
 const ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -127,6 +128,7 @@ const Leave = () => {
   const [myRequests, setMyRequests] = useState<LeaveRequest[]>([]);
   const [loading, setLoading] = useState(true);
   const [fileDialogOpen, setFileDialogOpen] = useState(false);
+  const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
   const [viewingRequest, setViewingRequest] = useState<LeaveRequest | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [isRegular, setIsRegular] = useState<boolean>(true);
@@ -158,92 +160,20 @@ const Leave = () => {
     reason: '',
   });
 
-  const fetchBalance = useCallback(async () => {
-    if (!currentUser?.id) return;
-    const year = new Date().getFullYear();
+  const { balance: hookBalance, eligibleLeaveTypes: hookEligibleTypes, isRegular: hookIsRegular } =
+    useEmployeeLeaveBalance(currentUser?.id);
 
-    const { data: empData } = await supabase
-      .from('employees')
-      .select('employment_status_id, gender')
-      .eq('id', currentUser.id)
-      .single();
-    const statusId = (empData as { employment_status_id?: string } | null)?.employment_status_id;
-    const empGender = ((empData as { gender?: string } | null)?.gender || '').toLowerCase().trim();
-    let isRegularEmp = true;
-    if (statusId) {
-      const { data: esData } = await supabase
-        .from('employment_statuses')
-        .select('is_regular')
-        .eq('id', statusId)
-        .single();
-      isRegularEmp = (esData as { is_regular?: boolean } | null)?.is_regular ?? true;
-      setIsRegular(isRegularEmp);
-    } else {
-      setIsRegular(true);
-    }
+  useEffect(() => {
+    setBalance(hookBalance);
+  }, [hookBalance]);
 
-    if (isRegularEmp) {
-      await supabase.rpc('ensure_leave_balance_for_current_user');
-    }
+  useEffect(() => {
+    setEligibleLeaveTypes(hookEligibleTypes);
+  }, [hookEligibleTypes]);
 
-    const { data, error } = await supabase
-      .from('leave_balances')
-      .select('*')
-      .eq('employee_id', currentUser.id)
-      .eq('year', year)
-      .maybeSingle();
-    if (error) {
-      console.error('Failed to fetch leave balance:', error);
-      setBalance(null);
-      return;
-    }
-    if (data) {
-      const lb = data as { balances?: Record<string, number> };
-      setBalance({
-        employee_id: data.employee_id,
-        year: data.year,
-        vl_balance: Number(data.vl_balance ?? 0),
-        sl_balance: Number(data.sl_balance ?? 0),
-        pto_balance: Number(data.pto_balance ?? 0),
-        lwop_days_used: Number(data.lwop_days_used ?? 0),
-        balances: lb.balances && typeof lb.balances === 'object' ? lb.balances : undefined,
-      });
-    } else {
-      setBalance(null);
-    }
-
-    const { data: configData } = await supabase
-      .from('leave_type_config')
-      .select('id, code, name, annual_entitlement, cap, is_system')
-      .order('sort_order');
-    const { data: eligData } = await supabase
-      .from('leave_type_eligibility')
-      .select('leave_type_config_id, employment_status_id, gender_filter');
-    let effectiveStatusId = statusId;
-    if (!effectiveStatusId) {
-      const { data: regStatus } = await supabase
-        .from('employment_statuses')
-        .select('id')
-        .ilike('name', 'regular')
-        .limit(1)
-        .maybeSingle();
-      effectiveStatusId = (regStatus as { id?: string } | null)?.id;
-    }
-    const configs = (configData || []) as { id: string; code: string; name: string; annual_entitlement: number; cap: number | null; is_system: boolean }[];
-    const eligibleRows = (eligData || []).filter(
-      (e: { employment_status_id: string }) => e.employment_status_id === effectiveStatusId
-    );
-    const eligible = configs.filter((c) => {
-      const match = eligibleRows.find((e: { leave_type_config_id: string }) => e.leave_type_config_id === c.id);
-      if (!match) return c.code === 'lwop';
-      const gf = (match as { gender_filter: string }).gender_filter;
-      if (gf === 'all') return true;
-      if (gf === 'male') return empGender === 'male' || empGender === 'm';
-      if (gf === 'female') return empGender === 'female' || empGender === 'f';
-      return false;
-    });
-    setEligibleLeaveTypes(eligible);
-  }, [currentUser?.id]);
+  useEffect(() => {
+    setIsRegular(hookIsRegular);
+  }, [hookIsRegular]);
 
   const fetchMyRequests = useCallback(async () => {
     if (!currentUser?.id) return;
@@ -262,8 +192,8 @@ const Leave = () => {
 
   const fetchAll = useCallback(() => {
     setLoading(true);
-    Promise.all([fetchBalance(), fetchMyRequests()]).finally(() => setLoading(false));
-  }, [fetchBalance, fetchMyRequests]);
+    fetchMyRequests().finally(() => setLoading(false));
+  }, [fetchMyRequests]);
 
   useEffect(() => {
     fetchAll();
@@ -284,21 +214,21 @@ const Leave = () => {
         'postgres_changes',
         { event: '*', schema: 'public', table: 'leave_balances', filter: `employee_id=eq.${currentUser.id}` },
         () => {
-          fetchBalance();
+          // Balance hook listens to Supabase changes; no-op here.
         }
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_config' }, () => {
-        fetchBalance();
+        // Balance hook listens to Supabase changes; no-op here.
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_eligibility' }, () => {
-        fetchBalance();
+        // Balance hook listens to Supabase changes; no-op here.
       })
       .subscribe();
 
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.id, fetchBalance, fetchMyRequests]);
+  }, [currentUser?.id, fetchMyRequests]);
 
   const fetchShiftForDate = useCallback(async (dateStr: string) => {
     if (!currentUser?.id || !dateStr) {
@@ -1024,9 +954,36 @@ const Leave = () => {
             <Button variant="outline" onClick={() => setFileDialogOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} disabled={submitting}>
+            <Button onClick={() => setConfirmSubmitOpen(true)} disabled={submitting}>
               {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
               Submit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={confirmSubmitOpen} onOpenChange={(open) => setConfirmSubmitOpen(open)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Confirm Leave Request</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to confirm this leave? Once submitted, it will be routed for approval based on your
+              company&apos;s rules.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmSubmitOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={async () => {
+                setConfirmSubmitOpen(false);
+                await handleSubmit();
+              }}
+              disabled={submitting}
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <FileText className="h-4 w-4 mr-2" />}
+              Yes, confirm
             </Button>
           </DialogFooter>
         </DialogContent>

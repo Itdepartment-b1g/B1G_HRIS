@@ -53,6 +53,7 @@ import ProfilePage from "./pages/mobile/ProfilePage";
 import TimeInOutPage from "./pages/TimeInOutPage";
 import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
+import LeaveOnBehalf from "./pages/LeaveOnBehalf";
 
 const queryClient = new QueryClient();
 
@@ -68,6 +69,14 @@ const App = () => (
             <Route index element={<Dashboard />} />
             <Route path="attendance" element={<Attendance />} />
             <Route path="leave" element={<Leave />} />
+            <Route
+              path="leave-on-behalf"
+              element={
+                <RequireRole roles={['admin', 'super_admin']}>
+                  <LeaveOnBehalf />
+                </RequireRole>
+              }
+            />
             <Route path="leave-balance" element={<MyLeaveBalance />} />
             <Route path="employee-leave-balances" element={<RequireRole roles={['admin', 'super_admin']}><AllEmployeeLeaveBalances /></RequireRole>} />
             <Route path="overtime" element={<Overtime />} />
