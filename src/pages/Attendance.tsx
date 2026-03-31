@@ -83,6 +83,15 @@ function computeHalfDayMidpointTime(opts: { start_time: string; end_time: string
   return `${hh}:${mm}:00`;
 }
 
+function formatEmployeeNameLastFirstMI(opts: { first?: string | null; middle?: string | null; last?: string | null }): string {
+  const last = (opts.last || '').trim();
+  const first = (opts.first || '').trim();
+  const middle = (opts.middle || '').trim();
+  const mi = middle ? `${middle[0]?.toUpperCase() || ''}.` : '';
+  const base = [last, first].filter(Boolean).join(', ');
+  return [base, mi].filter(Boolean).join(' ').trim() || 'Unknown';
+}
+
 const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave'] as const;
 
 function formatDate(dateStr: string) {
@@ -185,7 +194,7 @@ const Attendance = () => {
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
       let query = supabase
         .from('attendance_records')
-        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, last_name)')
+        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name)')
         .gte('date', dateFrom)
         .lte('date', dateTo);
       if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
@@ -199,6 +208,7 @@ const Attendance = () => {
         employee_id: r.employee?.id,
         employee_code: r.employee?.employee_code,
         employee_first_name: r.employee?.first_name,
+        employee_middle_name: r.employee?.middle_name,
         employee_last_name: r.employee?.last_name,
       }));
     } else {
@@ -259,7 +269,11 @@ const Attendance = () => {
       const shifts = shiftMap.get(r.employee_id) || [];
       const formatted = shiftFormattedMap.get(r.employee_id) || shifts.join(', ') || '—';
       const netHours = shiftNetHoursMap.get(r.employee_id) ?? null;
-      const employeeName = [r.employee_first_name, r.employee_last_name].filter(Boolean).join(' ') || 'Unknown';
+      const employeeName = formatEmployeeNameLastFirstMI({
+        first: r.employee_first_name,
+        middle: r.employee_middle_name,
+        last: r.employee_last_name,
+      });
 
       // Recompute minutes_late from shift start when missing/wrong (null or 0) but time_in exists
       // Use the shift that applies to this record's weekday

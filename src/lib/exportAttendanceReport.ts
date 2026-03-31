@@ -130,7 +130,7 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   // 1. Fetch all active employees
   const { data: employees, error: empError } = await supabase
     .from('employees')
-    .select('id, employee_code, first_name, last_name')
+    .select('id, employee_code, first_name, middle_name, last_name')
     .eq('is_active', true)
     .order('employee_code');
 
@@ -419,9 +419,12 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   const rows: AttendanceReportRow[] = (employees || []).map((emp) => {
     const a = agg.get(emp.id) ?? { totalWorkedHours: 0, sumUndertimeMinutes: 0, absences: 0 };
     const undertimeHours = a.sumUndertimeMinutes / 60;
-    const employeeName = emp.last_name
-      ? `${emp.last_name}, ${emp.first_name ?? ''}`.trim().replace(/,\s*$/, '')
-      : emp.first_name ?? '';
+    const middle = (emp as any).middle_name ? String((emp as any).middle_name).trim() : '';
+    const mi = middle ? `${middle[0]?.toUpperCase() || ''}.` : '';
+    const last = emp.last_name ? String(emp.last_name).trim() : '';
+    const first = emp.first_name ? String(emp.first_name).trim() : '';
+    const base = [last, first].filter(Boolean).join(', ');
+    const employeeName = [base, mi].filter(Boolean).join(' ').trim() || first || 'Unknown';
     return {
       employeeNumber: emp.employee_code || '',
       employeeName,
