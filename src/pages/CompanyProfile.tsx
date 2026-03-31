@@ -186,22 +186,22 @@ const CompanyProfile = () => {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Company Profile</h1>
-          <p className="text-muted-foreground text-sm mt-1">
-            {canEdit ? 'Manage company information' : 'View company information'}
-          </p>
+      <form onSubmit={handleSave}>
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">Company Profile</h1>
+            <p className="text-muted-foreground text-sm mt-1">
+              {canEdit ? 'Manage company information' : 'View company information'}
+            </p>
+          </div>
+          {canEdit && (
+            <Button type="submit" disabled={saving} className="bg-primary hover:bg-primary/90 text-white">
+              <Save className="h-4 w-4 mr-2" />
+              {saving ? 'Saving...' : 'Save Changes'}
+            </Button>
+          )}
         </div>
-        {canEdit && (
-          <Button type="submit" form="company-profile-form" disabled={saving} className="bg-primary hover:bg-primary/90 text-white">
-            <Save className="h-4 w-4 mr-2" />
-            {saving ? 'Saving...' : 'Save Changes'}
-          </Button>
-        )}
-      </div>
 
-      <form id="company-profile-form" onSubmit={handleSave}>
         <Card>
           <CardHeader>
             <CardTitle className="text-base flex items-center gap-2">
