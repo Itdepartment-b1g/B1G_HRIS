@@ -1003,9 +1003,9 @@ const Dashboard = () => {
                 if (!aPinned && bPinned) return 1;
                 return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
               })
-              .map((item) =>
+              .map((item, idx) =>
                 item.type === 'announcement' ? (
-                  <Card key={`ann-${item.id}`}>
+                  <Card key={`feed-ann-${item.id}-${idx}`}>
                     <CardContent className="pt-4 pb-4">
                       <div className="flex items-start justify-between">
                         <div className="flex items-center gap-3">
@@ -1046,7 +1046,7 @@ const Dashboard = () => {
                   </Card>
                 ) : (
                   <Card
-                    key={`leave-${item.id}`}
+                    key={`feed-leave-${item.id}-${idx}`}
                     className="cursor-pointer hover:border-primary/50 transition-colors"
                     onClick={() => navigate(currentUser?.roles?.some((r) => ['super_admin', 'admin', 'supervisor', 'manager'].includes(r)) ? '/dashboard/leave?tab=approval' : '/dashboard/leave')}
                   >
