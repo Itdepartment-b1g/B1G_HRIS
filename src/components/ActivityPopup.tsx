@@ -14,7 +14,8 @@ import { Loader2, MessageCircle, FileText, ClipboardList } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useNotifications } from '@/hooks/useNotifications';
+import { useNotifications, type UserNotification } from '@/hooks/useNotifications';
+import { supabase } from '@/lib/supabase';
 
 const ActivityPopup = () => {
   const navigate = useNavigate();
@@ -25,19 +26,67 @@ const ActivityPopup = () => {
   const [open, setOpen] = useState(false);
   const [surveyDialogOpen, setSurveyDialogOpen] = useState(false);
   const [surveyDialogId, setSurveyDialogId] = useState<string | null>(null);
+  const [validAckPending, setValidAckPending] = useState<UserNotification[]>([]);
 
-  const item = ackPending[0];
+  // Filter out expired surveys from pending notifications
+  useEffect(() => {
+    const filterValidNotifications = async () => {
+      if (!ackPending.length) {
+        setValidAckPending([]);
+        return;
+      }
+
+      const today = new Date().toISOString().split('T')[0];
+      const valid: UserNotification[] = [];
+      const expiredSurveyIds: string[] = [];
+
+      for (const notification of ackPending) {
+        // For surveys, check if end_date has passed
+        if (notification.type === 'survey') {
+          const metadata = (notification.metadata || {}) as Record<string, unknown>;
+          const surveyId = metadata.survey_id as string | undefined;
+
+          if (surveyId) {
+            const { data: survey } = await supabase
+              .from('surveys')
+              .select('end_date')
+              .eq('id', surveyId)
+              .single();
+
+            if (survey && survey.end_date < today) {
+              // Survey expired - auto-acknowledge
+              expiredSurveyIds.push(notification.id);
+              continue;
+            }
+          }
+        }
+        valid.push(notification);
+      }
+
+      // Auto-acknowledge expired surveys
+      if (expiredSurveyIds.length > 0) {
+        await Promise.all(expiredSurveyIds.map((id) => acknowledge(id)));
+        refetchCompliance();
+      }
+
+      setValidAckPending(valid);
+    };
+
+    filterValidNotifications();
+  }, [ackPending, acknowledge, refetchCompliance]);
+
+  const item = validAckPending[0];
   const metadata = (item?.metadata || {}) as Record<string, unknown>;
 
   useEffect(() => {
-    setOpen(ackPending.length > 0);
-  }, [ackPending.length]);
+    setOpen(validAckPending.length > 0);
+  }, [validAckPending.length]);
 
   const handleAcknowledge = async () => {
     if (!item) return;
     setAcknowledging(true);
     await acknowledge(item.id);
-    if (ackPending.length <= 1) setOpen(false);
+    if (validAckPending.length <= 1) setOpen(false);
     refetchCompliance();
     setAcknowledging(false);
   };
@@ -57,13 +106,13 @@ const ActivityPopup = () => {
 
   const handleSurveySuccess = () => {
     if (item) acknowledge(item.id);
-    if (ackPending.length <= 1) setOpen(false);
+    if (validAckPending.length <= 1) setOpen(false);
     refetchCompliance();
     setSurveyDialogOpen(false);
     setSurveyDialogId(null);
   };
 
-  if (loading || ackPending.length === 0) return null;
+  if (loading || validAckPending.length === 0) return null;
   if (!item) return null;
 
   return (

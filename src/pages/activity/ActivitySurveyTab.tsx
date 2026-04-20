@@ -216,6 +216,21 @@ const ActivitySurveyTab = () => {
       return;
     }
     toast.success('Survey submitted.');
+
+    // Acknowledge the survey notification to prevent popup from showing
+    await supabase
+      .from('user_notifications')
+      .update({
+        is_acknowledged: true,
+        acknowledged_at: new Date().toISOString(),
+        is_read: true,
+        read_at: new Date().toISOString(),
+      })
+      .eq('user_id', currentUser.id)
+      .eq('type', 'survey')
+      .eq('is_acknowledged', false)
+      .filter('metadata->>survey_id', 'eq', survey.id);
+
     setAnswerSurvey(null);
     fetchSurveys();
     refetchCompliance();
