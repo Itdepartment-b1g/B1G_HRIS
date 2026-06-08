@@ -3,7 +3,8 @@
  * One row per active employee with:
  *   Employee Number, Employee Name,
  *   NoOfHours   — actual hours worked (time_out − time_in − break), capped at net shift hours.
- *                 For paid leaves (on_leave + pay_type='paid'), full net shift hours are added.
+ *                 For paid leaves (on_leave + pay_type='paid') and company holidays, full net shift hours are added.
+ *                 Regular holidays → LegalHoliday1; special holidays → SpecialHoliday1.
  *   Undertime   — sum of late minutes (past shift start) + early-out minutes (before shift end),
  *   Absences    — absent = 1 day, half_day = 0.5 day.
  *                 For unpaid leaves (on_leave + pay_type='unpaid'), 1 day is added.
@@ -139,7 +140,7 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   // 2. Fetch attendance records in date range (include time_in/time_out + leave_type_code)
   const { data: records, error: recError } = await supabase
     .from('attendance_records')
-    .select('employee_id, date, status, minutes_late, flex_undertime_minutes, time_in, time_out, leave_type_code, leave_duration_type, leave_day_fraction, business_trip_id')
+    .select('employee_id, date, status, holiday_type, minutes_late, flex_undertime_minutes, time_in, time_out, leave_type_code, leave_duration_type, leave_day_fraction, business_trip_id')
     .gte('date', dateFrom)
     .lte('date', dateTo);
 
@@ -187,13 +188,25 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
   // 4. Aggregate by employee
   const agg = new Map<
     string,
-    { totalWorkedHours: number; sumUndertimeMinutes: number; absences: number }
+    {
+      totalWorkedHours: number;
+      sumUndertimeMinutes: number;
+      absences: number;
+      legalHolidayHours: number;
+      specialHolidayHours: number;
+    }
   >();
 
   for (const r of records || []) {
     const empId = r.employee_id;
     if (!agg.has(empId)) {
-      agg.set(empId, { totalWorkedHours: 0, sumUndertimeMinutes: 0, absences: 0 });
+      agg.set(empId, {
+        totalWorkedHours: 0,
+        sumUndertimeMinutes: 0,
+        absences: 0,
+        legalHolidayHours: 0,
+        specialHolidayHours: 0,
+      });
     }
     const curr = agg.get(empId)!;
 
@@ -226,6 +239,23 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
         ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
         : 8;
       curr.totalWorkedHours += netShiftHrs;
+      continue;
+    }
+
+    // Holiday: route hours by type (matches master-data holiday types).
+    if (r.status === 'holiday') {
+      const netShiftHrs = shiftForDay
+        ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
+        : 8;
+      const holidayType = (r as { holiday_type?: string | null }).holiday_type;
+      if (holidayType === 'special') {
+        curr.specialHolidayHours += netShiftHrs;
+      } else if (holidayType === 'regular') {
+        curr.legalHolidayHours += netShiftHrs;
+      } else {
+        // company or legacy rows without holiday_type
+        curr.totalWorkedHours += netShiftHrs;
+      }
       continue;
     }
 
@@ -417,7 +447,13 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
 
   // 5. Build rows: one per active employee
   const rows: AttendanceReportRow[] = (employees || []).map((emp) => {
-    const a = agg.get(emp.id) ?? { totalWorkedHours: 0, sumUndertimeMinutes: 0, absences: 0 };
+    const a = agg.get(emp.id) ?? {
+      totalWorkedHours: 0,
+      sumUndertimeMinutes: 0,
+      absences: 0,
+      legalHolidayHours: 0,
+      specialHolidayHours: 0,
+    };
     const undertimeHours = a.sumUndertimeMinutes / 60;
     const middle = (emp as any).middle_name ? String((emp as any).middle_name).trim() : '';
     const mi = middle ? `${middle[0]?.toUpperCase() || ''}.` : '';
@@ -434,11 +470,11 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
       regularOT: EMPTY_PREMIUM,
       restDay: EMPTY_PREMIUM,
       restDayOT: EMPTY_PREMIUM,
-      specialHoliday1: EMPTY_PREMIUM,
+      specialHoliday1: a.specialHolidayHours > 0 ? a.specialHolidayHours.toFixed(2) : EMPTY_PREMIUM,
       specialHoliday2: EMPTY_PREMIUM,
       specialHoliday3: EMPTY_PREMIUM,
       specialHoliday4: EMPTY_PREMIUM,
-      legalHoliday1: EMPTY_PREMIUM,
+      legalHoliday1: a.legalHolidayHours > 0 ? a.legalHolidayHours.toFixed(2) : EMPTY_PREMIUM,
       legalHoliday2: EMPTY_PREMIUM,
       legalHoliday3: EMPTY_PREMIUM,
       legalHolidayRestDayOT: EMPTY_PREMIUM,

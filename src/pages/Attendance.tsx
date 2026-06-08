@@ -22,6 +22,7 @@ import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
 import { timeTo12Hour } from '@/lib/utils';
+import { formatHolidayStatusLabel, holidayTypeBadgeClass, normalizeHolidayType, type HolidayType } from '@/lib/holidayType';
 
 interface RecordRow {
   id: string;
@@ -45,6 +46,7 @@ interface RecordRow {
   notes: string | null;
   remarks: string | null;
   status: string;
+  holiday_type: string | null;
   minutes_late: number | null;
   flex_undertime_minutes: number | null;
   is_flexible_shift: boolean;
@@ -92,7 +94,12 @@ function formatEmployeeNameLastFirstMI(opts: { first?: string | null; middle?: s
   return [base, mi].filter(Boolean).join(' ').trim() || 'Unknown';
 }
 
-const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave'] as const;
+const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave', 'holiday'] as const;
+const HOLIDAY_TYPE_OPTIONS: { value: HolidayType; label: string }[] = [
+  { value: 'regular', label: 'Regular Holiday' },
+  { value: 'special', label: 'Special Non-Working' },
+  { value: 'company', label: 'Company Holiday' },
+];
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -151,6 +158,7 @@ const Attendance = () => {
   const [editTimeOutOpen, setEditTimeOutOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<RecordRow | null>(null);
   const [editStatus, setEditStatus] = useState('');
+  const [editHolidayType, setEditHolidayType] = useState<HolidayType>('regular');
   const [editRemarks, setEditRemarks] = useState('');
   const [editTimeIn, setEditTimeIn] = useState('');
   const [editTimeOut, setEditTimeOut] = useState('');
@@ -194,7 +202,7 @@ const Attendance = () => {
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
       let query = supabase
         .from('attendance_records')
-        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name)')
+        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, holiday_type, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name)')
         .gte('date', dateFrom)
         .lte('date', dateTo);
       if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
@@ -339,6 +347,7 @@ const Attendance = () => {
         notes: r.notes,
         remarks: r.remarks,
         status: r.status,
+        holiday_type: r.holiday_type || null,
         minutes_late: minutesLate,
         flex_undertime_minutes: r.flex_undertime_minutes ?? null,
         is_flexible_shift: isFlexibleShift,
@@ -355,6 +364,20 @@ const Attendance = () => {
     const today = new Date().toISOString().slice(0, 10);
     if (isAdmin && dateFrom <= today && dateTo >= today) {
       const todayWeekday = getWeekdayForDate(today);
+      const monthDay = today.slice(5, 10);
+
+      // Skip synthetic "absent today" rows when today is a holiday.
+      const { data: todayHolidayRows } = await supabase
+        .from('holidays')
+        .select('id, date, is_recurring')
+        .or(`date.eq.${today},and(is_recurring.eq.true,date.like.%-${monthDay})`)
+        .limit(1);
+      const isHolidayToday = (todayHolidayRows?.length || 0) > 0;
+      if (isHolidayToday) {
+        setRecords(rows);
+        setLoading(false);
+        return;
+      }
 
       // Fetch all active employees
       const { data: allEmployees } = await supabase
@@ -424,6 +447,7 @@ const Attendance = () => {
           notes: null,
           remarks: null,
           status,
+          holiday_type: null,
           minutes_late: null,
           flex_undertime_minutes: null,
           is_flexible_shift: !!shiftForDay.is_flexible,
@@ -478,6 +502,7 @@ const Attendance = () => {
   const openEditStatus = (r: RecordRow) => {
     setEditingRecord(r);
     setEditStatus(r.status);
+    setEditHolidayType(normalizeHolidayType(r.holiday_type) ?? 'regular');
     setEditStatusOpen(true);
   };
 
@@ -510,10 +535,14 @@ const Attendance = () => {
 
   const saveStatus = async () => {
     if (!editingRecord || !isAdmin) return;
+    const payload = {
+      status: editStatus,
+      holiday_type: editStatus === 'holiday' ? editHolidayType : null,
+    };
     setSaving(true);
     const { error } = isTodayAbsent(editingRecord)
-      ? await upsertForTodayAbsent(editingRecord, { status: editStatus })
-      : await supabase.from('attendance_records').update({ status: editStatus }).eq('id', editingRecord.id);
+      ? await upsertForTodayAbsent(editingRecord, payload)
+      : await supabase.from('attendance_records').update(payload).eq('id', editingRecord.id);
     setSaving(false);
     if (error) toast.error(error.message);
     else {
@@ -617,6 +646,7 @@ const Attendance = () => {
       leaveTypeCode?: string | null;
       leaveDurationType?: 'fullday' | 'first_half' | 'second_half' | null;
       businessTripId?: string | null;
+      holidayType?: string | null;
       isFlexibleShift?: boolean;
       flexUndertimeMinutes?: number | null;
       requiredDailyHours?: number | null;
@@ -629,6 +659,7 @@ const Attendance = () => {
       absent: 'bg-red-50 text-red-700 border-red-200',
       half_day: 'bg-blue-50 text-blue-700 border-blue-200',
       on_leave: 'bg-purple-50 text-purple-700 border-purple-200',
+      holiday: opts?.holidayType ? holidayTypeBadgeClass(opts.holidayType) : 'bg-indigo-50 text-indigo-700 border-indigo-200',
     };
     const lateLabel = minutesLate != null && minutesLate > 0 && (displayStatus === 'present' || displayStatus === 'late')
       ? formatMinutesLateVisual(minutesLate)
@@ -646,6 +677,8 @@ const Attendance = () => {
     const badgeLabel =
       displayStatus === 'on_leave'
         ? `On Leave${leaveCode ? ` (${leaveCode.toUpperCase()})` : ''}`
+        : displayStatus === 'holiday'
+          ? formatHolidayStatusLabel(opts?.holidayType)
         : displayStatus === 'present' && opts?.businessTripId
           ? `Present (Business Trip)`
         : displayStatus === 'present' && isHalfDayLeave
@@ -805,7 +838,7 @@ const Attendance = () => {
                     </div>
 
                     <div className="mt-3">
-                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id, isFlexibleShift: r.is_flexible_shift, flexUndertimeMinutes: r.flex_undertime_minutes, requiredDailyHours: r.required_daily_hours })}
+                      {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id, holidayType: r.holiday_type, isFlexibleShift: r.is_flexible_shift, flexUndertimeMinutes: r.flex_undertime_minutes, requiredDailyHours: r.required_daily_hours })}
                     </div>
                   </CardContent>
                 </Card>
@@ -904,7 +937,7 @@ const Attendance = () => {
                             <TableCell className="font-mono text-sm">{formatTime(r.time_out) || '—'}</TableCell>
                             <TableCell className="font-mono text-sm">{formatMinutesLate(r.minutes_late)}</TableCell>
                             <TableCell>
-                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id, isFlexibleShift: r.is_flexible_shift, flexUndertimeMinutes: r.flex_undertime_minutes, requiredDailyHours: r.required_daily_hours })}
+                              {statusBadge(r.status, r.minutes_late, { timeIn: r.time_in, timeOut: r.time_out, leaveTypeCode: r.leave_type_code, leaveDurationType: r.leave_duration_type, businessTripId: r.business_trip_id, holidayType: r.holiday_type, isFlexibleShift: r.is_flexible_shift, flexUndertimeMinutes: r.flex_undertime_minutes, requiredDailyHours: r.required_daily_hours })}
                             </TableCell>
                             <TableCell className="text-right">
                               <div className="flex items-center justify-end gap-1">
@@ -1051,7 +1084,7 @@ const Attendance = () => {
               </div>
               <div>
                 <span className="text-muted-foreground text-sm">Attendance Status</span>
-                 <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out, leaveTypeCode: viewingRecord.leave_type_code, leaveDurationType: viewingRecord.leave_duration_type, businessTripId: viewingRecord.business_trip_id, isFlexibleShift: viewingRecord.is_flexible_shift, flexUndertimeMinutes: viewingRecord.flex_undertime_minutes, requiredDailyHours: viewingRecord.required_daily_hours })}</div>
+                 <div className="mt-1">{statusBadge(viewingRecord.status, viewingRecord.minutes_late, { timeIn: viewingRecord.time_in, timeOut: viewingRecord.time_out, leaveTypeCode: viewingRecord.leave_type_code, leaveDurationType: viewingRecord.leave_duration_type, businessTripId: viewingRecord.business_trip_id, holidayType: viewingRecord.holiday_type, isFlexibleShift: viewingRecord.is_flexible_shift, flexUndertimeMinutes: viewingRecord.flex_undertime_minutes, requiredDailyHours: viewingRecord.required_daily_hours })}</div>
                 {isAdmin && <Button variant="outline" size="sm" className="mt-2" onClick={() => { setViewingRecord(null); openEditStatus(viewingRecord); }}><Pencil className="h-3 w-3 mr-1" /> Edit status</Button>}
               </div>
               {(viewingRecord.remarks || isAdmin) && (
@@ -1076,16 +1109,31 @@ const Attendance = () => {
             <DialogTitle>Edit Attendance Status</DialogTitle>
             <DialogDescription>Change the attendance status for admin records.</DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select value={editStatus} onValueChange={setEditStatus}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {ATTENDANCE_STATUSES.map((s) => (
-                  <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={editStatus} onValueChange={setEditStatus}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {ATTENDANCE_STATUSES.map((s) => (
+                    <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            {editStatus === 'holiday' && (
+              <div className="space-y-2">
+                <Label>Holiday Type</Label>
+                <Select value={editHolidayType} onValueChange={(v) => setEditHolidayType(v as HolidayType)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {HOLIDAY_TYPE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditStatusOpen(false)}>Cancel</Button>

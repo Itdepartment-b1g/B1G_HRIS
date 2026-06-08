@@ -26,6 +26,7 @@ import { isImageUrl } from '@/lib/attachmentUtils';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { computeFlexUndertimeMinutes } from '@/lib/flexAttendance';
 import type { AttendanceRecord } from '@/types';
+import { formatHolidayStatusLabel, holidayTypeBadgeClass } from '@/lib/holidayType';
 import type { Employee } from '@/types';
 import { toast } from 'sonner';
 
@@ -39,6 +40,7 @@ const statusVariant: Record<string, string> = {
   absent: 'bg-red-100 text-red-700 border-red-200',
   half_day: 'bg-blue-100 text-blue-700 border-blue-200',
   on_leave: 'bg-slate-100 text-slate-700 border-slate-200',
+  holiday: 'bg-indigo-100 text-indigo-700 border-indigo-200',
 };
 
 function formatTime(t: string | null): string {
@@ -1506,7 +1508,18 @@ const Dashboard = () => {
                       <TableCell className="font-mono text-sm">{record.time_in ?? '--:--'}</TableCell>
                       <TableCell className="font-mono text-sm">{record.time_out ?? '--:--'}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className={statusVariant[record.status] || ''}>{record.status.replace('_', ' ')}</Badge>
+                        <Badge
+                          variant="outline"
+                          className={
+                            record.status === 'holiday'
+                              ? holidayTypeBadgeClass(record.holiday_type)
+                              : statusVariant[record.status] || ''
+                          }
+                        >
+                          {record.status === 'holiday'
+                            ? formatHolidayStatusLabel(record.holiday_type)
+                            : record.status.replace('_', ' ')}
+                        </Badge>
                       </TableCell>
                     </TableRow>
                   ))
