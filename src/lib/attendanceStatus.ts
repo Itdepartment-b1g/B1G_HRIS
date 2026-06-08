@@ -48,7 +48,7 @@ function getMinutesFromMidnight(isoTimestamp: string): number {
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
 }
 
-export type AttendanceStatus = 'present' | 'late' | 'absent' | 'half_day' | 'on_leave';
+export type AttendanceStatus = 'present' | 'late' | 'absent' | 'half_day' | 'on_leave' | 'holiday';
 
 export interface AttendanceStatusResult {
   status: AttendanceStatus;
