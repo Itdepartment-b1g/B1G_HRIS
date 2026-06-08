@@ -21,6 +21,7 @@ import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
+import { exportAttendanceReportSummary } from '@/lib/exportAttendanceReportSummary';
 import { timeTo12Hour } from '@/lib/utils';
 import { formatHolidayStatusLabel, holidayTypeBadgeClass, normalizeHolidayType, type HolidayType } from '@/lib/holidayType';
 
@@ -164,6 +165,7 @@ const Attendance = () => {
   const [editTimeOut, setEditTimeOut] = useState('');
   const [saving, setSaving] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [summaryExportLoading, setSummaryExportLoading] = useState(false);
   const [page, setPage] = useState(1);
   type MobileFilter = 'all_today' | 'my_30_days' | 'absent';
   const [mobileFilter, setMobileFilter] = useState<MobileFilter>('my_30_days');
@@ -625,15 +627,27 @@ const Attendance = () => {
     }
   };
 
-  const handleExport = async (format: 'csv' | 'xlsx') => {
-    setExportLoading(true);
+  // const handleExport = async (format: 'csv' | 'xlsx') => {
+  //   setExportLoading(true);
+  //   try {
+  //     await exportAttendanceReport({ dateFrom, dateTo, format });
+  //     toast.success(`Report exported as ${format.toUpperCase()}`);
+  //   } catch (err) {
+  //     toast.error(err instanceof Error ? err.message : 'Failed to export report');
+  //   } finally {
+  //     setExportLoading(false);
+  //   }
+  // };
+
+  const handleSummaryExport = async (format: 'csv' | 'xlsx') => {
+    setSummaryExportLoading(true);
     try {
-      await exportAttendanceReport({ dateFrom, dateTo, format });
-      toast.success(`Report exported as ${format.toUpperCase()}`);
+      await exportAttendanceReportSummary({ dateFrom, dateTo, format });
+      toast.success(`Attendance summary exported as ${format.toUpperCase()}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to export report');
+      toast.error(err instanceof Error ? err.message : 'Failed to export attendance summary');
     } finally {
-      setExportLoading(false);
+      setSummaryExportLoading(false);
     }
   };
 
@@ -734,17 +748,30 @@ const Attendance = () => {
             </div>
           </div>
           {isAdmin && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="shrink-0" disabled={exportLoading}>
-                  {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <>
+              {/* <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="shrink-0" disabled={exportLoading}>
+                    {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu> */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" className="shrink-0" disabled={summaryExportLoading}>
+                    {summaryExportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleSummaryExport('csv')}>Export CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSummaryExport('xlsx')}>Export XLSX</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           )}
         </div>
 
@@ -867,18 +894,32 @@ const Attendance = () => {
           <span className="text-muted-foreground text-sm">to</span>
           <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[140px]" />
           {isAdmin && (
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" disabled={exportLoading}>
-                  {exportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
-                  Export
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
-                <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <>
+              {/* <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={exportLoading}>
+                    {exportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                    Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu> */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={summaryExportLoading}>
+                    {summaryExportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                     Export
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleSummaryExport('csv')}>CSV</DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleSummaryExport('xlsx')}>XLSX</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </>
           )}
         </div>
       </div>
