@@ -54,12 +54,16 @@ export interface LeaveRequest {
   end_date: string;
   leave_duration_type?: LeaveDurationType;
   number_of_days?: number | null;
-  status: 'pending' | 'approved' | 'rejected';
+  status: 'pending' | 'approved' | 'rejected' | 'cancelled';
   reason?: string | null;
   attachment_url?: string | null;
   approved_by?: string | null;
   approved_at?: string | null;
   approver_name?: string | null;
+  cancelled_by?: string | null;
+  cancelled_at?: string | null;
+  cancellation_note?: string | null;
+  canceller_name?: string | null;
 }
 
 export interface LeaveBalance {

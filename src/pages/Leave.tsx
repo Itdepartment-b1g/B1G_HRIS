@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
-import { Loader2, Plus, FileText, RefreshCw, Calendar, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Baby, Clock } from 'lucide-react';
+import { Loader2, Plus, FileText, RefreshCw, Calendar, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Baby, Clock, Ban } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -59,6 +59,13 @@ const DURATION_TYPES = [
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function leaveStatusBadgeClass(status: string) {
+  if (status === 'approved') return 'bg-green-100 text-green-700 border-green-200 dark:bg-green-950/50 dark:text-green-400 dark:border-green-800';
+  if (status === 'rejected') return 'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-400 dark:border-red-800';
+  if (status === 'cancelled') return 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-950/50 dark:text-slate-400 dark:border-slate-800';
+  return 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-950/50 dark:text-yellow-400 dark:border-yellow-800';
 }
 
 function getMinDateForVL(): string {
@@ -130,6 +137,10 @@ const Leave = () => {
   const [fileDialogOpen, setFileDialogOpen] = useState(false);
   const [confirmSubmitOpen, setConfirmSubmitOpen] = useState(false);
   const [viewingRequest, setViewingRequest] = useState<LeaveRequest | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancellingRequest, setCancellingRequest] = useState<LeaveRequest | null>(null);
+  const [cancellationNote, setCancellationNote] = useState('');
+  const [cancelling, setCancelling] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [isRegular, setIsRegular] = useState<boolean>(true);
   const [selectedLeaveType, setSelectedLeaveType] = useState<string>('');
@@ -179,13 +190,14 @@ const Leave = () => {
     if (!currentUser?.id) return;
     const { data } = await supabase
       .from('leave_requests')
-      .select('*, approver:employees!approved_by(first_name, last_name)')
+      .select('*, approver:employees!approved_by(first_name, last_name), canceller:employees!cancelled_by(first_name, last_name)')
       .eq('employee_id', currentUser.id)
       .order('created_at', { ascending: false })
       .limit(50);
     const withApprover = (data || []).map((r: any) => ({
       ...r,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
+      canceller_name: r.canceller ? `${r.canceller.first_name} ${r.canceller.last_name}` : null,
     }));
     setMyRequests(withApprover as LeaveRequest[]);
   }, [currentUser?.id]);
@@ -326,6 +338,48 @@ const Leave = () => {
     const start = (leavePage - 1) * PAGE_SIZE;
     return filteredMyRequests.slice(start, start + PAGE_SIZE);
   }, [filteredMyRequests, leavePage]);
+
+  const openCancelDialog = (request: LeaveRequest) => {
+    setCancellingRequest(request);
+    setCancellationNote('');
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelLeave = async () => {
+    if (!cancellingRequest || !currentUser?.id) return;
+    if (!cancellationNote.trim()) {
+      toast.error('Cancellation note is required');
+      return;
+    }
+    setCancelling(true);
+    try {
+      const { data } = await supabase.rpc('cancel_leave_request', {
+        p_leave_id: cancellingRequest.id,
+        p_cancellation_note: cancellationNote.trim(),
+      });
+      const result = data as { success: boolean; error?: string };
+      if (result?.success) {
+        createRequestInAppNotification({
+          event: 'cancelled',
+          requestType: 'leave',
+          requestId: cancellingRequest.id,
+          approverId: currentUser.id,
+        }).catch(() => {});
+        toast.success('Leave request cancelled');
+        setCancelDialogOpen(false);
+        setCancellingRequest(null);
+        setCancellationNote('');
+        if (viewingRequest?.id === cancellingRequest.id) setViewingRequest(null);
+        fetchMyRequests();
+      } else {
+        toast.error(result?.error || 'Cancellation failed');
+      }
+    } catch {
+      toast.error('Cancellation failed');
+    } finally {
+      setCancelling(false);
+    }
+  };
 
   const handleSubmit = async () => {
     if (!currentUser?.id) return;
@@ -733,16 +787,7 @@ const Leave = () => {
                         </TableCell>
                         <TableCell>{r.number_of_days ?? '—'}</TableCell>
                         <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={
-                              r.status === 'approved'
-                                ? 'bg-green-100 text-green-700 border-green-200'
-                                : r.status === 'rejected'
-                                  ? 'bg-red-100 text-red-700 border-red-200'
-                                  : 'bg-yellow-100 text-yellow-700 border-yellow-200'
-                            }
-                          >
+                          <Badge variant="outline" className={leaveStatusBadgeClass(r.status)}>
                             {r.status}
                           </Badge>
                         </TableCell>
@@ -751,15 +796,28 @@ const Leave = () => {
                         </TableCell>
                         <TableCell className="max-w-[200px] truncate">{r.reason || '—'}</TableCell>
                         <TableCell>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8"
-                            onClick={() => setViewingRequest(r)}
-                          >
-                            <Eye className="h-4 w-4 mr-1.5" />
-                            View
-                          </Button>
+                          <div className="flex items-center gap-1.5">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="h-8"
+                              onClick={() => setViewingRequest(r)}
+                            >
+                              <Eye className="h-4 w-4 mr-1.5" />
+                              View
+                            </Button>
+                            {r.status === 'pending' && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-destructive hover:text-destructive"
+                                onClick={() => openCancelDialog(r)}
+                              >
+                                <Ban className="h-4 w-4 mr-1.5" />
+                                Cancel
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1006,14 +1064,7 @@ const Leave = () => {
                 </div>
                 <div>
                   <p className="text-muted-foreground">Status</p>
-                  <Badge
-                    variant="outline"
-                    className={cn(
-                      viewingRequest.status === 'approved' && 'bg-green-100 text-green-700 border-green-200',
-                      viewingRequest.status === 'rejected' && 'bg-red-100 text-red-700 border-red-200',
-                      viewingRequest.status === 'pending' && 'bg-yellow-100 text-yellow-700 border-yellow-200'
-                    )}
-                  >
+                  <Badge variant="outline" className={cn(leaveStatusBadgeClass(viewingRequest.status))}>
                     {viewingRequest.status}
                   </Badge>
                 </div>
@@ -1059,12 +1110,93 @@ const Leave = () => {
                     <p className="font-medium mt-0.5">{viewingRequest.approver_name}</p>
                   </div>
                 )}
+                {viewingRequest.status === 'cancelled' && (
+                  <>
+                    {viewingRequest.canceller_name && (
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Cancelled by</p>
+                        <p className="font-medium mt-0.5">{viewingRequest.canceller_name}</p>
+                      </div>
+                    )}
+                    {viewingRequest.cancelled_at && (
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Cancelled at</p>
+                        <p className="font-medium mt-0.5">
+                          {new Date(viewingRequest.cancelled_at).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                    )}
+                    {viewingRequest.cancellation_note && (
+                      <div className="col-span-2 rounded-md border-2 border-yellow-300 bg-yellow-100 p-3 dark:border-yellow-700 dark:bg-yellow-950/40">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-yellow-800 dark:text-yellow-300">Cancellation note</p>
+                        <p className="mt-1.5 font-medium text-foreground">{viewingRequest.cancellation_note}</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           )}
           <DialogFooter>
+            {viewingRequest?.status === 'pending' && (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  openCancelDialog(viewingRequest);
+                  setViewingRequest(null);
+                }}
+              >
+                <Ban className="h-4 w-4 mr-1.5" />
+                Cancel Request
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setViewingRequest(null)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelDialogOpen} onOpenChange={(open) => {
+        setCancelDialogOpen(open);
+        if (!open) {
+          setCancellingRequest(null);
+          setCancellationNote('');
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel Leave Request</DialogTitle>
+            <DialogDescription>
+              {cancellingRequest
+                ? `Cancel your ${cancellingRequest.leave_type.toUpperCase()} leave (${formatDate(cancellingRequest.start_date)} – ${formatDate(cancellingRequest.end_date)}). This cannot be undone.`
+                : 'Provide a reason for cancelling this leave request.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label>
+              Reason for cancellation <span className="text-red-500">*</span>
+            </Label>
+            <Textarea
+              placeholder="Why are you cancelling this leave request?"
+              value={cancellationNote}
+              onChange={(e) => setCancellationNote(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={cancelling}>
+              Back
+            </Button>
+            <Button variant="destructive" onClick={handleCancelLeave} disabled={cancelling || !cancellationNote.trim()}>
+              {cancelling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
+              Confirm Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
