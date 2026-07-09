@@ -13,10 +13,17 @@ import { getAvatarFallback } from '@/lib/utils';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 import { Textarea } from '@/components/ui/textarea';
-import { UserPlus, Pencil, Trash2, Search, Loader2, ChevronRight, ChevronLeft, Eye } from 'lucide-react';
+import { UserPlus, Pencil, Trash2, Search, Loader2, ChevronRight, ChevronLeft, Eye, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { cn, timeTo12Hour, formatPhonePH, normalizePhonePH, isValidPhonePH } from '@/lib/utils';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { exportEmployeeList } from '@/lib/exportEmployeeList';
 
 // ── Types ──────────────────────────────────────────────
 
@@ -183,6 +190,9 @@ const Employees = () => {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('all');
+  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [employmentStatusFilter, setEmploymentStatusFilter] = useState('all');
+  const [exportLoading, setExportLoading] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -199,6 +209,7 @@ const Employees = () => {
   const [viewingSupervisors, setViewingSupervisors] = useState<string[]>([]);
   const [viewingShiftIds, setViewingShiftIds] = useState<string[]>([]);
   const [employeeDepartmentNames, setEmployeeDepartmentNames] = useState<Record<string, string[]>>({});
+  const [employeeDepartmentIds, setEmployeeDepartmentIds] = useState<Record<string, string[]>>({});
   const [page, setPage] = useState(1);
 
   // Multi-select states
@@ -235,12 +246,16 @@ const Employees = () => {
       });
       const deptMap = new Map<string, string>((deptResult.data || []).map((d) => [d.id, d.name]));
       const empDeptMap: Record<string, string[]> = {};
+      const empDeptIdMap: Record<string, string[]> = {};
       (edResult.data || []).forEach((ed: { employee_id: string; department_id: string }) => {
         const name = deptMap.get(ed.department_id);
         if (!empDeptMap[ed.employee_id]) empDeptMap[ed.employee_id] = [];
+        if (!empDeptIdMap[ed.employee_id]) empDeptIdMap[ed.employee_id] = [];
+        empDeptIdMap[ed.employee_id].push(ed.department_id);
         if (name) empDeptMap[ed.employee_id].push(name);
       });
       setEmployeeDepartmentNames(empDeptMap);
+      setEmployeeDepartmentIds(empDeptIdMap);
       setEmployees(
         (empResult.data || []).map((emp) => ({ ...emp, user_roles: roleMap.get(emp.id) || [] })) as Employee[]
       );
@@ -315,19 +330,29 @@ const Employees = () => {
     [employees]
   );
 
-  const filtered = employees.filter((emp) => {
-    const name = `${emp.first_name} ${emp.last_name} ${emp.company_email ?? ''} ${emp.employee_code}`.toLowerCase();
-    const matchesSearch = name.includes(search.toLowerCase());
-    const matchesRole = roleFilter === 'all' || getRoles(emp).includes(roleFilter);
-    return matchesSearch && matchesRole;
-  });
+  const filtered = useMemo(
+    () =>
+      employees.filter((emp) => {
+        const name = `${emp.first_name} ${emp.last_name} ${emp.company_email ?? ''} ${emp.employee_code}`.toLowerCase();
+        const matchesSearch = name.includes(search.toLowerCase());
+        const matchesRole = roleFilter === 'all' || getRoles(emp).includes(roleFilter);
+        const matchesDepartment =
+          departmentFilter === 'all' ||
+          emp.department_id === departmentFilter ||
+          (employeeDepartmentIds[emp.id] ?? []).includes(departmentFilter);
+        const matchesEmploymentStatus =
+          employmentStatusFilter === 'all' || emp.employment_status_id === employmentStatusFilter;
+        return matchesSearch && matchesRole && matchesDepartment && matchesEmploymentStatus;
+      }),
+    [employees, search, roleFilter, departmentFilter, employmentStatusFilter, employeeDepartmentIds]
+  );
 
   const paginated = useMemo(
     () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page]
   );
 
-  useEffect(() => setPage(1), [search, roleFilter]);
+  useEffect(() => setPage(1), [search, roleFilter, departmentFilter, employmentStatusFilter]);
 
   // ── Form Helpers ─────────────────────────────────────
 
@@ -1023,6 +1048,52 @@ const Employees = () => {
     );
   };
 
+  const formatRolesForExport = (emp: Employee): string =>
+    getRoles(emp)
+      .map((r) => ROLE_LABELS[r] || r.replace('_', ' '))
+      .join(', ');
+
+  const buildExportFilenameSuffix = (): string => {
+    const parts: string[] = [];
+    if (departmentFilter !== 'all') {
+      const dept = departments.find((d) => d.id === departmentFilter);
+      if (dept?.name) parts.push(dept.name.replace(/\s+/g, '-').toLowerCase());
+    }
+    if (employmentStatusFilter !== 'all') {
+      const status = employmentStatuses.find((s) => s.id === employmentStatusFilter);
+      if (status?.name) parts.push(status.name.replace(/\s+/g, '-').toLowerCase());
+    }
+    return parts.join('-');
+  };
+
+  const handleExport = async (format: 'pdf' | 'xlsx') => {
+    setExportLoading(true);
+    try {
+      await exportEmployeeList({
+        format,
+        filenameSuffix: buildExportFilenameSuffix() || undefined,
+        employees: filtered.map((emp) => ({
+          employee_code: emp.employee_code,
+          first_name: emp.first_name,
+          last_name: emp.last_name,
+          company_email: emp.company_email,
+          department: employeeDepartmentNames[emp.id]?.join(', ') || emp.department || '—',
+          position: emp.position,
+          roles: formatRolesForExport(emp),
+          employment_status:
+            employmentStatuses.find((s) => s.id === emp.employment_status_id)?.name ||
+            (emp.is_active ? 'Active' : 'Inactive'),
+          active_status: emp.is_active ? 'Active' : 'Inactive',
+        })),
+      });
+      toast.success(`Employee list exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export employee list');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1036,13 +1107,20 @@ const Employees = () => {
       </div>
 
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row gap-3">
-        <div className="relative flex-1">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px] max-w-md">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search by name, email, or code..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+          <Input
+            placeholder="Search by name, email, or code..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-10"
+          />
         </div>
         <Select value={roleFilter} onValueChange={setRoleFilter}>
-          <SelectTrigger className="w-[180px]"><SelectValue /></SelectTrigger>
+          <SelectTrigger className="w-full sm:w-[160px] shrink-0">
+            <SelectValue />
+          </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Roles</SelectItem>
             {Object.entries(ROLE_LABELS).map(([value, label]) => (
@@ -1050,6 +1128,44 @@ const Employees = () => {
             ))}
           </SelectContent>
         </Select>
+        <Select value={departmentFilter} onValueChange={setDepartmentFilter}>
+          <SelectTrigger className="w-full sm:w-[180px] shrink-0">
+            <SelectValue placeholder="All Departments" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Departments</SelectItem>
+            {departments.map((d) => (
+              <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={employmentStatusFilter} onValueChange={setEmploymentStatusFilter}>
+          <SelectTrigger className="w-full sm:w-[200px] shrink-0">
+            <SelectValue placeholder="All Employment Statuses" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Employment Statuses</SelectItem>
+            {employmentStatuses.map((s) => (
+              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" className="w-full sm:w-auto shrink-0" disabled={exportLoading}>
+              {exportLoading ? (
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+              ) : (
+                <Download className="h-4 w-4 mr-2" />
+              )}
+              Download
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => handleExport('pdf')}>Employee List PDF</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleExport('xlsx')}>Employee List XLSX</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Table */}
