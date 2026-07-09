@@ -129,7 +129,14 @@ const Dashboard = () => {
     approver_name?: string | null;
   }>>([]);
   const [employeesWithRole, setEmployeesWithRole] = useState<Array<Employee & { role: string; roles: string[] }>>([]);
-  const [companyProfile, setCompanyProfile] = useState<{ name: string; address?: string; work_start_time?: string; work_end_time?: string } | null>(null);
+  const [companyProfile, setCompanyProfile] = useState<{
+    name: string;
+    address?: string;
+    work_start_time?: string;
+    work_end_time?: string;
+    code_conduct_url?: string | null;
+    hand_book_url?: string | null;
+  } | null>(null);
   const [calendarDateDialog, setCalendarDateDialog] = useState<{
     dateStr: string;
     dateLabel: string;
@@ -444,7 +451,11 @@ const Dashboard = () => {
     const [empRes, roleRes, companyRes] = await Promise.all([
       supabase.from('employees').select('*').eq('is_active', true).order('first_name'),
       supabase.from('user_roles').select('user_id, role'),
-      supabase.from('company_profile').select('name, address, work_start_time, work_end_time').limit(1).maybeSingle(),
+      supabase
+        .from('company_profile')
+        .select('name, address, work_start_time, work_end_time, code_conduct_url, hand_book_url')
+        .limit(1)
+        .maybeSingle(),
     ]);
     const roleMap = new Map<string, string[]>();
     (roleRes.data || []).forEach((r: { user_id: string; role: string }) => {
@@ -1442,7 +1453,13 @@ const Dashboard = () => {
           <CardHeader className="pb-2">
             <div className="flex items-center justify-between">
               <CardTitle className="text-base font-semibold">Company Information</CardTitle>
-              <button className="text-xs text-primary font-medium">View More</button>
+              <button
+                type="button"
+                className="text-xs text-primary font-medium"
+                onClick={() => navigate('/dashboard/company/profile')}
+              >
+                View More
+              </button>
             </div>
           </CardHeader>
           <CardContent className="space-y-3">
@@ -1458,6 +1475,34 @@ const Dashboard = () => {
               <p>👥 {employeesWithRole.length} Employees</p>
               <p>🕐 Mon-Fri, {shiftLabel}</p>
             </div>
+            {(companyProfile?.code_conduct_url || companyProfile?.hand_book_url) && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {companyProfile.code_conduct_url && (
+                  <a
+                    href={companyProfile.code_conduct_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border bg-muted/50 hover:bg-muted text-xs font-medium text-foreground transition-colors"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-primary" />
+                    Code of Conduct
+                    <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                  </a>
+                )}
+                {companyProfile.hand_book_url && (
+                  <a
+                    href={companyProfile.hand_book_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border bg-muted/50 hover:bg-muted text-xs font-medium text-foreground transition-colors"
+                  >
+                    <FileText className="h-3.5 w-3.5 text-primary" />
+                    Employee Handbook
+                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground" />
+                  </a>
+                )}
+              </div>
+            )}
           </CardContent>
         </Card>
           </div>
