@@ -147,6 +147,7 @@ const Leave = () => {
   const [shiftForSLDate, setShiftForSLDate] = useState<{ start_time: string } | null>(null);
   const [slAttachmentFile, setSlAttachmentFile] = useState<File | null>(null);
   const [eligibleLeaveTypes, setEligibleLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
+  const [allLeaveTypes, setAllLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
   const [leavePage, setLeavePage] = useState(1);
   const [selectedApprovalLeaveType, setSelectedApprovalLeaveType] = useState<string>('');
   const tabParam = searchParams.get('tab');
@@ -186,6 +187,15 @@ const Leave = () => {
     setIsRegular(hookIsRegular);
   }, [hookIsRegular]);
 
+  const fetchAllLeaveTypes = useCallback(async () => {
+    const { data } = await supabase
+      .from('leave_type_config')
+      .select('code, name, annual_entitlement, cap, is_system')
+      .order('sort_order');
+    const configs = (data || []) as LeaveTypeConfigForBalance[];
+    setAllLeaveTypes(configs);
+  }, []);
+
   const fetchMyRequests = useCallback(async () => {
     if (!currentUser?.id) return;
     const { data } = await supabase
@@ -212,6 +222,10 @@ const Leave = () => {
   }, [fetchAll]);
 
   useEffect(() => {
+    fetchAllLeaveTypes();
+  }, [fetchAllLeaveTypes]);
+
+  useEffect(() => {
     if (!currentUser?.id) return;
     const channel = supabase
       .channel('leave-realtime')
@@ -230,7 +244,7 @@ const Leave = () => {
         }
       )
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_config' }, () => {
-        // Balance hook listens to Supabase changes; no-op here.
+        fetchAllLeaveTypes();
       })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'leave_type_eligibility' }, () => {
         // Balance hook listens to Supabase changes; no-op here.
@@ -240,7 +254,7 @@ const Leave = () => {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentUser?.id, fetchMyRequests]);
+  }, [currentUser?.id, fetchAllLeaveTypes, fetchMyRequests]);
 
   const fetchShiftForDate = useCallback(async (dateStr: string) => {
     if (!currentUser?.id || !dateStr) {
@@ -303,14 +317,14 @@ const Leave = () => {
   }, [isRegular, eligibleLeaveTypes]);
 
   const approvalSidebarItems = useMemo(() => {
-    const types = eligibleLeaveTypes.length > 0 ? eligibleLeaveTypes : defaultTypes;
+    const types = allLeaveTypes.length > 0 ? allLeaveTypes : defaultTypes;
     return types.map((t) => ({
       value: t.code,
       label: t.name,
       description: `${t.name} requests`,
       icon: ICON_BY_CODE[t.code] || DEFAULT_ICON,
     }));
-  }, [eligibleLeaveTypes]);
+  }, [allLeaveTypes]);
 
   useEffect(() => {
     if (!isRegular && !['lwop', ''].includes(selectedLeaveType)) {
