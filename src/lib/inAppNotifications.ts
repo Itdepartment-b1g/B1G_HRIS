@@ -1,7 +1,7 @@
 import { supabase } from '@/lib/supabase';
 
 type RequestType = 'leave' | 'overtime' | 'business_trip';
-type RequestEvent = 'submitted' | 'approved' | 'rejected';
+type RequestEvent = 'submitted' | 'approved' | 'rejected' | 'cancelled';
 type ActivityType = 'announcement' | 'policy' | 'survey';
 
 export async function createRequestInAppNotification(input: {

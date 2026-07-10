@@ -3,10 +3,12 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarFallbackFromFullName } from '@/lib/utils';
-import { Loader2, Check, X, Calendar, Clock, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Baby } from 'lucide-react';
+import { Loader2, Check, X, Calendar, Clock, Palmtree, HeartPulse, Briefcase, CalendarX, ChevronRight, Eye, Paperclip, Baby, Ban, MoreVertical } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -16,6 +18,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { RequireRole } from '@/components/RequireRole';
 import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
@@ -68,13 +77,20 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
   const [pending, setPending] = useState<LeaveRequestWithEmployee[]>([]);
   const [approved, setApproved] = useState<LeaveRequestWithEmployee[]>([]);
   const [rejected, setRejected] = useState<LeaveRequestWithEmployee[]>([]);
+  const [cancelled, setCancelled] = useState<LeaveRequestWithEmployee[]>([]);
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
+  const [cancelling, setCancelling] = useState<string | null>(null);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [cancellingRequest, setCancellingRequest] = useState<LeaveRequestWithEmployee | null>(null);
+  const [cancellationNote, setCancellationNote] = useState('');
   const [internalFilter, setInternalFilter] = useState<string>('');
   const useExternalFilter = embedded && filterCode !== undefined && onFilterChange !== undefined;
   const selectedLeaveType = useExternalFilter ? (filterCode ?? '') : internalFilter;
   const [viewingRequest, setViewingRequest] = useState<LeaveRequestWithEmployee | null>(null);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
+
+  const isSuperAdmin = currentUser?.roles?.includes('super_admin') ?? false;
 
   const sidebarLeaveItems = useMemo(() => {
     const types = leaveTypes.length > 0 ? leaveTypes : defaultTypes;
@@ -124,12 +140,13 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
       setPending([]);
       setApproved([]);
       setRejected([]);
+      setCancelled([]);
       if (!silent) setLoading(false);
       return;
     }
     const { data } = await supabase
       .from('leave_requests')
-      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name), canceller:employees!cancelled_by(first_name, last_name)')
       .in('employee_id', ids)
       .order('created_at', { ascending: false });
     const withName = (data || []).map((r: any) => ({
@@ -137,10 +154,12 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
       employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
       employee_avatar_url: r.employee?.avatar_url ?? null,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
+      canceller_name: r.canceller ? `${r.canceller.first_name} ${r.canceller.last_name}` : null,
     }));
     setPending(withName.filter((r) => r.status === 'pending'));
     setApproved(withName.filter((r) => r.status === 'approved'));
     setRejected(withName.filter((r) => r.status === 'rejected'));
+    setCancelled(withName.filter((r) => r.status === 'cancelled'));
     if (!silent) setLoading(false);
   }, [currentUser?.id, fetchSupervisedIds]);
 
@@ -181,6 +200,49 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
   const filteredPending = useMemo(() => filterByType(pending), [pending, selectedLeaveType]);
   const filteredApproved = useMemo(() => filterByType(approved), [approved, selectedLeaveType]);
   const filteredRejected = useMemo(() => filterByType(rejected), [rejected, selectedLeaveType]);
+  const filteredCancelled = useMemo(() => filterByType(cancelled), [cancelled, selectedLeaveType]);
+
+  const openCancelDialog = (request: LeaveRequestWithEmployee) => {
+    setCancellingRequest(request);
+    setCancellationNote('');
+    setCancelDialogOpen(true);
+  };
+
+  const handleCancelLeave = async () => {
+    if (!cancellingRequest || !currentUser?.id) return;
+    if (!cancellationNote.trim()) {
+      toast.error('Cancellation note is required');
+      return;
+    }
+    setCancelling(cancellingRequest.id);
+    try {
+      const { data } = await supabase.rpc('cancel_leave_request', {
+        p_leave_id: cancellingRequest.id,
+        p_cancellation_note: cancellationNote.trim(),
+      });
+      const result = data as { success: boolean; error?: string };
+      if (result?.success) {
+        createRequestInAppNotification({
+          event: 'cancelled',
+          requestType: 'leave',
+          requestId: cancellingRequest.id,
+          approverId: currentUser.id,
+        }).catch(() => {});
+        toast.success('Leave request cancelled');
+        setCancelDialogOpen(false);
+        setCancellingRequest(null);
+        setCancellationNote('');
+        if (viewingRequest?.id === cancellingRequest.id) setViewingRequest(null);
+        fetchRequests();
+      } else {
+        toast.error(result?.error || 'Cancellation failed');
+      }
+    } catch {
+      toast.error('Cancellation failed');
+    } finally {
+      setCancelling(null);
+    }
+  };
 
   const handleApprove = async (id: string, action: 'approved' | 'rejected') => {
     setApproving(id);
@@ -209,9 +271,11 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
       ? 'bg-green-100 text-green-700 border-green-200 dark:bg-green-950/50 dark:text-green-400 dark:border-green-800'
       : status === 'rejected'
         ? 'bg-red-100 text-red-700 border-red-200 dark:bg-red-950/50 dark:text-red-400 dark:border-red-800'
-        : 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-950/50 dark:text-yellow-400 dark:border-yellow-800';
+        : status === 'cancelled'
+          ? 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-950/50 dark:text-slate-400 dark:border-slate-800'
+          : 'bg-yellow-100 text-yellow-700 border-yellow-200 dark:bg-yellow-950/50 dark:text-yellow-400 dark:border-yellow-800';
 
-  const renderRequests = (requests: LeaveRequestWithEmployee[], showActions: boolean) => {
+  const renderRequests = (requests: LeaveRequestWithEmployee[], showActions: boolean, showCancel = false) => {
     if (requests.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -272,18 +336,21 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                         {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.approver_name}
                       </p>
                     )}
+                    {r.status === 'cancelled' && r.cancellation_note && (
+                      <div className="mt-2 rounded-md border border-yellow-300 bg-yellow-100 px-2.5 py-2 dark:border-yellow-700 dark:bg-yellow-950/40">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-yellow-800 dark:text-yellow-300">Cancellation note</p>
+                        <p className="mt-1 text-xs text-foreground">{r.cancellation_note}</p>
+                        {r.canceller_name && (
+                          <p className="mt-1 text-[11px] text-muted-foreground">Cancelled by {r.canceller_name}</p>
+                        )}
+                      </div>
+                    )}
+                    {r.status === 'cancelled' && r.canceller_name && !r.cancellation_note && (
+                      <p className="text-xs text-muted-foreground mt-2">Cancelled by {r.canceller_name}</p>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
-                    onClick={() => setViewingRequest(r)}
-                  >
-                    <Eye className="h-4 w-4 mr-1.5" />
-                    View
-                  </Button>
                   <span
                     className={cn(
                       'rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
@@ -292,34 +359,55 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                   >
                     {r.status}
                   </span>
-                  {showActions && (
-                    <div className="flex gap-1.5">
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
                       <Button
-                        size="sm"
-                        variant="default"
-                        className="h-8 w-8 p-0"
-                        onClick={() => handleApprove(r.id, 'approved')}
-                        disabled={approving === r.id}
-                        title="Approve"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 shrink-0"
+                        disabled={approving === r.id || cancelling === r.id}
                       >
-                        {approving === r.id ? (
+                        {approving === r.id || cancelling === r.id ? (
                           <Loader2 className="h-4 w-4 animate-spin" />
                         ) : (
-                          <Check className="h-4 w-4" />
+                          <MoreVertical className="h-4 w-4" />
                         )}
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="h-8 w-8 p-0"
-                        onClick={() => handleApprove(r.id, 'rejected')}
-                        disabled={approving === r.id}
-                        title="Reject"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  )}
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-44">
+                      <DropdownMenuItem onClick={() => setViewingRequest(r)}>
+                        <Eye className="h-4 w-4 mr-2" />
+                        View
+                      </DropdownMenuItem>
+                      {showActions && (
+                        <>
+                          <DropdownMenuItem onClick={() => handleApprove(r.id, 'approved')}>
+                            <Check className="h-4 w-4 mr-2" />
+                            Approve
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => handleApprove(r.id, 'rejected')}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <X className="h-4 w-4 mr-2" />
+                            Reject
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                      {showCancel && isSuperAdmin && (r.status === 'pending' || r.status === 'approved') && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => openCancelDialog(r)}
+                            className="text-destructive focus:text-destructive"
+                          >
+                            <Ban className="h-4 w-4 mr-2" />
+                            Cancel
+                          </DropdownMenuItem>
+                        </>
+                      )}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </div>
             </CardContent>
@@ -433,21 +521,25 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                 </div>
               ) : (
                 <Tabs defaultValue="pending" className="w-full">
-                  <TabsList className="grid w-full grid-cols-3">
+                  <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="pending">
                       Pending ({filteredPending.length})
                     </TabsTrigger>
                     <TabsTrigger value="approved">Approved ({filteredApproved.length})</TabsTrigger>
                     <TabsTrigger value="rejected">Rejected ({filteredRejected.length})</TabsTrigger>
+                    <TabsTrigger value="cancelled">Cancelled ({filteredCancelled.length})</TabsTrigger>
                   </TabsList>
                   <TabsContent value="pending" className="mt-5">
-                    {renderRequests(filteredPending, true)}
+                    {renderRequests(filteredPending, true, true)}
                   </TabsContent>
                   <TabsContent value="approved" className="mt-5">
-                    {renderRequests(filteredApproved, false)}
+                    {renderRequests(filteredApproved, false, true)}
                   </TabsContent>
                   <TabsContent value="rejected" className="mt-5">
-                    {renderRequests(filteredRejected, false)}
+                    {renderRequests(filteredRejected, false, false)}
+                  </TabsContent>
+                  <TabsContent value="cancelled" className="mt-5">
+                    {renderRequests(filteredCancelled, false, false)}
                   </TabsContent>
                 </Tabs>
               )}
@@ -528,12 +620,93 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                     <p className="font-medium mt-0.5">{viewingRequest.approver_name}</p>
                   </div>
                 )}
+                {viewingRequest.status === 'cancelled' && (
+                  <>
+                    {viewingRequest.canceller_name && (
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Cancelled by</p>
+                        <p className="font-medium mt-0.5">{viewingRequest.canceller_name}</p>
+                      </div>
+                    )}
+                    {viewingRequest.cancelled_at && (
+                      <div className="col-span-2">
+                        <p className="text-muted-foreground">Cancelled at</p>
+                        <p className="font-medium mt-0.5">
+                          {new Date(viewingRequest.cancelled_at).toLocaleString('en-US', {
+                            month: 'short',
+                            day: 'numeric',
+                            year: 'numeric',
+                            hour: 'numeric',
+                            minute: '2-digit',
+                          })}
+                        </p>
+                      </div>
+                    )}
+                    {viewingRequest.cancellation_note && (
+                      <div className="col-span-2 rounded-md border-2 border-yellow-300 bg-yellow-100 p-3 dark:border-yellow-700 dark:bg-yellow-950/40">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-yellow-800 dark:text-yellow-300">Cancellation note</p>
+                        <p className="mt-1.5 font-medium text-foreground">{viewingRequest.cancellation_note}</p>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           )}
           <DialogFooter>
+            {isSuperAdmin && viewingRequest && (viewingRequest.status === 'pending' || viewingRequest.status === 'approved') && (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  openCancelDialog(viewingRequest);
+                  setViewingRequest(null);
+                }}
+              >
+                <Ban className="h-4 w-4 mr-1.5" />
+                Cancel Request
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setViewingRequest(null)}>
               Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={cancelDialogOpen} onOpenChange={(open) => {
+        setCancelDialogOpen(open);
+        if (!open) {
+          setCancellingRequest(null);
+          setCancellationNote('');
+        }
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Cancel Leave Request</DialogTitle>
+            <DialogDescription>
+              {cancellingRequest
+                ? `Cancel ${cancellingRequest.employee_name}'s ${cancellingRequest.leave_type.toUpperCase()} leave (${formatDate(cancellingRequest.start_date)} – ${formatDate(cancellingRequest.end_date)}). Approved leaves will have balance restored.`
+                : 'Provide a reason for cancelling this leave request.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label>
+              Reason for cancellation <span className="text-red-500">*</span>
+            </Label>
+            <Textarea
+              placeholder="Why is this leave being cancelled?"
+              value={cancellationNote}
+              onChange={(e) => setCancellationNote(e.target.value)}
+              rows={3}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCancelDialogOpen(false)} disabled={!!cancelling}>
+              Back
+            </Button>
+            <Button variant="destructive" onClick={handleCancelLeave} disabled={!!cancelling || !cancellationNote.trim()}>
+              {cancelling ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Ban className="h-4 w-4 mr-2" />}
+              Confirm Cancel
             </Button>
           </DialogFooter>
         </DialogContent>
