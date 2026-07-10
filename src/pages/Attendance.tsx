@@ -14,6 +14,8 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Search, Loader2, Eye, ChevronDown, ChevronRight, Pencil, Camera, Filter, MapPin, MoreVertical, AlertCircle, Download } from 'lucide-react';
@@ -22,8 +24,10 @@ import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
 import { exportAttendanceReportSummary } from '@/lib/exportAttendanceReportSummary';
+import { exportAttendanceBreakdown } from '@/lib/exportAttendanceBreakdown';
 import { timeTo12Hour } from '@/lib/utils';
 import { formatHolidayStatusLabel, holidayTypeBadgeClass, normalizeHolidayType, type HolidayType } from '@/lib/holidayType';
+import { DateRangeFilter } from '@/components/DateRangeFilter';
 
 interface RecordRow {
   id: string;
@@ -145,11 +149,7 @@ const Attendance = () => {
   const [records, setRecords] = useState<RecordRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date();
-    d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
-  });
+  const [dateFrom, setDateFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [dateTo, setDateTo] = useState(() => new Date().toISOString().slice(0, 10));
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const [viewingRecord, setViewingRecord] = useState<RecordRow | null>(null);
@@ -166,11 +166,14 @@ const Attendance = () => {
   const [saving, setSaving] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [summaryExportLoading, setSummaryExportLoading] = useState(false);
+  const [breakdownExportLoading, setBreakdownExportLoading] = useState(false);
   const [page, setPage] = useState(1);
-  type MobileFilter = 'all_today' | 'my_30_days' | 'absent';
-  const [mobileFilter, setMobileFilter] = useState<MobileFilter>('my_30_days');
+  const [allTimeFrom, setAllTimeFrom] = useState(() => new Date().toISOString().slice(0, 10));
+  type MobileFilter = 'all_today' | 'my_30_days' | 'absent' | 'custom';
+  const [mobileFilter, setMobileFilter] = useState<MobileFilter>('custom');
 
   const isAdmin = user?.roles?.includes('super_admin') || user?.roles?.includes('admin');
+  const canExport = isAdmin;
 
   // Sync date range when mobile filter changes
   useEffect(() => {
@@ -185,6 +188,33 @@ const Attendance = () => {
       setDateTo(today);
     }
   }, [mobileFilter]);
+
+  useEffect(() => {
+    if (userLoading || !user?.id) return;
+    const today = new Date().toISOString().slice(0, 10);
+
+    const fetchEarliestAttendanceDate = async () => {
+      let query = supabase
+        .from('attendance_records')
+        .select('date')
+        .order('date', { ascending: true })
+        .limit(1);
+
+      if (!isAdmin) {
+        query = query.eq('employee_id', user.id);
+      }
+
+      const { data } = await query.maybeSingle();
+      if ((data as { date?: string } | null)?.date) {
+        const earliestDate = (data as { date: string }).date;
+        setAllTimeFrom(earliestDate);
+        setDateFrom(earliestDate);
+        setDateTo(today);
+      }
+    };
+
+    fetchEarliestAttendanceDate();
+  }, [userLoading, user?.id, isAdmin]);
 
   const fetchRecords = useCallback(async () => {
     setLoading(true);
@@ -627,17 +657,17 @@ const Attendance = () => {
     }
   };
 
-  // const handleExport = async (format: 'csv' | 'xlsx') => {
-  //   setExportLoading(true);
-  //   try {
-  //     await exportAttendanceReport({ dateFrom, dateTo, format });
-  //     toast.success(`Report exported as ${format.toUpperCase()}`);
-  //   } catch (err) {
-  //     toast.error(err instanceof Error ? err.message : 'Failed to export report');
-  //   } finally {
-  //     setExportLoading(false);
-  //   }
-  // };
+  const handleExport = async (format: 'csv' | 'xlsx') => {
+    setExportLoading(true);
+    try {
+      await exportAttendanceReport({ dateFrom, dateTo, format });
+      toast.success(`Attendance report exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export attendance report');
+    } finally {
+      setExportLoading(false);
+    }
+  };
 
   const handleSummaryExport = async (format: 'csv' | 'xlsx') => {
     setSummaryExportLoading(true);
@@ -648,6 +678,33 @@ const Attendance = () => {
       toast.error(err instanceof Error ? err.message : 'Failed to export attendance summary');
     } finally {
       setSummaryExportLoading(false);
+    }
+  };
+
+  const handleBreakdownExport = async (format: 'csv' | 'xlsx') => {
+    setBreakdownExportLoading(true);
+    try {
+      await exportAttendanceBreakdown({
+        rows: filtered.map((row) => ({
+          date: row.date,
+          employee_code: row.employee_code,
+          employee_name: row.employee_name,
+          assigned_shift_formatted: row.assigned_shift_formatted,
+          time_in: row.time_in,
+          time_out: row.time_out,
+          minutes_late: row.minutes_late,
+          status: row.status,
+          remarks: row.remarks,
+        })),
+        dateFrom,
+        dateTo,
+        format,
+      });
+      toast.success(`Attendance breakdown exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export attendance breakdown');
+    } finally {
+      setBreakdownExportLoading(false);
     }
   };
 
@@ -728,6 +785,39 @@ const Attendance = () => {
 
       {/* Mobile: Filter tabs + Cards */}
       <div className="block lg:hidden space-y-4">
+        <div className="flex items-center justify-between gap-2">
+          <DateRangeFilter
+            value={{ from: dateFrom, to: dateTo }}
+            onChange={({ from, to }) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+            allTimeFrom={allTimeFrom}
+            triggerClassName="h-10 flex-1"
+          />
+          {canExport && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="shrink-0" disabled={exportLoading || summaryExportLoading || breakdownExportLoading}>
+                  {exportLoading || summaryExportLoading || breakdownExportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel>Attendance Breakdown</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleBreakdownExport('csv')}>Breakdown CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleBreakdownExport('xlsx')}>Breakdown XLSX</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Detailed Report</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleExport('csv')}>Detailed CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>Detailed XLSX</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Summary Report (AUB)</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleSummaryExport('csv')}>Summary CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleSummaryExport('xlsx')}>Summary XLSX</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </div>
         <div className="flex items-center justify-between gap-2 overflow-x-auto pb-2">
           <div className="flex items-center gap-2 shrink-0">
             <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -747,32 +837,6 @@ const Attendance = () => {
             ))}
             </div>
           </div>
-          {isAdmin && (
-            <>
-              {/* <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="shrink-0" disabled={exportLoading}>
-                    {exportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu> */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" className="shrink-0" disabled={summaryExportLoading}>
-                    {summaryExportLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleSummaryExport('csv')}>Export CSV</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleSummaryExport('xlsx')}>Export XLSX</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
-          )}
         </div>
 
         {loading ? (
@@ -890,36 +954,37 @@ const Attendance = () => {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="w-[140px]" />
-          <span className="text-muted-foreground text-sm">to</span>
-          <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="w-[140px]" />
-          {isAdmin && (
-            <>
-              {/* <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={exportLoading}>
-                    {exportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
-                    Export
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu> */}
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={summaryExportLoading}>
-                    {summaryExportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
-                     Export
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleSummaryExport('csv')}>CSV</DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleSummaryExport('xlsx')}>XLSX</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </>
+          <DateRangeFilter
+            value={{ from: dateFrom, to: dateTo }}
+            onChange={({ from, to }) => {
+              setDateFrom(from);
+              setDateTo(to);
+            }}
+            allTimeFrom={allTimeFrom}
+            triggerClassName="min-w-[240px]"
+          />
+          {canExport && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={exportLoading || summaryExportLoading || breakdownExportLoading}>
+                  {exportLoading || summaryExportLoading || breakdownExportLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Download className="h-4 w-4 mr-2" />}
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuLabel>Attendance Breakdown</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleBreakdownExport('csv')}>Breakdown CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleBreakdownExport('xlsx')}>Breakdown XLSX</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Detailed Report</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleExport('csv')}>Detailed CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport('xlsx')}>Detailed XLSX</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuLabel>Summary Report (AUB)</DropdownMenuLabel>
+                <DropdownMenuItem onClick={() => handleSummaryExport('csv')}>Summary CSV</DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleSummaryExport('xlsx')}>Summary XLSX</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           )}
         </div>
       </div>

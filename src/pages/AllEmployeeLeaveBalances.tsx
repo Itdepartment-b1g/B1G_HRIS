@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,12 +8,21 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Search, Loader2, Download, Pencil, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { exportLeaveBalances } from '@/lib/exportLeaveBalances';
+import { exportLeaveReport } from '@/lib/exportLeaveReport';
+import {
+  fetchApprovedLeaveUsageByYear,
+  formatUsedDays,
+  getUsedDays,
+  type LeaveUsageMap,
+} from '@/lib/leaveUsageAggregation';
 
 interface LeaveTypeConfig {
   id: string;
@@ -39,9 +48,9 @@ interface LeaveBalanceRow {
   balances?: Record<string, number> | null;
 }
 
-function getDisplayValue(lb: LeaveBalanceRow | null, code: string): string {
+function getBalanceDisplayValue(lb: LeaveBalanceRow | null, code: string): string {
   if (!lb) return '---';
-  if (code === 'lwop') return lb.lwop_days_used != null ? String(lb.lwop_days_used) : '---';
+  if (code === 'lwop') return '---';
   if (code === 'vl') return lb.vl_balance != null ? String(lb.vl_balance) : '---';
   if (code === 'sl') return lb.sl_balance != null ? String(lb.sl_balance) : '---';
   if (code === 'pto') return lb.pto_balance != null ? String(lb.pto_balance) : '---';
@@ -65,14 +74,22 @@ function parseOptionalNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+/** Frozen columns — opaque backgrounds so scrolled cells don't show through */
+const STICKY_FROZEN_BG = '!bg-white dark:!bg-[hsl(var(--card))]';
+const STICKY_CODE_COL = `sticky left-0 z-20 w-28 min-w-28 max-w-28 ${STICKY_FROZEN_BG} group-hover:!bg-muted`;
+const STICKY_NAME_COL = `sticky left-28 z-20 w-44 min-w-44 max-w-44 ${STICKY_FROZEN_BG} group-hover:!bg-muted shadow-[4px_0_6px_-2px_rgba(0,0,0,0.12)]`;
+const STICKY_HEAD_COL = 'z-30';
+
 const AllEmployeeLeaveBalances = () => {
   const [employees, setEmployees] = useState<EmployeeRow[]>([]);
   const [leaveTypeConfigs, setLeaveTypeConfigs] = useState<LeaveTypeConfig[]>([]);
   const [balanceMap, setBalanceMap] = useState<Map<string, LeaveBalanceRow>>(new Map());
+  const [usageMap, setUsageMap] = useState<LeaveUsageMap>(new Map());
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [exportLoading, setExportLoading] = useState(false);
+  const [reportExportLoading, setReportExportLoading] = useState(false);
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
   const [savingEmployeeId, setSavingEmployeeId] = useState<string | null>(null);
@@ -94,6 +111,15 @@ const AllEmployeeLeaveBalances = () => {
       supabase.from('leave_balances').select('*').eq('year', selectedYear),
       supabase.from('leave_type_config').select('id, code, name, sort_order').order('sort_order'),
     ]);
+
+    const employeeIds = ((empRes.data as EmployeeRow[]) || []).map((e) => e.id);
+
+    try {
+      setUsageMap(await fetchApprovedLeaveUsageByYear(selectedYear, employeeIds.length > 0 ? employeeIds : undefined));
+    } catch (err) {
+      console.error('Failed to fetch leave usage:', err);
+      setUsageMap(new Map());
+    }
 
     if (empRes.error) {
       console.error('Failed to fetch employees:', empRes.error);
@@ -144,18 +170,35 @@ const AllEmployeeLeaveBalances = () => {
   const handleExport = async (format: 'pdf' | 'csv' | 'xlsx') => {
     setExportLoading(true);
     try {
-      exportLeaveBalances({
+      await exportLeaveBalances({
         employees: filtered,
         balanceMap,
         leaveTypeConfigs,
         year: selectedYear,
         format,
+        usageMap,
       });
-      toast.success(`Leave balances exported as ${format.toUpperCase()}`);
+      toast.success(`Leave balance report exported as ${format.toUpperCase()}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to export');
     } finally {
       setExportLoading(false);
+    }
+  };
+
+  const handleLeaveReportExport = async (format: 'pdf' | 'csv' | 'xlsx') => {
+    setReportExportLoading(true);
+    try {
+      await exportLeaveReport({
+        year: selectedYear,
+        employeeIds: filtered.map((e) => e.id),
+        format,
+      });
+      toast.success(`Leave report exported as ${format.toUpperCase()}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to export leave report');
+    } finally {
+      setReportExportLoading(false);
     }
   };
 
@@ -164,7 +207,7 @@ const AllEmployeeLeaveBalances = () => {
       <div>
         <h1 className="text-2xl font-bold text-foreground">Number Of Leaves of All Employees</h1>
         <p className="text-muted-foreground text-sm mt-1">
-          View leave balances for all employees ({selectedYear})
+          View leave balances and approved leave usage for all employees ({selectedYear})
         </p>
       </div>
 
@@ -191,8 +234,8 @@ const AllEmployeeLeaveBalances = () => {
         />
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" disabled={exportLoading}>
-              {exportLoading ? (
+            <Button variant="outline" size="sm" disabled={exportLoading || reportExportLoading}>
+              {exportLoading || reportExportLoading ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
               ) : (
                 <Download className="h-4 w-4 mr-2" />
@@ -200,10 +243,16 @@ const AllEmployeeLeaveBalances = () => {
               Download
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => handleExport('pdf')}>Export PDF</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleExport('csv')}>Export CSV</DropdownMenuItem>
-            <DropdownMenuItem onClick={() => handleExport('xlsx')}>Export XLSX</DropdownMenuItem>
+          <DropdownMenuContent align="end" className="w-52">
+            <DropdownMenuLabel>Leave Balance Report</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => handleExport('pdf')}>Balance PDF</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleExport('csv')}>Balance CSV</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleExport('xlsx')}>Balance XLSX</DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuLabel>Leave Report</DropdownMenuLabel>
+            <DropdownMenuItem onClick={() => handleLeaveReportExport('pdf')}>Leave Report PDF</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleLeaveReportExport('csv')}>Leave Report CSV</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => handleLeaveReportExport('xlsx')}>Leave Report XLSX</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
@@ -211,7 +260,9 @@ const AllEmployeeLeaveBalances = () => {
       <Card>
         <CardHeader>
           <CardTitle className="text-base">Leave Balances ({filtered.length})</CardTitle>
-          <p className="text-sm text-muted-foreground">Year {selectedYear}</p>
+          <p className="text-sm text-muted-foreground">
+            Year {selectedYear} — Used days are summed from approved leave requests
+          </p>
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -220,13 +271,22 @@ const AllEmployeeLeaveBalances = () => {
             </div>
           ) : (
             <>
-              <Table>
+              <Table className="border-separate border-spacing-0">
                 <TableHeader>
-                  <TableRow>
-                    <TableHead>Employee Code</TableHead>
-                    <TableHead>Employee Name</TableHead>
+                  <TableRow className="group">
+                    <TableHead className={`${STICKY_CODE_COL} ${STICKY_HEAD_COL}`}>Employee Code</TableHead>
+                    <TableHead className={`${STICKY_NAME_COL} ${STICKY_HEAD_COL}`}>Employee Name</TableHead>
                     {leaveTypeConfigs.map((c) => (
-                      <TableHead key={c.id}>{c.name}</TableHead>
+                      <Fragment key={c.id}>
+                        <TableHead className="text-center whitespace-nowrap">
+                          {c.name}
+                          <span className="block text-xs font-normal text-muted-foreground">Balance</span>
+                        </TableHead>
+                        <TableHead className="text-center whitespace-nowrap">
+                          {c.name}
+                          <span className="block text-xs font-normal text-muted-foreground">Used</span>
+                        </TableHead>
+                      </Fragment>
                     ))}
                     <TableHead className="text-right">Actions</TableHead>
                   </TableRow>
@@ -237,25 +297,32 @@ const AllEmployeeLeaveBalances = () => {
                     const isEditing = editingEmployeeId === e.id;
                     const isSaving = savingEmployeeId === e.id;
                     return (
-                      <TableRow key={e.id}>
-                        <TableCell className="font-mono text-sm">{e.employee_code || '—'}</TableCell>
-                        <TableCell className="font-medium">{employeeName(e)}</TableCell>
+                      <TableRow key={e.id} className="group">
+                        <TableCell className={`font-mono text-sm ${STICKY_CODE_COL}`}>
+                          {e.employee_code || '—'}
+                        </TableCell>
+                        <TableCell className={`font-medium ${STICKY_NAME_COL}`}>{employeeName(e)}</TableCell>
                         {leaveTypeConfigs.map((c) => (
-                          <TableCell key={c.id} className="font-mono text-sm">
-                            {isEditing ? (
-                              <Input
-                                type="number"
-                                step="0.01"
-                                value={draftByCode[c.code] ?? ''}
-                                onChange={(ev) =>
-                                  setDraftByCode((prev) => ({ ...prev, [c.code]: ev.target.value }))
-                                }
-                                className="h-8 w-24"
-                              />
-                            ) : (
-                              getDisplayValue(lb, c.code)
-                            )}
-                          </TableCell>
+                          <Fragment key={c.id}>
+                            <TableCell className="font-mono text-sm text-center">
+                              {isEditing ? (
+                                <Input
+                                  type="number"
+                                  step="0.01"
+                                  value={draftByCode[c.code] ?? ''}
+                                  onChange={(ev) =>
+                                    setDraftByCode((prev) => ({ ...prev, [c.code]: ev.target.value }))
+                                  }
+                                  className="h-8 w-24 mx-auto"
+                                />
+                              ) : (
+                                getBalanceDisplayValue(lb, c.code)
+                              )}
+                            </TableCell>
+                            <TableCell className="font-mono text-sm text-center text-muted-foreground">
+                              {formatUsedDays(getUsedDays(usageMap, e.id, c.code))}
+                            </TableCell>
+                          </Fragment>
                         ))}
                         <TableCell className="text-right">
                           {isEditing ? (
@@ -350,7 +417,7 @@ const AllEmployeeLeaveBalances = () => {
                   {filtered.length === 0 && (
                     <TableRow>
                       <TableCell
-                        colSpan={3 + leaveTypeConfigs.length}
+                        colSpan={3 + leaveTypeConfigs.length * 2}
                         className="text-center text-muted-foreground py-8"
                       >
                         No employees found
