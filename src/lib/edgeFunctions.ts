@@ -411,6 +411,7 @@ export async function forgotPassword(
     longitude: verify.longitude,
     selfie: verify.selfie,
     user_agent: verify.user_agent,
+    app_origin: typeof window !== 'undefined' ? window.location.origin : undefined,
   });
 }
 
@@ -443,7 +444,22 @@ export async function changeOwnPassword(
     longitude: verify.longitude,
     selfie: verify.selfie,
     user_agent: verify.user_agent,
+    app_origin: typeof window !== 'undefined' ? window.location.origin : undefined,
   }, { useUserAuth: true, onAuthFailure: 'throw' });
+}
+
+export interface ConfirmPasswordChangeResponse {
+  success: boolean;
+  message: string;
+}
+
+export async function confirmPasswordChange(token: string): Promise<ConfirmPasswordChangeResponse> {
+  if (!token?.trim()) {
+    throw new Error('Confirmation token is required');
+  }
+  return callEdgeFunction<ConfirmPasswordChangeResponse>('confirm-password-change', {
+    token: token.trim(),
+  });
 }
 
 /**

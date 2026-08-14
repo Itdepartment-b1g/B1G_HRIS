@@ -144,7 +144,7 @@ const Login = () => {
         selfie: forgotVerify.photoDataUrl,
         user_agent: navigator.userAgent,
       });
-      toast.success(result.message || 'Password updated. Check your email for the confirmation.');
+      toast.success(result.message || 'Check your email and click Confirm password update.');
       setForgotOpen(false);
       setEmployeeCode(forgotCode.trim());
       setPassword('');
@@ -276,7 +276,7 @@ const Login = () => {
             <DialogDescription>
               {forgotStep === 1
                 ? 'Enter your employee code, the email on your HRIS record, and a new password.'
-                : 'Take a selfie and turn on location. We will email these details to you after the password is updated.'}
+                : 'Take a selfie and turn on location. We will email you a Confirm button. Your password will not change until you confirm.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleForgotPassword} className="space-y-4">
@@ -393,7 +393,7 @@ const Login = () => {
                 </Button>
               ) : (
                 <Button type="submit" disabled={forgotSubmitting || !forgotVerify}>
-                  {forgotSubmitting ? 'Updating...' : 'Update password'}
+                  {forgotSubmitting ? 'Sending...' : 'Send confirmation email'}
                 </Button>
               )}
             </DialogFooter>

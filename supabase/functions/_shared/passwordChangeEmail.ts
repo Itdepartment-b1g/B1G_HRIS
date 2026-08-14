@@ -1,5 +1,6 @@
 /**
- * Email notice after a password change (forgot-password or Settings).
+ * Emails for password-change requests.
+ * Employee gets a Confirm button. Company gets selfie + GPS details.
  * Requires secrets: GMAIL_USER, GMAIL_PASSWORD
  */
 
@@ -39,7 +40,16 @@ export function parseSelfieDataUrl(selfie: string): {
   return { mime, bytes, filename, base64: b64 }
 }
 
-export async function sendPasswordChangeEmail(opts: {
+function requireGmail(): { user: string; pass: string } {
+  const user = Deno.env.get('GMAIL_USER')
+  const pass = Deno.env.get('GMAIL_PASSWORD')
+  if (!user || !pass) {
+    throw new Error('Email is not configured. Set GMAIL_USER and GMAIL_PASSWORD secrets.')
+  }
+  return { user, pass }
+}
+
+export async function sendPasswordChangeRequestEmails(opts: {
   toEmail: string
   firstName: string
   lastName: string
@@ -48,15 +58,10 @@ export async function sendPasswordChangeEmail(opts: {
   longitude: number
   selfie: string
   source: PasswordChangeSource
+  confirmUrl: string
   userAgent?: string
 }): Promise<void> {
-  const gmailUser = Deno.env.get('GMAIL_USER')
-  const gmailPass = Deno.env.get('GMAIL_PASSWORD')
-  if (!gmailUser || !gmailPass) {
-    console.warn('GMAIL_USER or GMAIL_PASSWORD not set - skipping password-change email')
-    return
-  }
-
+  const { user: gmailUser, pass: gmailPass } = requireGmail()
   const selfie = parseSelfieDataUrl(opts.selfie)
   const when = new Date().toLocaleString('en-PH', {
     timeZone: 'Asia/Manila',
@@ -68,20 +73,36 @@ export async function sendPasswordChangeEmail(opts: {
   const mapsUrl = `https://www.google.com/maps?q=${lat},${lng}`
   const sourceLabel = opts.source === 'forgot_password' ? 'Forgot password (login page)' : 'Settings'
   const name = `${opts.firstName} ${opts.lastName}`.trim() || 'there'
-  const appUrl = 'https://b1ghris.vercel.app/'
   const buttonColor = '#7C3AED'
+  const employeeEmail = opts.toEmail.trim().toLowerCase()
+  const companyEmail = gmailUser.trim().toLowerCase()
 
-  const html = `
-    <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;line-height:1.5;">
-      <h2 style="margin:0 0 12px;">Your B1G HRIS password was changed</h2>
-      <p style="margin:0 0 16px;">Hi ${escapeHtml(name)},</p>
-      <p style="margin:0 0 16px;">A password change was completed on your account. Here are the details of this request:</p>
+  const confirmBtn = `
+    <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 12px;">
+      <tr>
+        <td align="center" bgcolor="${buttonColor}" style="border-radius:8px;">
+          <a href="${escapeHtml(opts.confirmUrl)}" target="_blank" rel="noopener noreferrer"
+            style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;">
+            Confirm password update
+          </a>
+        </td>
+      </tr>
+    </table>
+  `
+  const mapBtn = `
+    <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
+      <tr>
+        <td align="center" bgcolor="#111827" style="border-radius:8px;">
+          <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer"
+            style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;">
+            View map
+          </a>
+        </td>
+      </tr>
+    </table>
+  `
 
-      <p style="margin:0 0 8px;font-weight:bold;">Selfie</p>
-      <p style="margin:0 0 20px;">
-        <img src="cid:selfie" alt="Password change selfie" width="280" style="display:block;max-width:100%;border-radius:8px;border:1px solid #e5e5e5;" />
-      </p>
-
+  const detailsTable = `
       <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:0 0 16px;">
         <tr>
           <td style="padding:8px 0;border-bottom:1px solid #eee;"><strong>Employee code</strong></td>
@@ -104,22 +125,23 @@ export async function sendPasswordChangeEmail(opts: {
           <td style="padding:8px 0;border-bottom:1px solid #eee;font-family:Consolas,monospace;">${lng}</td>
         </tr>
       </table>
+  `
 
-      <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
-        <tr>
-          <td align="center" bgcolor="${buttonColor}" style="border-radius:8px;">
-            <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer"
-              style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;">
-              View map
-            </a>
-          </td>
-        </tr>
-      </table>
+  const html = `
+    <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;line-height:1.5;">
+      <h2 style="margin:0 0 12px;">Confirm your B1G HRIS password update</h2>
+      <p style="margin:0 0 16px;">Hi ${escapeHtml(name)},</p>
+      <p style="margin:0 0 16px;">Someone requested a password change on your account. Your password will <strong>not</strong> change until you click the button below. This link expires in 30 minutes.</p>
 
-      <p style="margin:0 0 8px;">If this was you, no further action is needed. Sign in:
-        <a href="${appUrl}" target="_blank" rel="noopener noreferrer">${appUrl}</a>
+      ${confirmBtn}
+
+      <p style="margin:16px 0 8px;font-weight:bold;">Selfie</p>
+      <p style="margin:0 0 20px;">
+        <img src="cid:selfie" alt="Password change selfie" width="280" style="display:block;max-width:100%;border-radius:8px;border:1px solid #e5e5e5;" />
       </p>
-      <p style="margin:0 0 16px;"><strong>If you did not change your password, contact HR immediately.</strong></p>
+      ${detailsTable}
+      ${mapBtn}
+      <p style="margin:0 0 16px;"><strong>If this was not you, ignore this email. Your current password stays the same.</strong></p>
       <p style="margin:0;color:#555;">— B1G HR Team</p>
     </div>
   `
@@ -127,82 +149,39 @@ export async function sendPasswordChangeEmail(opts: {
   const text = [
     `Hi ${name},`,
     '',
-    'A password change was completed on your B1G HRIS account.',
+    'Confirm your B1G HRIS password update. Your password will not change until you open this link:',
+    opts.confirmUrl,
+    '',
     `Employee code: ${opts.employeeCode}`,
     `When: ${when} (Philippine time)`,
-    `Where it was requested: ${sourceLabel}`,
     `Latitude: ${lat}`,
     `Longitude: ${lng}`,
     `View map: ${mapsUrl}`,
-    opts.userAgent ? `Device: ${opts.userAgent.slice(0, 240)}` : '',
     '',
-    'If this was not you, contact HR immediately.',
-    `Sign in: ${appUrl}`,
+    'If this was not you, ignore this email. Your current password stays the same.',
     '',
     '— B1G HR Team',
-  ].filter((line) => line !== '').join('\n')
-
-  const employeeEmail = opts.toEmail.trim().toLowerCase()
-  const companyEmail = gmailUser.trim().toLowerCase()
+  ].join('\n')
 
   const detailsHtml = `
     <div style="font-family:Arial,Helvetica,sans-serif;color:#111;max-width:560px;margin:0 auto;line-height:1.5;">
-      <h2 style="margin:0 0 12px;">Password change details</h2>
-      <p style="margin:0 0 16px;"><strong>${escapeHtml(name)}</strong> (${escapeHtml(opts.employeeCode)}) changed their B1G HRIS password.</p>
-
+      <h2 style="margin:0 0 12px;">Password change requested (awaiting confirmation)</h2>
+      <p style="margin:0 0 16px;"><strong>${escapeHtml(name)}</strong> (${escapeHtml(opts.employeeCode)}) requested a password change. It is not applied until they confirm in email.</p>
       <p style="margin:0 0 8px;font-weight:bold;">Selfie</p>
       <p style="margin:0 0 20px;">
         <img src="cid:selfie" alt="Password change selfie" width="280" style="display:block;max-width:100%;border-radius:8px;border:1px solid #e5e5e5;" />
       </p>
-
       <table cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;margin:0 0 16px;">
         <tr>
           <td style="padding:8px 0;border-bottom:1px solid #eee;"><strong>Employee email</strong></td>
           <td style="padding:8px 0;border-bottom:1px solid #eee;">${escapeHtml(employeeEmail)}</td>
         </tr>
-        <tr>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;"><strong>When</strong></td>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;">${escapeHtml(when)} (Philippine time)</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;"><strong>Requested from</strong></td>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;">${escapeHtml(sourceLabel)}</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;"><strong>Latitude</strong></td>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;font-family:Consolas,monospace;">${lat}</td>
-        </tr>
-        <tr>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;"><strong>Longitude</strong></td>
-          <td style="padding:8px 0;border-bottom:1px solid #eee;font-family:Consolas,monospace;">${lng}</td>
-        </tr>
       </table>
-
-      <table cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px;">
-        <tr>
-          <td align="center" bgcolor="${buttonColor}" style="border-radius:8px;">
-            <a href="${mapsUrl}" target="_blank" rel="noopener noreferrer"
-              style="display:inline-block;padding:12px 22px;color:#ffffff;text-decoration:none;font-weight:bold;font-size:14px;">
-              View map
-            </a>
-          </td>
-        </tr>
-      </table>
-
+      ${detailsTable}
+      ${mapBtn}
       <p style="margin:0;color:#555;">— B1G HRIS</p>
     </div>
   `
-
-  const detailsText = [
-    `${name} (${opts.employeeCode}) changed their B1G HRIS password.`,
-    `Employee email: ${employeeEmail}`,
-    `When: ${when} (Philippine time)`,
-    `Where it was requested: ${sourceLabel}`,
-    `Latitude: ${lat}`,
-    `Longitude: ${lng}`,
-    `View map: ${mapsUrl}`,
-    opts.userAgent ? `Device: ${opts.userAgent.slice(0, 240)}` : '',
-  ].filter((line) => line !== '').join('\n')
 
   const selfieAttachment = {
     filename: selfie.filename,
@@ -220,15 +199,15 @@ export async function sendPasswordChangeEmail(opts: {
     auth: { user: gmailUser, pass: gmailPass },
   })
 
-  const send = (optsMail: Record<string, unknown>) =>
+  const send = (mail: Record<string, unknown>) =>
     new Promise<void>((resolve, reject) => {
-      transport.sendMail(optsMail, (err: Error | null) => (err ? reject(err) : resolve()))
+      transport.sendMail(mail, (err: Error | null) => (err ? reject(err) : resolve()))
     })
 
   await send({
     from: gmailUser,
     to: employeeEmail,
-    subject: 'Your B1G HRIS password was changed',
+    subject: 'Confirm your B1G HRIS password update',
     html,
     text,
     attachments: [selfieAttachment],
@@ -238,9 +217,9 @@ export async function sendPasswordChangeEmail(opts: {
     await send({
       from: gmailUser,
       to: companyEmail,
-      subject: `Password change details: ${opts.employeeCode} ${name}`,
+      subject: `Password change requested: ${opts.employeeCode} ${name}`,
       html: detailsHtml,
-      text: detailsText,
+      text: `${name} (${opts.employeeCode}) requested a password change (awaiting confirmation).\nEmail: ${employeeEmail}\nLatitude: ${lat}\nLongitude: ${lng}\nView map: ${mapsUrl}`,
       attachments: [selfieAttachment],
     })
   }
