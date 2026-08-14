@@ -42,6 +42,7 @@ export function TimeInOutDialog({
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [locationLoading, setLocationLoading] = useState(false);
   const [faceCheckLoading, setFaceCheckLoading] = useState(false);
+  const [mirrored, setMirrored] = useState(true);
 
   const getLocation = useCallback((options?: { retries?: number }): Promise<{ lat: number; lng: number }> => {
     const maxRetries = options?.retries ?? 0;
@@ -106,6 +107,10 @@ export function TimeInOutDialog({
 
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+    if (mirrored) {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0);
     setFaceCheckLoading(true);
     try {
@@ -127,7 +132,7 @@ export function TimeInOutDialog({
     } finally {
       setFaceCheckLoading(false);
     }
-  }, [stopCamera]);
+  }, [mirrored, stopCamera]);
 
   const retakePhoto = useCallback(() => {
     setCapturedPhoto(null);
@@ -172,6 +177,7 @@ export function TimeInOutDialog({
       setWithinRadius(null);
       setLocationLoading(false);
       setCameraError(null);
+      setMirrored(true);
       startCamera();
     } else {
       stopCamera();
@@ -214,39 +220,59 @@ export function TimeInOutDialog({
 
         <div className="space-y-3 sm:space-y-4">
           {!capturedPhoto ? (
-            <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className="w-full h-full object-cover scale-x-[-1] md:scale-x-100"
-              />
-              <canvas ref={canvasRef} className="hidden" />
-              {cameraError && (
-                <div className="absolute inset-0 flex items-center justify-center bg-muted/90 p-4">
-                  <p className="text-sm text-destructive text-center">{cameraError}</p>
-                </div>
-              )}
-              {!cameraError && (
-                <Button
-                  type="button"
-                  size="lg"
-                  className="absolute bottom-4 left-1/2 -translate-x-1/2"
-                  onClick={capturePhoto}
-                  disabled={faceCheckLoading}
-                >
-                  {faceCheckLoading ? (
-                    <>
-                      <Loader2 className="h-5 w-5 mr-2 animate-spin" /> Checking...
-                    </>
-                  ) : (
-                    <>
-                      <Camera className="h-5 w-5 mr-2" /> Capture Photo
-                    </>
-                  )}
-                </Button>
-              )}
+            <div className="space-y-3">
+              <div className="relative aspect-video bg-muted rounded-lg overflow-hidden">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover ${mirrored ? 'scale-x-[-1]' : ''}`}
+                />
+                <canvas ref={canvasRef} className="hidden" />
+                {cameraError && (
+                  <div className="absolute inset-0 flex items-center justify-center bg-muted/90 p-4">
+                    <p className="text-sm text-destructive text-center">{cameraError}</p>
+                  </div>
+                )}
+                {!cameraError && (
+                  <div className="absolute top-2 right-2 z-10 flex rounded-md border overflow-hidden text-xs bg-background/90 backdrop-blur-sm">
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 font-medium ${mirrored ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                      onClick={() => setMirrored(true)}
+                    >
+                      Mirror
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-3 py-1.5 font-medium ${!mirrored ? 'bg-primary text-primary-foreground' : 'text-muted-foreground'}`}
+                      onClick={() => setMirrored(false)}
+                    >
+                      Inverted
+                    </button>
+                  </div>
+                )}
+                {!cameraError && (
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="absolute bottom-4 left-1/2 -translate-x-1/2"
+                    onClick={capturePhoto}
+                    disabled={faceCheckLoading}
+                  >
+                    {faceCheckLoading ? (
+                      <>
+                        <Loader2 className="h-5 w-5 mr-2 animate-spin" /> Checking...
+                      </>
+                    ) : (
+                      <>
+                        <Camera className="h-5 w-5 mr-2" /> Capture Photo
+                      </>
+                    )}
+                  </Button>
+                )}
+              </div>
             </div>
           ) : (
             <>

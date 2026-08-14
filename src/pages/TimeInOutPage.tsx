@@ -36,6 +36,7 @@ const TimeInOutPage = () => {
   const [clockedIn, setClockedIn] = useState(false);
   const [todayRecord, setTodayRecord] = useState<{ time_in: string | null; time_out: string | null } | null>(null);
   const [scheduleError, setScheduleError] = useState<string | null>(null);
+  const [mirrored, setMirrored] = useState(true);
 
   const getLocation = useCallback((options?: { retries?: number }): Promise<{ lat: number; lng: number }> => {
     const maxRetries = options?.retries ?? 0;
@@ -85,6 +86,10 @@ const TimeInOutPage = () => {
     if (!ctx) return;
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+    if (mirrored) {
+      ctx.translate(canvas.width, 0);
+      ctx.scale(-1, 1);
+    }
     ctx.drawImage(video, 0, 0);
     setFaceCheckLoading(true);
     try {
@@ -100,7 +105,7 @@ const TimeInOutPage = () => {
     } finally {
       setFaceCheckLoading(false);
     }
-  }, [stopCamera]);
+  }, [mirrored, stopCamera]);
 
   const retakePhoto = useCallback(() => {
     setCapturedPhoto(null);
@@ -500,12 +505,30 @@ const TimeInOutPage = () => {
               autoPlay
               playsInline
               muted
-              className="absolute inset-0 w-full h-full object-cover scale-x-[-1] md:scale-x-100"
+              className={`absolute inset-0 w-full h-full object-cover ${mirrored ? 'scale-x-[-1]' : ''}`}
             />
             <canvas ref={canvasRef} className="hidden" />
             {cameraError && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-6">
                 <p className="text-sm text-destructive text-center">{cameraError}</p>
+              </div>
+            )}
+            {!cameraError && (
+              <div className="absolute top-4 right-4 z-20 flex rounded-md border border-white/40 overflow-hidden text-sm bg-black/40 backdrop-blur-sm">
+                <button
+                  type="button"
+                  className={`px-4 py-1.5 font-medium ${mirrored ? 'bg-primary text-primary-foreground' : 'text-white'}`}
+                  onClick={() => setMirrored(true)}
+                >
+                  Mirror
+                </button>
+                <button
+                  type="button"
+                  className={`px-4 py-1.5 font-medium ${!mirrored ? 'bg-primary text-primary-foreground' : 'text-white'}`}
+                  onClick={() => setMirrored(false)}
+                >
+                  Inverted
+                </button>
               </div>
             )}
           </div>
