@@ -42,7 +42,7 @@ export interface AttendanceRecord {
   notes?: string | null;
 }
 
-export type LeaveType = 'vl' | 'sl' | 'pto' | 'lwop' | 'vacation' | 'sick' | 'personal' | 'maternity' | 'paternity';
+export type LeaveType = 'vl' | 'sl' | 'pto' | 'lwop' | 'cto' | 'vacation' | 'sick' | 'personal' | 'maternity' | 'paternity';
 export type LeaveDurationType = 'fullday' | 'first_half' | 'second_half';
 
 export interface LeaveRequest {

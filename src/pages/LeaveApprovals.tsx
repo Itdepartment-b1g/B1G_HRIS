@@ -52,6 +52,7 @@ const ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> 
   sl: HeartPulse,
   pto: Briefcase,
   lwop: CalendarX,
+  cto: Clock,
   maternity: Baby,
   paternity: Baby,
 };
