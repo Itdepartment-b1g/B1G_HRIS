@@ -153,7 +153,7 @@ const Settings = () => {
         selfie: verifyCapture.photoDataUrl,
         user_agent: navigator.userAgent,
       });
-      toast.success(result.message || 'Password changed. Check your email for the confirmation.');
+      toast.success(result.message || 'Check your email and click Confirm password update.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
@@ -311,7 +311,7 @@ const Settings = () => {
                 )}
               </div>
               <p className="text-xs text-muted-foreground">
-                You will take a selfie and share your location. A confirmation is emailed to you.
+                You will take a selfie and share your location. We email a Confirm button — the password does not change until you click it.
               </p>
               <Button type="submit" disabled={changingPw} className="bg-primary hover:bg-primary/90 text-white">
                 {changingPw && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
@@ -449,7 +449,7 @@ const Settings = () => {
               Verify password change
             </DialogTitle>
             <DialogDescription>
-              Take a selfie and turn on location. These details will be emailed to {user.email}.
+              Take a selfie and turn on location. We will email you a Confirm button. Your password will not change until you confirm.
             </DialogDescription>
           </DialogHeader>
           <SelfieLocationCapture
@@ -474,7 +474,7 @@ const Settings = () => {
               disabled={changingPw || !verifyCapture}
             >
               {changingPw && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
-              Confirm change
+              Confirm and email me
             </Button>
           </DialogFooter>
           )}

@@ -29,6 +29,9 @@ verify_jwt = false
 [functions.change-password]
 verify_jwt = false
 
+[functions.confirm-password-change]
+verify_jwt = false
+
 [functions.seed-database]
 verify_jwt = false
 

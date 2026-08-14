@@ -1,13 +1,14 @@
 // Edge Function: Forgot Password (unauthenticated)
 // Deploy: supabase functions deploy forgot-password
-// Verifies employee code + email, requires selfie + location, then sets a new password
-// and emails the verification details. Secrets: GMAIL_USER, GMAIL_PASSWORD
+// Creates a pending request and emails a Confirm link. Password is not
+// changed until confirm-password-change is called.
+// Secrets: GMAIL_USER, GMAIL_PASSWORD
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { corsHeaders } from './auth.ts'
 import { forgotPasswordSchema, validateOr400, ValidationError } from './validation.ts'
-import { sendPasswordChangeEmail } from '../_shared/passwordChangeEmail.ts'
+import { createPendingPasswordChange } from '../_shared/createPendingPasswordChange.ts'
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -39,7 +40,6 @@ serve(async (req) => {
 
     const employeeCode = parsed.employee_code
     const email = parsed.email.trim().toLowerCase()
-    const newPassword = parsed.new_password
 
     const { data: employee, error: lookupError } = await supabaseClient
       .from('employees')
@@ -63,39 +63,31 @@ serve(async (req) => {
       )
     }
 
-    const { error: updateError } = await supabaseClient.auth.admin.updateUserById(
-      employee.id,
-      { password: newPassword }
-    )
-
-    if (updateError) {
-      console.error('Forgot password update error:', updateError)
-      return new Response(
-        JSON.stringify({ error: updateError.message || 'Failed to update password' }),
-        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 400 }
-      )
-    }
-
     try {
-      await sendPasswordChangeEmail({
-        toEmail: storedEmail,
-        firstName: employee.first_name ?? '',
-        lastName: employee.last_name ?? '',
-        employeeCode: employee.employee_code ?? employeeCode,
+      await createPendingPasswordChange(supabaseClient, {
+        employee,
+        newPassword: parsed.new_password,
         latitude: parsed.latitude,
         longitude: parsed.longitude,
         selfie: parsed.selfie,
         source: 'forgot_password',
         userAgent: parsed.user_agent,
+        appOrigin: parsed.app_origin,
       })
     } catch (emailErr) {
-      console.error('Forgot password email error:', emailErr)
+      console.error('Forgot password pending/email error:', emailErr)
+      return new Response(
+        JSON.stringify({
+          error: emailErr instanceof Error ? emailErr.message : 'Could not send confirmation email.',
+        }),
+        { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 500 }
+      )
     }
 
     return new Response(
       JSON.stringify({
         success: true,
-        message: 'Password updated. A confirmation with your selfie and location was sent to your email.',
+        message: 'Check your email and click Confirm password update. Your password will not change until you confirm.',
       }),
       { headers: { ...corsHeaders(req), 'Content-Type': 'application/json' }, status: 200 }
     )

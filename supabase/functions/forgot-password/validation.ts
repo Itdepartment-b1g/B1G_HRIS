@@ -21,6 +21,7 @@ export const forgotPasswordSchema = z.object({
   longitude: z.number().min(-180).max(180),
   selfie: selfieSchema,
   user_agent: z.string().max(512).optional(),
+  app_origin: z.string().max(255).optional(),
 })
 
 type ZodSchema<T> = {
