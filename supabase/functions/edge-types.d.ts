@@ -21,6 +21,14 @@ declare module 'https://esm.sh/@supabase/supabase-js@2' {
   export function createClient(...args: any[]): any;
 }
 
+declare module 'https://esm.sh/zod@3.23.8' {
+  export const z: typeof import('zod').z;
+  export namespace z {
+    export type ZodSchema<T = any> = import('zod').ZodType<T>;
+    export type infer<T extends import('zod').ZodTypeAny> = import('zod').infer<T>;
+  }
+}
+
 declare module 'https://deno.land/std@0.168.0/http/server.ts' {
   export function serve(handler: any): void;
 }

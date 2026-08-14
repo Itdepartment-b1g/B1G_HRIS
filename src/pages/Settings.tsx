@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { changeOwnPassword } from '@/lib/edgeFunctions';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,14 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   Shield,
   Key,
   Monitor,
@@ -27,8 +36,10 @@ import {
   Eye,
   EyeOff,
   CheckCircle2,
+  Camera,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { SelfieLocationCapture, type SelfieLocationValue } from '@/components/SelfieLocationCapture';
 
 interface UserSession {
   id: string;
@@ -81,6 +92,9 @@ const Settings = () => {
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [changingPw, setChangingPw] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
+  const [verifyCapture, setVerifyCapture] = useState<SelfieLocationValue | null>(null);
+  const [verifyHasSelfie, setVerifyHasSelfie] = useState(false);
 
   // Terminate dialog
   const [terminateOpen, setTerminateOpen] = useState(false);
@@ -121,15 +135,32 @@ const Settings = () => {
       toast.error('Passwords do not match');
       return;
     }
+    setVerifyCapture(null);
+    setVerifyHasSelfie(false);
+    setVerifyOpen(true);
+  };
+
+  const handleConfirmPasswordChange = async () => {
+    if (!verifyCapture) {
+      toast.error('Take a selfie and allow location to continue');
+      return;
+    }
     setChangingPw(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) {
-      toast.error(error.message || 'Failed to change password');
-    } else {
-      toast.success('Password changed successfully');
+    try {
+      const result = await changeOwnPassword(newPassword, {
+        latitude: verifyCapture.lat,
+        longitude: verifyCapture.lng,
+        selfie: verifyCapture.photoDataUrl,
+        user_agent: navigator.userAgent,
+      });
+      toast.success(result.message || 'Password changed. Check your email for the confirmation.');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
+      setVerifyOpen(false);
+      setVerifyCapture(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to change password');
     }
     setChangingPw(false);
   };
@@ -279,6 +310,9 @@ const Settings = () => {
                   <p className="text-xs text-red-500">Passwords do not match</p>
                 )}
               </div>
+              <p className="text-xs text-muted-foreground">
+                You will take a selfie and share your location. A confirmation is emailed to you.
+              </p>
               <Button type="submit" disabled={changingPw} className="bg-primary hover:bg-primary/90 text-white">
                 {changingPw && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Update Password
@@ -396,6 +430,56 @@ const Settings = () => {
           </CardContent>
         </Card>
       </div>
+
+      <Dialog
+        open={verifyOpen}
+        onOpenChange={(open) => {
+          if (changingPw) return;
+          setVerifyOpen(open);
+          if (!open) {
+            setVerifyCapture(null);
+            setVerifyHasSelfie(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Camera className="h-4 w-4 text-primary" />
+              Verify password change
+            </DialogTitle>
+            <DialogDescription>
+              Take a selfie and turn on location. These details will be emailed to {user.email}.
+            </DialogDescription>
+          </DialogHeader>
+          <SelfieLocationCapture
+            active={verifyOpen}
+            value={verifyCapture}
+            onChange={setVerifyCapture}
+            onHasPhotoChange={setVerifyHasSelfie}
+          />
+          {verifyHasSelfie && (
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setVerifyOpen(false)}
+              disabled={changingPw}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmPasswordChange}
+              disabled={changingPw || !verifyCapture}
+            >
+              {changingPw && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Confirm change
+            </Button>
+          </DialogFooter>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {/* Terminate Confirmation */}
       <AlertDialog open={terminateOpen} onOpenChange={setTerminateOpen}>

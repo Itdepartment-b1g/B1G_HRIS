@@ -1,10 +1,20 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, User, Building2, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, Building2, Eye, EyeOff, Mail, ChevronLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
+import { forgotPassword } from '@/lib/edgeFunctions';
+import { SelfieLocationCapture, type SelfieLocationValue } from '@/components/SelfieLocationCapture';
 import { toast } from 'sonner';
 
 const Login = () => {
@@ -15,6 +25,18 @@ const Login = () => {
   const [checkingSession, setCheckingSession] = useState(true);
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  const [forgotOpen, setForgotOpen] = useState(false);
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotNewPassword, setForgotNewPassword] = useState('');
+  const [forgotConfirmPassword, setForgotConfirmPassword] = useState('');
+  const [showForgotNew, setShowForgotNew] = useState(false);
+  const [showForgotConfirm, setShowForgotConfirm] = useState(false);
+  const [forgotSubmitting, setForgotSubmitting] = useState(false);
+  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotVerify, setForgotVerify] = useState<SelfieLocationValue | null>(null);
+  const [forgotHasSelfie, setForgotHasSelfie] = useState(false);
 
   // Show session expired toast when redirected after auth failure
   useEffect(() => {
@@ -44,7 +66,7 @@ const Login = () => {
         setIsLoading(false);
         return;
       }
-      const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) {
         toast.error(error.message || 'Invalid employee code or password');
         setIsLoading(false);
@@ -60,6 +82,76 @@ const Login = () => {
       toast.error(err instanceof Error ? err.message : 'Invalid employee code or password');
     }
     setIsLoading(false);
+  };
+
+  const openForgotDialog = () => {
+    setForgotCode(employeeCode);
+    setForgotEmail('');
+    setForgotNewPassword('');
+    setForgotConfirmPassword('');
+    setShowForgotNew(false);
+    setShowForgotConfirm(false);
+    setForgotStep(1);
+    setForgotVerify(null);
+    setForgotHasSelfie(false);
+    setForgotOpen(true);
+  };
+
+  const validateForgotForm = () => {
+    if (!forgotCode.trim()) {
+      toast.error('Employee code is required');
+      return false;
+    }
+    if (!forgotEmail.trim()) {
+      toast.error('Email is required');
+      return false;
+    }
+    if (forgotNewPassword.length < 6) {
+      toast.error('Password must be at least 6 characters');
+      return false;
+    }
+    if (forgotNewPassword !== forgotConfirmPassword) {
+      toast.error('Passwords do not match');
+      return false;
+    }
+    return true;
+  };
+
+  const handleForgotContinue = () => {
+    if (!validateForgotForm()) return;
+    setForgotVerify(null);
+    setForgotHasSelfie(false);
+    setForgotStep(2);
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (forgotStep !== 2) {
+      handleForgotContinue();
+      return;
+    }
+    if (!validateForgotForm()) return;
+    if (!forgotVerify) {
+      toast.error('Take a selfie and allow location to continue');
+      return;
+    }
+
+    setForgotSubmitting(true);
+    try {
+      const result = await forgotPassword(forgotCode, forgotEmail, forgotNewPassword, {
+        latitude: forgotVerify.lat,
+        longitude: forgotVerify.lng,
+        selfie: forgotVerify.photoDataUrl,
+        user_agent: navigator.userAgent,
+      });
+      toast.success(result.message || 'Password updated. Check your email for the confirmation.');
+      setForgotOpen(false);
+      setEmployeeCode(forgotCode.trim());
+      setPassword('');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to update password');
+    }
+    setForgotSubmitting(false);
   };
 
   if (checkingSession) {
@@ -154,8 +246,161 @@ const Login = () => {
           <p className="text-center text-xs text-gray-600">
             Sign in with your company employee code and password.
           </p>
+          <p className="text-center text-sm text-gray-600">
+            Forgot password?{' '}
+            <button
+              type="button"
+              onClick={openForgotDialog}
+              className="text-primary font-medium hover:underline"
+            >
+              Click here
+            </button>
+          </p>
         </div>
       </div>
+
+      <Dialog
+        open={forgotOpen}
+        onOpenChange={(open) => {
+          setForgotOpen(open);
+          if (!open) {
+            setForgotStep(1);
+            setForgotVerify(null);
+            setForgotHasSelfie(false);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{forgotStep === 1 ? 'Set a new password' : 'Verify it is you'}</DialogTitle>
+            <DialogDescription>
+              {forgotStep === 1
+                ? 'Enter your employee code, the email on your HRIS record, and a new password.'
+                : 'Take a selfie and turn on location. We will email these details to you after the password is updated.'}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            {forgotStep === 1 ? (
+              <>
+            <div className="space-y-2">
+              <Label htmlFor="forgot-code">Employee Code</Label>
+              <div className="relative">
+                <User className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="forgot-code"
+                  value={forgotCode}
+                  onChange={(e) => setForgotCode(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="forgot-email">Email</Label>
+              <div className="relative">
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="forgot-email"
+                  type="email"
+                  placeholder="you@company.com"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  className="pl-10"
+                  required
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="forgot-new">New Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="forgot-new"
+                  type={showForgotNew ? 'text' : 'password'}
+                  value={forgotNewPassword}
+                  onChange={(e) => setForgotNewPassword(e.target.value)}
+                  className="pl-10 pr-10"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowForgotNew((p) => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={showForgotNew ? 'Hide password' : 'Show password'}
+                >
+                  {showForgotNew ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                At least 6 characters.
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="forgot-confirm">Confirm Password</Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="forgot-confirm"
+                  type={showForgotConfirm ? 'text' : 'password'}
+                  value={forgotConfirmPassword}
+                  onChange={(e) => setForgotConfirmPassword(e.target.value)}
+                  className="pl-10 pr-10"
+                  required
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowForgotConfirm((p) => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  aria-label={showForgotConfirm ? 'Hide password' : 'Show password'}
+                >
+                  {showForgotConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                </button>
+              </div>
+            </div>
+              </>
+            ) : (
+              <SelfieLocationCapture
+                active={forgotOpen && forgotStep === 2}
+                value={forgotVerify}
+                onChange={setForgotVerify}
+                onHasPhotoChange={setForgotHasSelfie}
+              />
+            )}
+            {(forgotStep === 1 || forgotHasSelfie) && (
+            <DialogFooter className="gap-2 sm:gap-0">
+              {forgotStep === 2 ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setForgotStep(1);
+                    setForgotVerify(null);
+                    setForgotHasSelfie(false);
+                  }}
+                  disabled={forgotSubmitting}
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Back
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" onClick={() => setForgotOpen(false)} disabled={forgotSubmitting}>
+                  Cancel
+                </Button>
+              )}
+              {forgotStep === 1 ? (
+                <Button type="submit">
+                  Continue
+                </Button>
+              ) : (
+                <Button type="submit" disabled={forgotSubmitting || !forgotVerify}>
+                  {forgotSubmitting ? 'Updating...' : 'Update password'}
+                </Button>
+              )}
+            </DialogFooter>
+            )}
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };

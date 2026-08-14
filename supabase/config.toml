@@ -23,6 +23,12 @@ verify_jwt = false
 [functions.reset-password]
 verify_jwt = false
 
+[functions.forgot-password]
+verify_jwt = false
+
+[functions.change-password]
+verify_jwt = false
+
 [functions.seed-database]
 verify_jwt = false
 

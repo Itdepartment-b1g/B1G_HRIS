@@ -8,7 +8,7 @@
 import { supabase } from '@/lib/supabase';
 
 // Must match createClient() — trim so CRLF in .env does not break apikey / URL.
-const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL ?? '').trim();
+const SUPABASE_URL = (import.meta.env.VITE_SUPABASE_URL ?? '').trim().replace(/\/+$/, '');
 const SUPABASE_ANON_KEY = (import.meta.env.VITE_SUPABASE_ANON_KEY ?? '').trim();
 
 function checkCredentials() {
@@ -178,6 +178,11 @@ export interface ResetPasswordResponse {
   success: boolean;
   message: string;
   user_id: string;
+}
+
+export interface ForgotPasswordResponse {
+  success: boolean;
+  message: string;
 }
 
 export interface UpdateUserProfileData {
@@ -362,6 +367,83 @@ export async function resetPassword(
     ...identifier,
     new_password: newPassword,
   }, { useUserAuth: true });
+}
+
+export interface PasswordChangeVerifyPayload {
+  latitude: number;
+  longitude: number;
+  selfie: string;
+  user_agent?: string;
+}
+
+/**
+ * Forgot password from the login page (no session).
+ * Requires employee code + email to match the same active employee,
+ * plus a selfie and GPS location. A confirmation email is sent.
+ */
+export async function forgotPassword(
+  employeeCode: string,
+  email: string,
+  newPassword: string,
+  verify: PasswordChangeVerifyPayload
+): Promise<ForgotPasswordResponse> {
+  if (!employeeCode?.trim()) {
+    throw new Error('Employee code is required');
+  }
+  if (!email?.trim()) {
+    throw new Error('Email is required');
+  }
+  if (!newPassword) {
+    throw new Error('New password is required');
+  }
+  if (verify.latitude == null || verify.longitude == null) {
+    throw new Error('Location is required');
+  }
+  if (!verify.selfie) {
+    throw new Error('Selfie is required');
+  }
+
+  return callEdgeFunction<ForgotPasswordResponse>('forgot-password', {
+    employee_code: employeeCode.trim(),
+    email: email.trim(),
+    new_password: newPassword,
+    latitude: verify.latitude,
+    longitude: verify.longitude,
+    selfie: verify.selfie,
+    user_agent: verify.user_agent,
+  });
+}
+
+export interface ChangePasswordResponse {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * Change password while signed in. Requires selfie + GPS location.
+ * A confirmation email with those details is sent to the employee.
+ */
+export async function changeOwnPassword(
+  newPassword: string,
+  verify: PasswordChangeVerifyPayload
+): Promise<ChangePasswordResponse> {
+  if (!newPassword) {
+    throw new Error('New password is required');
+  }
+  if (verify.latitude == null || verify.longitude == null) {
+    throw new Error('Location is required');
+  }
+  if (!verify.selfie) {
+    throw new Error('Selfie is required');
+  }
+
+  return callEdgeFunction<ChangePasswordResponse>('change-password', {
+    new_password: newPassword,
+    latitude: verify.latitude,
+    longitude: verify.longitude,
+    selfie: verify.selfie,
+    user_agent: verify.user_agent,
+  }, { useUserAuth: true, onAuthFailure: 'throw' });
 }
 
 /**
