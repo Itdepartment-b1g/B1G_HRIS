@@ -52,7 +52,7 @@ export const navDropdowns: NavDropdown[] = [
       { label: 'Leave On Behalf', path: '/dashboard/leave-on-behalf', description: 'File leave on behalf of employees', iconBg: 'bg-blue-50', iconColor: 'text-blue-700', icon: Calendar, roles: ['super_admin', 'admin'] },
       { label: 'Overtime', path: '/dashboard/overtime', description: 'Overtime and approvals', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', icon: Timer },
       { label: 'Business Trip', path: '/dashboard/business-trip', description: 'Business trip related data', iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', icon: Briefcase },
-      { label: 'Number Of Leaves', path: '/dashboard/employee-leave-balances', description: 'All employees leave balances', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: Layers, roles: ['super_admin', 'admin'] },
+      { label: 'Employee Leave Credits', path: '/dashboard/employee-leave-balances', description: 'All employees leave credits', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: Layers, roles: ['super_admin', 'admin'] },
     ],
   },
   {

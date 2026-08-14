@@ -91,7 +91,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
   const [viewingRequest, setViewingRequest] = useState<LeaveRequestWithEmployee | null>(null);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
 
-  const isSuperAdmin = currentUser?.roles?.includes('super_admin') ?? false;
+  const canCancelLeave = currentUser?.roles?.some((r) => r === 'super_admin' || r === 'admin') ?? false;
 
   const sidebarLeaveItems = useMemo(() => {
     const types = leaveTypes.length > 0 ? leaveTypes : defaultTypes;
@@ -395,7 +395,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                           </DropdownMenuItem>
                         </>
                       )}
-                      {showCancel && isSuperAdmin && (r.status === 'pending' || r.status === 'approved') && (
+                      {showCancel && canCancelLeave && (r.status === 'pending' || r.status === 'approved') && (
                         <>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
@@ -655,7 +655,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
             </div>
           )}
           <DialogFooter>
-            {isSuperAdmin && viewingRequest && (viewingRequest.status === 'pending' || viewingRequest.status === 'approved') && (
+            {canCancelLeave && viewingRequest && (viewingRequest.status === 'pending' || viewingRequest.status === 'approved') && (
               <Button
                 variant="destructive"
                 onClick={() => {
