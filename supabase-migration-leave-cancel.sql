@@ -53,8 +53,8 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'Leave request not found or cannot be cancelled');
   END IF;
 
-  IF public.has_role(v_canceller_id, 'super_admin') THEN
-    NULL; -- super_admin may cancel pending or approved
+  IF public.is_admin(v_canceller_id) THEN
+    NULL; -- admin and super_admin may cancel pending or approved
   ELSIF v_rec.employee_id = v_canceller_id AND v_rec.status = 'pending' THEN
     NULL; -- employee may cancel own pending only
   ELSE
