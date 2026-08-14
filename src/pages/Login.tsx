@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Lock, User, Building2, Eye, EyeOff, Mail, ChevronLeft } from 'lucide-react';
+import { Lock, User, Building2, Eye, EyeOff, Mail, ChevronLeft, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +14,7 @@ import {
 } from '@/components/ui/dialog';
 import { supabase } from '@/lib/supabase';
 import { forgotPassword } from '@/lib/edgeFunctions';
+import { openGmailInbox } from '@/lib/openGmail';
 import { SelfieLocationCapture, type SelfieLocationValue } from '@/components/SelfieLocationCapture';
 import { toast } from 'sonner';
 
@@ -34,7 +35,7 @@ const Login = () => {
   const [showForgotNew, setShowForgotNew] = useState(false);
   const [showForgotConfirm, setShowForgotConfirm] = useState(false);
   const [forgotSubmitting, setForgotSubmitting] = useState(false);
-  const [forgotStep, setForgotStep] = useState<1 | 2>(1);
+  const [forgotStep, setForgotStep] = useState<1 | 2 | 3>(1);
   const [forgotVerify, setForgotVerify] = useState<SelfieLocationValue | null>(null);
   const [forgotHasSelfie, setForgotHasSelfie] = useState(false);
 
@@ -145,9 +146,9 @@ const Login = () => {
         user_agent: navigator.userAgent,
       });
       toast.success(result.message || 'Check your email and click Confirm password update.');
-      setForgotOpen(false);
       setEmployeeCode(forgotCode.trim());
       setPassword('');
+      setForgotStep(3);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to update password');
     }
@@ -272,15 +273,23 @@ const Login = () => {
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>{forgotStep === 1 ? 'Set a new password' : 'Verify it is you'}</DialogTitle>
+            <DialogTitle>
+              {forgotStep === 1
+                ? 'Set a new password'
+                : forgotStep === 2
+                  ? 'Verify it is you'
+                  : 'Check your Gmail'}
+            </DialogTitle>
             <DialogDescription>
               {forgotStep === 1
                 ? 'Enter your employee code, the email on your HRIS record, and a new password.'
-                : 'Take a selfie and turn on location. We will email you a Confirm button. Your password will not change until you confirm.'}
+                : forgotStep === 2
+                  ? 'Take a selfie and turn on location. We will email you a Confirm button. Your password will not change until you confirm.'
+                  : 'Open Gmail and tap Confirm password update. Your password will not change until you confirm.'}
             </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleForgotPassword} className="space-y-4">
-            {forgotStep === 1 ? (
+            {forgotStep === 1 && (
               <>
             <div className="space-y-2">
               <Label htmlFor="forgot-code">Employee Code</Label>
@@ -358,7 +367,8 @@ const Login = () => {
               </div>
             </div>
               </>
-            ) : (
+            )}
+            {forgotStep === 2 && (
               <SelfieLocationCapture
                 active={forgotOpen && forgotStep === 2}
                 value={forgotVerify}
@@ -366,37 +376,57 @@ const Login = () => {
                 onHasPhotoChange={setForgotHasSelfie}
               />
             )}
-            {(forgotStep === 1 || forgotHasSelfie) && (
-            <DialogFooter className="gap-2 sm:gap-0">
-              {forgotStep === 2 ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={() => {
-                    setForgotStep(1);
-                    setForgotVerify(null);
-                    setForgotHasSelfie(false);
-                  }}
-                  disabled={forgotSubmitting}
-                >
-                  <ChevronLeft className="h-4 w-4 mr-1" />
-                  Back
+            {forgotStep === 3 && (
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                <p className="text-sm text-muted-foreground">
+                  We sent a confirmation email. Open Gmail, then tap Confirm password update.
+                </p>
+              </div>
+            )}
+            {forgotStep === 3 ? (
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button type="button" variant="outline" onClick={() => setForgotOpen(false)}>
+                  Close
                 </Button>
-              ) : (
-                <Button type="button" variant="outline" onClick={() => setForgotOpen(false)} disabled={forgotSubmitting}>
-                  Cancel
+                <Button type="button" onClick={openGmailInbox}>
+                  <Mail className="h-4 w-4 mr-2" />
+                  Open Gmail
                 </Button>
-              )}
-              {forgotStep === 1 ? (
-                <Button type="submit">
-                  Continue
-                </Button>
-              ) : (
-                <Button type="submit" disabled={forgotSubmitting || !forgotVerify}>
-                  {forgotSubmitting ? 'Sending...' : 'Send confirmation email'}
-                </Button>
-              )}
-            </DialogFooter>
+              </DialogFooter>
+            ) : (
+              (forgotStep === 1 || forgotHasSelfie) && (
+                <DialogFooter className="gap-2 sm:gap-0">
+                  {forgotStep === 2 ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setForgotStep(1);
+                        setForgotVerify(null);
+                        setForgotHasSelfie(false);
+                      }}
+                      disabled={forgotSubmitting}
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Back
+                    </Button>
+                  ) : (
+                    <Button type="button" variant="outline" onClick={() => setForgotOpen(false)} disabled={forgotSubmitting}>
+                      Cancel
+                    </Button>
+                  )}
+                  {forgotStep === 1 ? (
+                    <Button type="submit">
+                      Continue
+                    </Button>
+                  ) : (
+                    <Button type="submit" disabled={forgotSubmitting || !forgotVerify}>
+                      {forgotSubmitting ? 'Sending...' : 'Send confirmation email'}
+                    </Button>
+                  )}
+                </DialogFooter>
+              )
             )}
           </form>
         </DialogContent>

@@ -487,13 +487,31 @@ const TimeInOutPage = () => {
   return (
     <div className="min-h-screen flex flex-col bg-background pb-[env(safe-area-inset-bottom)]">
       {/* Header: Back button + Title */}
-      <header className="sticky top-0 z-10 flex items-center gap-3 px-4 py-3 border-b bg-background">
+      <header className="sticky top-0 z-10 flex items-center gap-2 px-3 sm:px-4 py-3 border-b bg-background">
         <Button variant="ghost" size="icon" onClick={() => navigate(-1)} className="shrink-0">
           <ArrowLeft className="h-5 w-5" />
         </Button>
-        <h1 className="text-lg font-semibold flex-1">
+        <h1 className="text-lg font-semibold min-w-0 truncate flex-1">
           Time {mode === 'in' ? 'In' : 'Out'}
         </h1>
+        {!capturedPhoto && !cameraError && (
+          <div className="ml-auto shrink-0 flex rounded-md border overflow-hidden text-xs">
+            <button
+              type="button"
+              className={`px-2.5 py-1.5 font-medium ${mirrored ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground'}`}
+              onClick={() => setMirrored(true)}
+            >
+              Mirror
+            </button>
+            <button
+              type="button"
+              className={`px-2.5 py-1.5 font-medium ${!mirrored ? 'bg-primary text-primary-foreground' : 'bg-background text-muted-foreground'}`}
+              onClick={() => setMirrored(false)}
+            >
+              Inverted
+            </button>
+          </div>
+        )}
       </header>
 
       {!capturedPhoto ? (
@@ -511,24 +529,6 @@ const TimeInOutPage = () => {
             {cameraError && (
               <div className="absolute inset-0 flex items-center justify-center bg-black/80 p-6">
                 <p className="text-sm text-destructive text-center">{cameraError}</p>
-              </div>
-            )}
-            {!cameraError && (
-              <div className="absolute top-4 right-4 z-20 flex rounded-md border border-white/40 overflow-hidden text-sm bg-black/40 backdrop-blur-sm">
-                <button
-                  type="button"
-                  className={`px-4 py-1.5 font-medium ${mirrored ? 'bg-primary text-primary-foreground' : 'text-white'}`}
-                  onClick={() => setMirrored(true)}
-                >
-                  Mirror
-                </button>
-                <button
-                  type="button"
-                  className={`px-4 py-1.5 font-medium ${!mirrored ? 'bg-primary text-primary-foreground' : 'text-white'}`}
-                  onClick={() => setMirrored(false)}
-                >
-                  Inverted
-                </button>
               </div>
             )}
           </div>

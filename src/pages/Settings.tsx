@@ -37,9 +37,11 @@ import {
   EyeOff,
   CheckCircle2,
   Camera,
+  Mail,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { SelfieLocationCapture, type SelfieLocationValue } from '@/components/SelfieLocationCapture';
+import { openGmailInbox } from '@/lib/openGmail';
 
 interface UserSession {
   id: string;
@@ -95,6 +97,7 @@ const Settings = () => {
   const [verifyOpen, setVerifyOpen] = useState(false);
   const [verifyCapture, setVerifyCapture] = useState<SelfieLocationValue | null>(null);
   const [verifyHasSelfie, setVerifyHasSelfie] = useState(false);
+  const [verifyEmailSent, setVerifyEmailSent] = useState(false);
 
   // Terminate dialog
   const [terminateOpen, setTerminateOpen] = useState(false);
@@ -137,6 +140,7 @@ const Settings = () => {
     }
     setVerifyCapture(null);
     setVerifyHasSelfie(false);
+    setVerifyEmailSent(false);
     setVerifyOpen(true);
   };
 
@@ -157,8 +161,8 @@ const Settings = () => {
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
-      setVerifyOpen(false);
       setVerifyCapture(null);
+      setVerifyEmailSent(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to change password');
     }
@@ -439,21 +443,48 @@ const Settings = () => {
           if (!open) {
             setVerifyCapture(null);
             setVerifyHasSelfie(false);
+            setVerifyEmailSent(false);
           }
         }}
       >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Camera className="h-4 w-4 text-primary" />
-              Verify password change
+              {verifyEmailSent ? (
+                <Mail className="h-4 w-4 text-primary" />
+              ) : (
+                <Camera className="h-4 w-4 text-primary" />
+              )}
+              {verifyEmailSent ? 'Check your Gmail' : 'Verify password change'}
             </DialogTitle>
             <DialogDescription>
-              Take a selfie and turn on location. We will email you a Confirm button. Your password will not change until you confirm.
+              {verifyEmailSent
+                ? 'Open Gmail and tap Confirm password update. Your password will not change until you confirm.'
+                : 'Take a selfie and turn on location. We will email you a Confirm button. Your password will not change until you confirm.'}
             </DialogDescription>
           </DialogHeader>
+          {verifyEmailSent ? (
+            <>
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
+                <CheckCircle2 className="h-5 w-5 text-emerald-600 shrink-0 mt-0.5" />
+                <p className="text-sm text-muted-foreground">
+                  We sent a confirmation email. Open Gmail, then tap Confirm password update.
+                </p>
+              </div>
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => setVerifyOpen(false)}>
+                  Close
+                </Button>
+                <Button type="button" onClick={openGmailInbox}>
+                  <Mail className="h-4 w-4 mr-2" />
+                  Open Gmail
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
           <SelfieLocationCapture
-            active={verifyOpen}
+            active={verifyOpen && !verifyEmailSent}
             value={verifyCapture}
             onChange={setVerifyCapture}
             onHasPhotoChange={setVerifyHasSelfie}
@@ -477,6 +508,8 @@ const Settings = () => {
               Confirm and email me
             </Button>
           </DialogFooter>
+          )}
+            </>
           )}
         </DialogContent>
       </Dialog>
