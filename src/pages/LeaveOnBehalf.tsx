@@ -37,6 +37,7 @@ const ICON_BY_CODE: Record<string, React.ComponentType<{ className?: string }>> 
   lwop: CalendarX,
   maternity: Baby,
   paternity: Baby,
+  cto: Clock,
 };
 const DEFAULT_ICON = Calendar;
 
