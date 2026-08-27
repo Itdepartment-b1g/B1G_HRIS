@@ -11,6 +11,7 @@ import {
   Menu,
   X,
   Building2,
+  Package,
 } from 'lucide-react';
 import type { Employee, UserRole } from '@/types';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
@@ -23,6 +24,8 @@ import MobileBottomNav from '@/components/MobileBottomNav';
 import ActivityPopup from '@/components/ActivityPopup';
 import { ActivityComplianceProvider } from '@/contexts/ActivityComplianceContext';
 import { useNotifications } from '@/hooks/useNotifications';
+import { launchAssetManagement } from '@/lib/launch-asset-management';
+import { toast } from 'sonner';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -43,6 +46,7 @@ const DashboardLayout = () => {
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [launchingAsset, setLaunchingAsset] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
@@ -209,6 +213,20 @@ const DashboardLayout = () => {
   const handleLogout = async () => {
     await import('@/lib/supabase').then(({ supabase }) => supabase.auth.signOut());
     navigate('/');
+  };
+
+  const handleOpenAssetManagement = async () => {
+    if (launchingAsset) return;
+    setLaunchingAsset(true);
+    setProfileOpen(false);
+    try {
+      const { redirect_url } = await launchAssetManagement();
+      window.location.assign(redirect_url);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unable to open Asset Management.';
+      toast.error(message);
+      setLaunchingAsset(false);
+    }
   };
 
   if (loading || !user) return null;
@@ -506,6 +524,15 @@ const DashboardLayout = () => {
                   </button>
                   <button className="w-full text-left px-4 py-2 text-sm text-foreground/70 hover:bg-muted flex items-center gap-2" onClick={() => { navigate('/dashboard/settings'); setProfileOpen(false); }}>
                     <Settings className="h-4 w-4" /> Settings
+                  </button>
+                  <button
+                    type="button"
+                    className="w-full text-left px-4 py-2 text-sm text-foreground/70 hover:bg-muted flex items-center gap-2 disabled:opacity-50"
+                    disabled={launchingAsset}
+                    onClick={handleOpenAssetManagement}
+                  >
+                    <Package className="h-4 w-4" />
+                    {launchingAsset ? 'Opening Asset Management…' : 'Asset Management'}
                   </button>
                   <div className="border-t mt-1 pt-1">
                     <button onClick={handleLogout} className="w-full text-left px-4 py-2 text-sm text-destructive hover:bg-destructive/5 flex items-center gap-2">

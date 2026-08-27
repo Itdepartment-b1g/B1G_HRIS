@@ -21,6 +21,9 @@
       "path": "./tsconfig.node.json"
     },
     {
+      "path": "./tsconfig.server.json"
+    },
+    {
       "path": "./supabase/functions/tsconfig.json"
     }
   ]
