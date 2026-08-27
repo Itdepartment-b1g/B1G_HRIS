@@ -13,11 +13,16 @@ import {
   Settings,
   Layers,
   Award,
+  Package,
   type LucideIcon,
 } from 'lucide-react';
 
+/** External SSO / cross-app actions (handled by Redux, not react-router). */
+export type NavExternalAction = 'asset-management';
+
 export interface NavItem {
   label: string;
+  /** In-app route, or a stable key (e.g. `#asset-management`) when `externalAction` is set. */
   path: string;
   description?: string;
   iconBg?: string;
@@ -25,6 +30,8 @@ export interface NavItem {
   icon: LucideIcon;
   /** When set, only these roles can see this item. Omit for all roles. */
   roles?: string[];
+  /** When set, click runs an external launch instead of navigate(path). */
+  externalAction?: NavExternalAction;
 }
 
 export interface NavDropdown {
@@ -64,6 +71,15 @@ export const navDropdowns: NavDropdown[] = [
       { label: 'Policy Updates', path: '/dashboard/activity/policies', description: 'Company policies', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: FileText },
       { label: 'Survey Analytics', path: '/dashboard/activity/survey-analytics', description: 'View survey responses and analytics', iconBg: 'bg-violet-100', iconColor: 'text-violet-600', icon: BarChart3, roles: ['super_admin', 'admin'] },
       { label: 'Employee of the Month', path: '/dashboard/activity/employee-of-month', description: 'Set featured employee for the feed', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: Award, roles: ['super_admin', 'admin'] },
+      {
+        label: 'Asset Request | Manage',
+        path: '#asset-management',
+        description: 'Open Asset Management (SSO)',
+        iconBg: 'bg-slate-100',
+        iconColor: 'text-slate-700',
+        icon: Package,
+        externalAction: 'asset-management',
+      },
     ],
   },
   {

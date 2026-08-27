@@ -19,12 +19,13 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { cn, getAvatarFallback } from '@/lib/utils';
-import { navDropdowns } from '@/lib/navConfig';
+import { navDropdowns, type NavItem } from '@/lib/navConfig';
 import MobileBottomNav from '@/components/MobileBottomNav';
 import ActivityPopup from '@/components/ActivityPopup';
 import { ActivityComplianceProvider } from '@/contexts/ActivityComplianceContext';
 import { useNotifications } from '@/hooks/useNotifications';
-import { launchAssetManagement } from '@/lib/launch-asset-management';
+import { launchAssetManagement } from '@/store';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { toast } from 'sonner';
 import {
   DropdownMenu,
@@ -40,19 +41,31 @@ const DashboardLayout = () => {
   const location = useLocation();
   const { user, loading } = useCurrentUser();
   const { notifications, unreadCount, markAsRead, markAllAsRead } = useNotifications(user?.id);
+  const dispatch = useAppDispatch();
+  const assetLaunchStatus = useAppSelector((s) => s.assetManagement.status);
+  const launchingAsset = assetLaunchStatus === 'loading';
   const [dismissedDropdownIds, setDismissedDropdownIds] = useState<Set<string>>(new Set());
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [launchingAsset, setLaunchingAsset] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const flattenedNavItems = useMemo(() => {
-    const items: Array<{ label: string; path: string; description?: string; dropdownLabel: string; icon: typeof Building2; iconBg?: string; iconColor?: string }> = [];
+    const items: Array<{
+      label: string;
+      path: string;
+      description?: string;
+      dropdownLabel: string;
+      icon: typeof Building2;
+      iconBg?: string;
+      iconColor?: string;
+      externalAction?: NavItem['externalAction'];
+    }> = [];
     navDropdowns.forEach((d) => {
+      if (d.hidden) return;
       d.items
         .filter((item) => !item.roles || (user?.roles && item.roles.some((r) => user.roles!.includes(r as UserRole))))
         .forEach((item) => {
@@ -64,6 +77,7 @@ const DashboardLayout = () => {
             icon: item.icon,
             iconBg: item.iconBg,
             iconColor: item.iconColor,
+            externalAction: item.externalAction,
           });
         });
     });
@@ -217,16 +231,23 @@ const DashboardLayout = () => {
 
   const handleOpenAssetManagement = async () => {
     if (launchingAsset) return;
-    setLaunchingAsset(true);
     setProfileOpen(false);
+    setOpenDropdown(null);
     try {
-      const { redirect_url } = await launchAssetManagement();
-      window.location.assign(redirect_url);
+      const result = await dispatch(launchAssetManagement()).unwrap();
+      window.location.assign(result.redirect_url);
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unable to open Asset Management.';
+      const message = typeof err === 'string' ? err : 'Unable to open Asset Management.';
       toast.error(message);
-      setLaunchingAsset(false);
     }
+  };
+
+  const handleNavItem = (item: Pick<NavItem, 'path' | 'externalAction'>) => {
+    if (item.externalAction === 'asset-management') {
+      void handleOpenAssetManagement();
+      return;
+    }
+    navigate(item.path);
   };
 
   if (loading || !user) return null;
@@ -311,14 +332,16 @@ const DashboardLayout = () => {
                               return (
                                 <button
                                   key={item.path}
+                                  type="button"
+                                  disabled={item.externalAction === 'asset-management' && launchingAsset}
                                   onClick={() => {
-                                    navigate(item.path);
+                                    handleNavItem(item);
                                     setOpenDropdown(null);
                                   }}
                                   className={cn(
-                                    "flex items-start gap-3 rounded-lg text-left transition-colors border border-transparent hover:border-gray-200 hover:bg-gray-50 w-full",
+                                    "flex items-start gap-3 rounded-lg text-left transition-colors border border-transparent hover:border-gray-200 hover:bg-gray-50 w-full disabled:opacity-50",
                                     dropdown.grid ? "p-4" : "p-3",
-                                    location.pathname === item.path && "bg-primary/5 border-primary/20"
+                                    !item.externalAction && location.pathname === item.path && "bg-primary/5 border-primary/20"
                                   )}
                                 >
                                   <div className={cn(
@@ -363,7 +386,7 @@ const DashboardLayout = () => {
                       searchInputRef.current?.blur();
                     } else if (e.key === 'Enter' && searchResults.length > 0) {
                       e.preventDefault();
-                      navigate(searchResults[0].path);
+                      handleNavItem(searchResults[0]);
                       setSearchQuery('');
                       setSearchOpen(false);
                     }
@@ -387,7 +410,7 @@ const DashboardLayout = () => {
                             key={item.path}
                             type="button"
                             onClick={() => {
-                              navigate(item.path);
+                              handleNavItem(item);
                               setSearchQuery('');
                               setSearchOpen(false);
                             }}
@@ -561,7 +584,7 @@ const DashboardLayout = () => {
                   return (
                     <button
                       key={item.path}
-                      onClick={() => { navigate(item.path); setMobileMenuOpen(false); }}
+                      onClick={() => { handleNavItem(item); setMobileMenuOpen(false); }}
                       className={cn(
                         "w-full text-left px-3 py-2.5 text-sm rounded-lg flex items-center gap-3",
                         location.pathname === item.path ? "text-primary bg-primary/20 font-medium" : "text-gray-200"

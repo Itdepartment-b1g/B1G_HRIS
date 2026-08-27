@@ -1,16 +1,9 @@
-import { configureStore, createSlice } from '@reduxjs/toolkit';
-
-/** Placeholder root slice so the store boots; replace/extend via slices/ as features land. */
-const appSlice = createSlice({
-  name: 'app',
-  initialState: { ready: true as boolean },
-  reducers: {},
-});
+import { configureStore } from '@reduxjs/toolkit';
+import assetManagementReducer from './slices/asset-management-slice';
 
 export const store = configureStore({
   reducer: {
-    app: appSlice.reducer,
-    // Feature slices register here as they are added under src/store/slices/
+    assetManagement: assetManagementReducer,
   },
 });
 
