@@ -21,6 +21,9 @@ import {
 import { Search, Loader2, Eye, ChevronDown, ChevronRight, Pencil, Camera, Filter, MapPin, MoreVertical, AlertCircle, Download } from 'lucide-react';
 import { toast } from 'sonner';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
+
+/** PostgREST max_rows is ~1000; fetch in chunks so All Time is not truncated. */
+const ATTENDANCE_FETCH_CHUNK = 1000;
 import { computeAttendanceStatusFromTimeIn, getWeekdayForDate } from '@/lib/attendanceStatus';
 import { exportAttendanceReport } from '@/lib/exportAttendanceReport';
 import { exportAttendanceReportSummary } from '@/lib/exportAttendanceReportSummary';
@@ -168,26 +171,29 @@ const Attendance = () => {
   const [summaryExportLoading, setSummaryExportLoading] = useState(false);
   const [breakdownExportLoading, setBreakdownExportLoading] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const [allTimeFrom, setAllTimeFrom] = useState(() => new Date().toISOString().slice(0, 10));
-  type MobileFilter = 'all_today' | 'my_30_days' | 'absent' | 'custom';
-  const [mobileFilter, setMobileFilter] = useState<MobileFilter>('custom');
+  type MobileDateFilter = 'all_today' | 'my_30_days' | 'custom';
+  type StatusFilter = 'all' | 'present' | 'absent';
+  const [mobileDateFilter, setMobileDateFilter] = useState<MobileDateFilter>('custom');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
   const isAdmin = user?.roles?.includes('super_admin') || user?.roles?.includes('admin');
   const canExport = isAdmin;
 
-  // Sync date range when mobile filter changes
+  // Sync date range when mobile date quick-filter changes (status never rewrites dates)
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
-    if (mobileFilter === 'all_today') {
+    if (mobileDateFilter === 'all_today') {
       setDateFrom(today);
       setDateTo(today);
-    } else if (mobileFilter === 'my_30_days' || mobileFilter === 'absent') {
+    } else if (mobileDateFilter === 'my_30_days') {
       const d = new Date();
       d.setDate(d.getDate() - 30);
       setDateFrom(d.toISOString().slice(0, 10));
       setDateTo(today);
     }
-  }, [mobileFilter]);
+  }, [mobileDateFilter]);
 
   useEffect(() => {
     if (userLoading || !user?.id) return;
@@ -219,40 +225,98 @@ const Attendance = () => {
   const fetchRecords = useCallback(async () => {
     setLoading(true);
     // Use RPC to ensure admins always see all records (handles RLS edge cases)
-    const statusFilter = mobileFilter === 'absent' ? 'absent' : null;
-    let data: any[] | null = null;
+    const rpcStatusFilter = statusFilter === 'all' ? null : statusFilter;
+    let data: any[] = [];
 
-    const { data: rpcData, error } = await supabase.rpc('get_attendance_records', {
-      _date_from: dateFrom,
-      _date_to: dateTo,
-      _status_filter: statusFilter,
-    });
+    const fetchAllViaRpc = async (): Promise<{ rows: any[]; usedPaging: boolean } | null> => {
+      // Prefer paged RPC (migration) so we can load past PostgREST's ~1000 max_rows.
+      const first = await supabase.rpc('get_attendance_records', {
+        _date_from: dateFrom,
+        _date_to: dateTo,
+        _status_filter: rpcStatusFilter,
+        _limit: ATTENDANCE_FETCH_CHUNK,
+        _offset: 0,
+      });
 
-    if (error) {
+      if (!first.error) {
+        const rows: any[] = [...(first.data || [])];
+        let offset = rows.length;
+        while (rows.length > 0 && rows.length % ATTENDANCE_FETCH_CHUNK === 0) {
+          const next = await supabase.rpc('get_attendance_records', {
+            _date_from: dateFrom,
+            _date_to: dateTo,
+            _status_filter: rpcStatusFilter,
+            _limit: ATTENDANCE_FETCH_CHUNK,
+            _offset: offset,
+          });
+          if (next.error) {
+            console.warn('Paged attendance RPC failed mid-fetch:', next.error.message);
+            break;
+          }
+          const chunk = next.data || [];
+          if (chunk.length === 0) break;
+          rows.push(...chunk);
+          offset += chunk.length;
+          if (chunk.length < ATTENDANCE_FETCH_CHUNK) break;
+        }
+        return { rows, usedPaging: true };
+      }
+
+      // Legacy 3-arg RPC (no limit/offset) — still capped at ~1000 by PostgREST
+      const legacy = await supabase.rpc('get_attendance_records', {
+        _date_from: dateFrom,
+        _date_to: dateTo,
+        _status_filter: rpcStatusFilter,
+      });
+      if (legacy.error) return null;
+      return { rows: legacy.data || [], usedPaging: false };
+    };
+
+    const rpcResult = await fetchAllViaRpc();
+
+    if (!rpcResult) {
       // Fallback to direct query if RPC doesn't exist yet (migration not run)
-      console.warn('RPC get_attendance_records failed, falling back to direct query:', error.message);
+      console.warn('RPC get_attendance_records failed, falling back to direct query');
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
-      let query = supabase
-        .from('attendance_records')
-        .select('id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, holiday_type, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name)')
-        .gte('date', dateFrom)
-        .lte('date', dateTo);
-      if (mobileFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
-      if (mobileFilter === 'all_today' && restrictToSelf) query = query.eq('employee_id', user.id);
-      if (mobileFilter === 'absent') query = query.eq('status', 'absent');
-      const { data: directData } = await query.order('date', { ascending: false }).order('time_in', { ascending: false });
+      const selectCols =
+        'id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, holiday_type, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name)';
 
-      // Transform direct query format to match RPC format for unified handling below
-      data = (directData || []).map((r: any) => ({
-        ...r,
-        employee_id: r.employee?.id,
-        employee_code: r.employee?.employee_code,
-        employee_first_name: r.employee?.first_name,
-        employee_middle_name: r.employee?.middle_name,
-        employee_last_name: r.employee?.last_name,
-      }));
+      let offset = 0;
+      for (;;) {
+        let query = supabase
+          .from('attendance_records')
+          .select(selectCols)
+          .gte('date', dateFrom)
+          .lte('date', dateTo);
+        if (mobileDateFilter === 'my_30_days' && restrictToSelf) query = query.eq('employee_id', user.id);
+        if (mobileDateFilter === 'all_today' && restrictToSelf) query = query.eq('employee_id', user.id);
+        if (rpcStatusFilter) query = query.eq('status', rpcStatusFilter);
+        const { data: directData } = await query
+          .order('date', { ascending: false })
+          .order('time_in', { ascending: false })
+          .range(offset, offset + ATTENDANCE_FETCH_CHUNK - 1);
+
+        const chunk = directData || [];
+        data.push(
+          ...chunk.map((r: any) => ({
+            ...r,
+            employee_id: r.employee?.id,
+            employee_code: r.employee?.employee_code,
+            employee_first_name: r.employee?.first_name,
+            employee_middle_name: r.employee?.middle_name,
+            employee_last_name: r.employee?.last_name,
+          }))
+        );
+        if (chunk.length < ATTENDANCE_FETCH_CHUNK) break;
+        offset += ATTENDANCE_FETCH_CHUNK;
+      }
     } else {
-      data = rpcData || [];
+      data = rpcResult.rows;
+      if (!rpcResult.usedPaging && data.length >= ATTENDANCE_FETCH_CHUNK) {
+        console.warn(
+          'Attendance RPC returned a full 1000-row page without pagination support. Run supabase-migration-attendance-rpc-pagination.sql to load all rows.'
+        );
+      }
     }
 
     // Build shift maps for employees that have records
@@ -394,7 +458,12 @@ const Attendance = () => {
     // The pg_cron job handles past dates (runs at end of day for yesterday).
     // Today is still in progress, so we fill the gap on the frontend — lightweight (1 day only).
     const today = new Date().toISOString().slice(0, 10);
-    if (isAdmin && dateFrom <= today && dateTo >= today) {
+    if (
+      isAdmin &&
+      dateFrom <= today &&
+      dateTo >= today &&
+      (statusFilter === 'all' || statusFilter === 'absent')
+    ) {
       const todayWeekday = getWeekdayForDate(today);
       const monthDay = today.slice(5, 10);
 
@@ -500,7 +569,7 @@ const Attendance = () => {
 
     setRecords(rows);
     setLoading(false);
-  }, [dateFrom, dateTo, mobileFilter, userLoading, isAdmin, user?.id]);
+  }, [dateFrom, dateTo, statusFilter, mobileDateFilter, userLoading, isAdmin, user?.id]);
 
   useEffect(() => {
     if (!userLoading) fetchRecords();
@@ -516,11 +585,11 @@ const Attendance = () => {
   }, [records, search]);
 
   const paginated = useMemo(
-    () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
-    [filtered, page]
+    () => filtered.slice((page - 1) * pageSize, page * pageSize),
+    [filtered, page, pageSize]
   );
 
-  useEffect(() => setPage(1), [search, dateFrom, dateTo]);
+  useEffect(() => setPage(1), [search, dateFrom, dateTo, statusFilter, pageSize]);
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -789,6 +858,7 @@ const Attendance = () => {
           <DateRangeFilter
             value={{ from: dateFrom, to: dateTo }}
             onChange={({ from, to }) => {
+              setMobileDateFilter('custom');
               setDateFrom(from);
               setDateTo(to);
             }}
@@ -818,24 +888,46 @@ const Attendance = () => {
             </DropdownMenu>
           )}
         </div>
-        <div className="flex items-center justify-between gap-2 overflow-x-auto pb-2">
+        <div className="flex flex-col gap-2 overflow-x-auto pb-2">
           <div className="flex items-center gap-2 shrink-0">
             <Filter className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="flex gap-2 shrink-0">
-              {(['all_today', 'my_30_days', 'absent'] as const).map((f) => (
+              {([
+                { key: 'all_today' as const, label: 'All Today' },
+                { key: 'my_30_days' as const, label: 'My Last 30 Days' },
+              ]).map((f) => (
+                <button
+                  key={f.key}
+                  onClick={() => setMobileDateFilter(f.key)}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
+                    mobileDateFilter === f.key
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted/50 text-muted-foreground hover:bg-muted'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex gap-2 shrink-0 pl-6">
+            {([
+              { key: 'all' as const, label: 'All Status' },
+              { key: 'present' as const, label: 'Present' },
+              { key: 'absent' as const, label: 'Absent' },
+            ]).map((f) => (
               <button
-                key={f}
-                onClick={() => setMobileFilter(f)}
+                key={f.key}
+                onClick={() => setStatusFilter(f.key)}
                 className={`px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-colors ${
-                  mobileFilter === f
+                  statusFilter === f.key
                     ? 'bg-primary text-primary-foreground'
                     : 'bg-muted/50 text-muted-foreground hover:bg-muted'
                 }`}
               >
-                {f === 'all_today' ? 'All Today' : f === 'my_30_days' ? 'My Last 30 Days' : 'Absent'}
+                {f.label}
               </button>
             ))}
-            </div>
           </div>
         </div>
 
@@ -954,9 +1046,23 @@ const Attendance = () => {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={statusFilter}
+            onValueChange={(v) => setStatusFilter(v as StatusFilter)}
+          >
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="present">Present</SelectItem>
+              <SelectItem value="absent">Absent</SelectItem>
+            </SelectContent>
+          </Select>
           <DateRangeFilter
             value={{ from: dateFrom, to: dateTo }}
             onChange={({ from, to }) => {
+              setMobileDateFilter('custom');
               setDateFrom(from);
               setDateTo(to);
             }}
@@ -1126,7 +1232,13 @@ const Attendance = () => {
                 </TableBody>
               </Table>
               {!loading && filtered.length > 0 && (
-                <TablePagination totalItems={filtered.length} currentPage={page} onPageChange={setPage} />
+                <TablePagination
+                  totalItems={filtered.length}
+                  currentPage={page}
+                  onPageChange={setPage}
+                  pageSize={pageSize}
+                  onPageSizeChange={setPageSize}
+                />
               )}
             </>
           )}
