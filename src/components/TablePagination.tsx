@@ -1,7 +1,9 @@
 import { Pagination, PaginationContent, PaginationEllipsis, PaginationItem, PaginationLink, PaginationNext, PaginationPrevious } from '@/components/ui/pagination';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
 
 const PAGE_SIZE = 10;
+const PAGE_SIZE_OPTIONS = [5, 10, 25, 50] as const;
 const SIBLING_COUNT = 1; // pages shown on each side of current page
 
 interface TablePaginationProps {
@@ -9,6 +11,8 @@ interface TablePaginationProps {
   currentPage: number;
   onPageChange: (page: number) => void;
   pageSize?: number;
+  onPageSizeChange?: (size: number) => void;
+  pageSizeOptions?: readonly number[];
   className?: string;
 }
 
@@ -60,57 +64,96 @@ function getPageRange(current: number, total: number): (number | string)[] {
   return pages;
 }
 
-export function TablePagination({ totalItems, currentPage, onPageChange, pageSize = PAGE_SIZE, className }: TablePaginationProps) {
+export function TablePagination({
+  totalItems,
+  currentPage,
+  onPageChange,
+  pageSize = PAGE_SIZE,
+  onPageSizeChange,
+  pageSizeOptions = PAGE_SIZE_OPTIONS,
+  className,
+}: TablePaginationProps) {
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-  const start = (currentPage - 1) * pageSize + 1;
+  const start = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, totalItems);
 
-  if (totalItems <= pageSize) return null;
+  if (totalItems <= 0) return null;
 
   const pages = getPageRange(currentPage, totalPages);
+  const showPageButtons = totalItems > pageSize;
 
   return (
-    <div className={cn('flex items-center justify-between gap-4 py-3', className)}>
-      <p className="text-sm text-muted-foreground whitespace-nowrap">
-        Showing {start}–{end} of {totalItems}
-      </p>
-      <Pagination>
-        <PaginationContent>
-          <PaginationItem>
-            <PaginationPrevious
-              href="#"
-              onClick={(e) => { e.preventDefault(); if (currentPage > 1) onPageChange(currentPage - 1); }}
-              className={cn(currentPage <= 1 && 'pointer-events-none opacity-50')}
-            />
-          </PaginationItem>
-          {pages.map((p) =>
-            typeof p === 'string' ? (
-              <PaginationItem key={p}>
-                <PaginationEllipsis />
-              </PaginationItem>
-            ) : (
-              <PaginationItem key={p}>
-                <PaginationLink
-                  href="#"
-                  onClick={(e) => { e.preventDefault(); onPageChange(p); }}
-                  isActive={currentPage === p}
-                >
-                  {p}
-                </PaginationLink>
-              </PaginationItem>
-            )
-          )}
-          <PaginationItem>
-            <PaginationNext
-              href="#"
-              onClick={(e) => { e.preventDefault(); if (currentPage < totalPages) onPageChange(currentPage + 1); }}
-              className={cn(currentPage >= totalPages && 'pointer-events-none opacity-50')}
-            />
-          </PaginationItem>
-        </PaginationContent>
-      </Pagination>
+    <div
+      className={cn(
+        // Extra right padding so Activity popup FAB does not cover Next
+        'flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 pr-16 lg:pr-20',
+        className
+      )}
+    >
+      <div className="flex flex-wrap items-center gap-3">
+        {onPageSizeChange && (
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">Rows per page</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(v) => onPageSizeChange(Number(v))}
+            >
+              <SelectTrigger className="h-9 w-[72px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {pageSizeOptions.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+        <p className="text-sm text-muted-foreground whitespace-nowrap">
+          Showing {start}–{end} of {totalItems}
+        </p>
+      </div>
+      {showPageButtons && (
+        <Pagination className="mx-0 w-auto justify-start sm:justify-end">
+          <PaginationContent>
+            <PaginationItem>
+              <PaginationPrevious
+                href="#"
+                onClick={(e) => { e.preventDefault(); if (currentPage > 1) onPageChange(currentPage - 1); }}
+                className={cn(currentPage <= 1 && 'pointer-events-none opacity-50')}
+              />
+            </PaginationItem>
+            {pages.map((p) =>
+              typeof p === 'string' ? (
+                <PaginationItem key={p}>
+                  <PaginationEllipsis />
+                </PaginationItem>
+              ) : (
+                <PaginationItem key={p}>
+                  <PaginationLink
+                    href="#"
+                    onClick={(e) => { e.preventDefault(); onPageChange(p); }}
+                    isActive={currentPage === p}
+                  >
+                    {p}
+                  </PaginationLink>
+                </PaginationItem>
+              )
+            )}
+            <PaginationItem>
+              <PaginationNext
+                href="#"
+                onClick={(e) => { e.preventDefault(); if (currentPage < totalPages) onPageChange(currentPage + 1); }}
+                className={cn(currentPage >= totalPages && 'pointer-events-none opacity-50')}
+              />
+            </PaginationItem>
+          </PaginationContent>
+        </Pagination>
+      )}
     </div>
   );
 }
 
-export { PAGE_SIZE };
+export { PAGE_SIZE, PAGE_SIZE_OPTIONS };
