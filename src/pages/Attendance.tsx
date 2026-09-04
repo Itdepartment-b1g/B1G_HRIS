@@ -501,9 +501,14 @@ const Attendance = () => {
         allShiftsByEmp.set(s.employee_id, arr);
       });
 
-      // Build set of employees who already have a record today
+      // Who already has ANY attendance row today (ignore status filter — present/late
+      // must still block synthetic absents when filtering Absent).
+      const { data: todayExistingRows } = await supabase
+        .from('attendance_records')
+        .select('employee_id')
+        .eq('date', today);
       const existingTodayEmpIds = new Set(
-        rows.filter((r) => r.date === today).map((r) => r.employee_id)
+        (todayExistingRows || []).map((r: { employee_id: string }) => r.employee_id).filter(Boolean)
       );
 
       for (const emp of allEmployees || []) {
