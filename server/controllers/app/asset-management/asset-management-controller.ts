@@ -32,19 +32,23 @@ export async function launchAssetManagement(req: Request, res: Response): Promis
     }
 
     const { redirectUrl } = createAssetHandoffToken(employee);
+    res.setHeader('Cache-Control', 'no-store');
     res.status(200).json({ redirect_url: redirectUrl });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unexpected error';
-    if (message.startsWith('Missing required env:')) {
-      console.error('[asset-management] config error:', message);
-      res.status(500).json({ error: 'Asset Management is not configured.' });
-      return;
-    }
+    const isDev = process.env.NODE_ENV !== 'production';
+    console.error('[asset-management] launch error:', message);
+
     if (message === 'NO_COMPANY_EMAIL') {
       res.status(400).json({ error: 'No company email on file for this account.' });
       return;
     }
-    console.error('[asset-management] launch error:', err);
-    res.status(500).json({ error: 'Unable to open Asset Management. Please try again.' });
+
+    const generic =
+      message.startsWith('Missing required env:') || message.includes('Invalid API key')
+        ? 'Asset Management is not configured.'
+        : 'Unable to open Asset Management. Please try again.';
+    res.setHeader('Cache-Control', 'no-store');
+    res.status(500).json({ error: isDev ? message : generic });
   }
 }

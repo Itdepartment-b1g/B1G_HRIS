@@ -30,7 +30,22 @@ export function createServiceClient(): SupabaseClient {
   if (!serviceKey) {
     throw new Error('Missing required env: SUPABASE_SERVICE_ROLE_KEY');
   }
+
+  // Opaque sb_secret_ keys are not JWTs. supabase-js also sends them as
+  // Authorization: Bearer, and PostgREST then returns Invalid JWT / 500.
+  const stripBearerForOpaqueSecret = serviceKey.startsWith('sb_secret_')
+    ? {
+        fetch: (input, init) => {
+          const headers = new Headers(init?.headers);
+          headers.set('apikey', serviceKey);
+          headers.delete('Authorization');
+          return fetch(input, { ...init, headers });
+        },
+      }
+    : undefined;
+
   return createClient(getSupabaseUrl(), serviceKey, {
     auth: { autoRefreshToken: false, persistSession: false },
+    global: stripBearerForOpaqueSecret,
   });
 }

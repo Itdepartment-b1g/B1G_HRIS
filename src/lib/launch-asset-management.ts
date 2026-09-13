@@ -23,6 +23,7 @@ export async function launchAssetManagement(): Promise<LaunchAssetManagementResp
 
   const response = await fetch(apiUrl('/apps/asset-management/launch'), {
     method: 'GET',
+    cache: 'no-store',
     headers: {
       Authorization: `Bearer ${session.access_token}`,
       Accept: 'application/json',
