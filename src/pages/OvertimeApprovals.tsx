@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -20,6 +20,15 @@ import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
 import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { OvertimeRequest } from '@/types';
+import {
+  QuickFilterSheet,
+  createQuickFilterAndClause,
+  matchesQuickFilterAndClauses,
+  type QuickFilterAndClause,
+  type QuickFilterColumn,
+} from '@/components/QuickFilterSheet';
+import { ALL_TIME_DATE_RANGE, type DateRangeFilterValue } from '@/components/DateRangeFilterPopover';
+import { getDateRangeFromPreset, isDateInRange } from '@/lib/dateRangePresets';
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
@@ -39,6 +48,25 @@ function formatTime(timeStr: string) {
 interface OvertimeRequestWithEmployee extends OvertimeRequest {
   employee_name: string;
   employee_avatar_url?: string | null;
+  department?: string | null;
+  position?: string | null;
+}
+
+type OtQuickColumn = 'employee' | 'department' | 'position';
+type OtStatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
+
+const OtQuickFilterSheet = QuickFilterSheet<OtQuickColumn, OtStatusFilter>;
+
+function uniqueOptions(items: Array<{ value: string; label: string }>) {
+  const seen = new Set<string>();
+  return items
+    .filter((item) => {
+      const key = item.value.trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 interface OvertimeApprovalsProps {
@@ -53,6 +81,11 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
   const [viewingRequest, setViewingRequest] = useState<OvertimeRequestWithEmployee | null>(null);
+  const [dateRange, setDateRange] = useState<DateRangeFilterValue>(ALL_TIME_DATE_RANGE);
+  const [columnClauses, setColumnClauses] = useState<QuickFilterAndClause<OtQuickColumn>[]>([
+    createQuickFilterAndClause<OtQuickColumn>(),
+  ]);
+  const [statusFilter, setStatusFilter] = useState<OtStatusFilter>('all');
 
   const fetchSupervisedIds = useCallback(async (): Promise<string[]> => {
     if (!currentUser?.id) return [];
@@ -86,7 +119,7 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
     }
     const { data } = await supabase
       .from('overtime_requests')
-      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url, department, position), approver:employees!approved_by(first_name, last_name)')
       .in('employee_id', ids)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
@@ -94,6 +127,8 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
       ...r,
       employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
       employee_avatar_url: r.employee?.avatar_url ?? null,
+      department: r.employee?.department ?? null,
+      position: r.employee?.position ?? null,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
     }));
     setAllRequests(withName);
@@ -117,6 +152,69 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
       supabase.removeChannel(channel);
     };
   }, [currentUser?.id, fetchRequests]);
+
+  const quickColumns = useMemo((): QuickFilterColumn<OtQuickColumn>[] => {
+    return [
+      {
+        key: 'employee',
+        label: 'Employee Name',
+        searchPlaceholder: 'Search employee...',
+        options: uniqueOptions(
+          allRequests.map((r) => ({ value: r.employee_id, label: r.employee_name }))
+        ),
+      },
+      {
+        key: 'department',
+        label: 'Department',
+        searchPlaceholder: 'Search department...',
+        options: uniqueOptions(
+          allRequests
+            .filter((r) => r.department)
+            .map((r) => ({ value: r.department as string, label: r.department as string }))
+        ),
+      },
+      {
+        key: 'position',
+        label: 'Rank/Position',
+        searchPlaceholder: 'Search position...',
+        options: uniqueOptions(
+          allRequests
+            .filter((r) => r.position)
+            .map((r) => ({ value: r.position as string, label: r.position as string }))
+        ),
+      },
+    ];
+  }, [allRequests]);
+
+  const filteredRequests = useMemo(() => {
+    const { start, end } = getDateRangeFromPreset(dateRange.preset, dateRange.customStart, dateRange.customEnd);
+    return allRequests.filter((r) => {
+      if (!isDateInRange(r.date, start, end)) return false;
+      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+      return matchesQuickFilterAndClauses(columnClauses, (field, value) => {
+        if (field === 'employee') return r.employee_id === value;
+        if (field === 'department') return (r.department || '') === value;
+        if (field === 'position') return (r.position || '') === value;
+        return false;
+      });
+    });
+  }, [allRequests, dateRange, columnClauses, statusFilter]);
+
+  const statusOptions = useMemo(
+    () => [
+      { value: 'all' as const, label: 'All statuses', count: allRequests.length },
+      { value: 'pending' as const, label: 'Pending', count: allRequests.filter((r) => r.status === 'pending').length },
+      { value: 'approved' as const, label: 'Approved', count: allRequests.filter((r) => r.status === 'approved').length },
+      { value: 'rejected' as const, label: 'Rejected', count: allRequests.filter((r) => r.status === 'rejected').length },
+    ],
+    [allRequests]
+  );
+
+  const clearQuickFilters = () => {
+    setDateRange(ALL_TIME_DATE_RANGE);
+    setColumnClauses([createQuickFilterAndClause<OtQuickColumn>()]);
+    setStatusFilter('all');
+  };
 
   const handleApprove = async (id: string, action: 'approved' | 'rejected') => {
     setApproving(id);
@@ -275,11 +373,24 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
       )}
 
       <Card>
-          <CardHeader>
-            <CardTitle className="text-base">All Overtime Requests</CardTitle>
-            <CardDescription>
-              Review and approve overtime requests. Pending requests require your action.
-            </CardDescription>
+          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+            <div>
+              <CardTitle className="text-base">All Overtime Requests ({filteredRequests.length})</CardTitle>
+              <CardDescription>
+                Review and approve overtime requests. Pending requests require your action.
+              </CardDescription>
+            </div>
+            <OtQuickFilterSheet
+              dateRange={dateRange}
+              onDateRangeChange={setDateRange}
+              columns={quickColumns}
+              columnClauses={columnClauses}
+              onColumnClausesChange={setColumnClauses}
+              status={statusFilter}
+              statusOptions={statusOptions}
+              onStatusChange={setStatusFilter}
+              onClear={clearQuickFilters}
+            />
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -287,7 +398,7 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              renderRequests(allRequests, true)
+              renderRequests(filteredRequests, true)
             )}
           </CardContent>
         </Card>

@@ -31,6 +31,15 @@ import { exportAttendanceBreakdown } from '@/lib/exportAttendanceBreakdown';
 import { timeTo12Hour } from '@/lib/utils';
 import { formatHolidayStatusLabel, holidayTypeBadgeClass, normalizeHolidayType, type HolidayType } from '@/lib/holidayType';
 import { DateRangeFilter } from '@/components/DateRangeFilter';
+import {
+  QuickFilterSheet,
+  createQuickFilterAndClause,
+  matchesQuickFilterAndClauses,
+  type QuickFilterAndClause,
+  type QuickFilterColumn,
+} from '@/components/QuickFilterSheet';
+import { ALL_TIME_DATE_RANGE, type DateRangeFilterValue } from '@/components/DateRangeFilterPopover';
+import { getDateRangeFromPreset, isDateInRange } from '@/lib/dateRangePresets';
 
 interface RecordRow {
   id: string;
@@ -62,6 +71,8 @@ interface RecordRow {
   leave_type_code: string | null; // e.g. 'vl', 'sl', 'lwop' — only set when status='on_leave'
   leave_duration_type: 'fullday' | 'first_half' | 'second_half' | null;
   business_trip_id: string | null;
+  department?: string | null;
+  position?: string | null;
 }
 
 function parseTimeToMinutes(time: string): number {
@@ -108,6 +119,17 @@ const HOLIDAY_TYPE_OPTIONS: { value: HolidayType; label: string }[] = [
   { value: 'special', label: 'Special Non-Working' },
   { value: 'company', label: 'Company Holiday' },
 ];
+
+type AttendanceQuickColumn = 'employee' | 'employee_code' | 'department' | 'position' | 'shift' | 'leave_type';
+type AttendanceQuickStatus = 'all' | (typeof ATTENDANCE_STATUSES)[number];
+
+const AttendanceQuickFilterSheet = QuickFilterSheet<AttendanceQuickColumn, AttendanceQuickStatus>;
+
+function sortedOptions(map: Map<string, string>) {
+  return [...map.entries()]
+    .map(([value, label]) => ({ value, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -177,9 +199,24 @@ const Attendance = () => {
   type StatusFilter = 'all' | 'present' | 'absent';
   const [mobileDateFilter, setMobileDateFilter] = useState<MobileDateFilter>('custom');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [quickDateRange, setQuickDateRange] = useState<DateRangeFilterValue>(ALL_TIME_DATE_RANGE);
+  const [quickColumnClauses, setQuickColumnClauses] = useState<QuickFilterAndClause<AttendanceQuickColumn>[]>([
+    createQuickFilterAndClause<AttendanceQuickColumn>(),
+  ]);
+  const [quickStatusFilter, setQuickStatusFilter] = useState<AttendanceQuickStatus>('all');
 
   const isAdmin = user?.roles?.includes('super_admin') || user?.roles?.includes('admin');
   const canExport = isAdmin;
+  const [isDesktop, setIsDesktop] = useState(
+    () => typeof window !== 'undefined' && window.matchMedia('(min-width: 1024px)').matches
+  );
+
+  useEffect(() => {
+    const mql = window.matchMedia('(min-width: 1024px)');
+    const onChange = () => setIsDesktop(mql.matches);
+    mql.addEventListener('change', onChange);
+    return () => mql.removeEventListener('change', onChange);
+  }, []);
 
   // Sync date range when mobile date quick-filter changes (status never rewrites dates)
   useEffect(() => {
@@ -197,7 +234,6 @@ const Attendance = () => {
 
   useEffect(() => {
     if (userLoading || !user?.id) return;
-    const today = new Date().toISOString().slice(0, 10);
 
     const fetchEarliestAttendanceDate = async () => {
       let query = supabase
@@ -212,10 +248,7 @@ const Attendance = () => {
 
       const { data } = await query.maybeSingle();
       if ((data as { date?: string } | null)?.date) {
-        const earliestDate = (data as { date: string }).date;
-        setAllTimeFrom(earliestDate);
-        setDateFrom(earliestDate);
-        setDateTo(today);
+        setAllTimeFrom((data as { date: string }).date);
       }
     };
 
@@ -279,7 +312,7 @@ const Attendance = () => {
       console.warn('RPC get_attendance_records failed, falling back to direct query');
       const restrictToSelf = !userLoading && !isAdmin && user?.id;
       const selectCols =
-        'id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, holiday_type, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name)';
+        'id, date, time_in, time_out, lat_in, lng_in, lat_out, lng_out, address_in, address_out, notes, remarks, status, holiday_type, minutes_late, flex_undertime_minutes, time_in_photo_url, time_out_photo_url, leave_type_code, leave_duration_type, employee:employees!employee_id(id, employee_code, first_name, middle_name, last_name, department, position)';
 
       let offset = 0;
       for (;;) {
@@ -451,8 +484,26 @@ const Attendance = () => {
         leave_type_code: r.leave_type_code || null,
         leave_duration_type: (r.leave_duration_type as any) || null,
         business_trip_id: r.business_trip_id || null,
+        department: r.employee?.department || r.department || null,
+        position: r.employee?.position || r.position || null,
       };
     });
+
+    if (empIds.length) {
+      const { data: empMeta } = await supabase
+        .from('employees')
+        .select('id, department, position')
+        .in('id', empIds);
+      const metaById = new Map(
+        (empMeta || []).map((e: { id: string; department?: string | null; position?: string | null }) => [e.id, e])
+      );
+      for (const row of rows) {
+        const meta = metaById.get(row.employee_id);
+        if (!meta) continue;
+        row.department = row.department || meta.department || null;
+        row.position = row.position || meta.position || null;
+      }
+    }
 
     // --- For TODAY only: generate absent rows for employees who haven't clocked in yet ---
     // The pg_cron job handles past dates (runs at end of day for yesterday).
@@ -483,7 +534,7 @@ const Attendance = () => {
       // Fetch all active employees
       const { data: allEmployees } = await supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name, login_exempted')
+        .select('id, employee_code, first_name, last_name, login_exempted, department, position')
         .eq('is_active', true);
 
       // Fetch all employee_shifts with shift info
@@ -561,6 +612,8 @@ const Attendance = () => {
           leave_type_code: null,
           leave_duration_type: null,
           business_trip_id: null,
+          department: emp.department || null,
+          position: emp.position || null,
         });
       }
 
@@ -581,20 +634,131 @@ const Attendance = () => {
   }, [fetchRecords, userLoading]);
 
   const filtered = useMemo(() => {
-    if (!search.trim()) return records;
-    const q = search.toLowerCase();
-    return records.filter(
-      (r) =>
-        r.employee_name.toLowerCase().includes(q) || r.employee_code.toLowerCase().includes(q)
+    const q = search.trim().toLowerCase();
+    const { start, end } = getDateRangeFromPreset(
+      quickDateRange.preset,
+      quickDateRange.customStart,
+      quickDateRange.customEnd
     );
-  }, [records, search]);
+    return records.filter((r) => {
+      if (q) {
+        const matchesSearch =
+          r.employee_name.toLowerCase().includes(q) || r.employee_code.toLowerCase().includes(q);
+        if (!matchesSearch) return false;
+      }
+      if (!isDateInRange(r.date, start, end)) return false;
+      if (quickStatusFilter !== 'all' && r.status !== quickStatusFilter) return false;
+      return matchesQuickFilterAndClauses(quickColumnClauses, (field, value) => {
+        if (field === 'employee') return r.employee_id === value;
+        if (field === 'employee_code') return r.employee_code === value;
+        if (field === 'department') return (r.department || '') === value;
+        if (field === 'position') return (r.position || '') === value;
+        if (field === 'shift') return r.assigned_shift === value;
+        if (field === 'leave_type') return (r.leave_type_code || '') === value;
+        return false;
+      });
+    });
+  }, [records, search, quickDateRange, quickColumnClauses, quickStatusFilter]);
 
   const paginated = useMemo(
     () => filtered.slice((page - 1) * pageSize, page * pageSize),
     [filtered, page, pageSize]
   );
 
-  useEffect(() => setPage(1), [search, dateFrom, dateTo, statusFilter, pageSize]);
+  useEffect(() => setPage(1), [search, dateFrom, dateTo, statusFilter, pageSize, quickDateRange, quickColumnClauses, quickStatusFilter]);
+
+  const quickColumns = useMemo((): QuickFilterColumn<AttendanceQuickColumn>[] => {
+    const employees = new Map<string, string>();
+    const codes = new Map<string, string>();
+    const departments = new Map<string, string>();
+    const positions = new Map<string, string>();
+    const shifts = new Map<string, string>();
+    const leaveTypes = new Map<string, string>();
+
+    for (const r of records) {
+      if (r.employee_id) employees.set(r.employee_id, r.employee_name);
+      if (r.employee_code && r.employee_code !== '—') codes.set(r.employee_code, r.employee_code);
+      if (r.department) departments.set(r.department, r.department);
+      if (r.position) positions.set(r.position, r.position);
+      if (r.assigned_shift && r.assigned_shift !== '—') shifts.set(r.assigned_shift, r.assigned_shift);
+      if (r.leave_type_code) leaveTypes.set(r.leave_type_code, r.leave_type_code.toUpperCase());
+    }
+
+    return [
+      {
+        key: 'employee',
+        label: 'Employee Name',
+        searchPlaceholder: 'Search employee...',
+        options: sortedOptions(employees),
+      },
+      {
+        key: 'employee_code',
+        label: 'Employee Code',
+        searchPlaceholder: 'Search code...',
+        options: sortedOptions(codes),
+      },
+      {
+        key: 'department',
+        label: 'Department',
+        searchPlaceholder: 'Search department...',
+        options: sortedOptions(departments),
+      },
+      {
+        key: 'position',
+        label: 'Rank/Position',
+        searchPlaceholder: 'Search position...',
+        options: sortedOptions(positions),
+      },
+      {
+        key: 'shift',
+        label: 'Assigned Shift',
+        searchPlaceholder: 'Search shift...',
+        options: sortedOptions(shifts),
+      },
+      {
+        key: 'leave_type',
+        label: 'Leave Type',
+        searchPlaceholder: 'Search leave type...',
+        options: sortedOptions(leaveTypes),
+      },
+    ];
+  }, [records]);
+
+  const quickStatusOptions = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const r of records) {
+      counts[r.status] = (counts[r.status] || 0) + 1;
+    }
+    return [
+      { value: 'all' as const, label: 'All statuses', count: records.length },
+      { value: 'present' as const, label: 'Present', count: counts.present || 0 },
+      { value: 'late' as const, label: 'Late', count: counts.late || 0 },
+      { value: 'absent' as const, label: 'Absent', count: counts.absent || 0 },
+      { value: 'half_day' as const, label: 'Half day', count: counts.half_day || 0 },
+      { value: 'on_leave' as const, label: 'On leave', count: counts.on_leave || 0 },
+      { value: 'holiday' as const, label: 'Holiday', count: counts.holiday || 0 },
+    ];
+  }, [records]);
+
+  const clearQuickFilters = () => {
+    setQuickDateRange(ALL_TIME_DATE_RANGE);
+    setQuickColumnClauses([createQuickFilterAndClause<AttendanceQuickColumn>()]);
+    setQuickStatusFilter('all');
+  };
+
+  const renderAttendanceQuickFilter = () => (
+    <AttendanceQuickFilterSheet
+      dateRange={quickDateRange}
+      onDateRangeChange={setQuickDateRange}
+      columns={quickColumns}
+      columnClauses={quickColumnClauses}
+      onColumnClausesChange={setQuickColumnClauses}
+      status={quickStatusFilter}
+      statusOptions={quickStatusOptions}
+      onStatusChange={setQuickStatusFilter}
+      onClear={clearQuickFilters}
+    />
+  );
 
   const toggleExpand = (id: string) => {
     setExpandedIds((prev) => {
@@ -858,7 +1022,8 @@ const Attendance = () => {
       </div>
 
       {/* Mobile: Filter tabs + Cards */}
-      <div className="block lg:hidden space-y-4">
+      {!isDesktop && (
+      <div className="space-y-4">
         <div className="flex items-center justify-between gap-2">
           <DateRangeFilter
             value={{ from: dateFrom, to: dateTo }}
@@ -892,6 +1057,9 @@ const Attendance = () => {
               </DropdownMenuContent>
             </DropdownMenu>
           )}
+        </div>
+        <div className="flex justify-end">
+          {renderAttendanceQuickFilter()}
         </div>
         <div className="flex flex-col gap-2 overflow-x-auto pb-2">
           <div className="flex items-center gap-2 shrink-0">
@@ -942,7 +1110,7 @@ const Attendance = () => {
           </div>
         ) : (
           <div className="space-y-4">
-            {filtered.map((r) => {
+            {paginated.map((r) => {
               const hasWarning = r.status === 'absent' || r.status === 'late' || r.status === 'lti';
               return (
                 <Card key={r.id} className="overflow-hidden">
@@ -992,7 +1160,7 @@ const Attendance = () => {
                         <div className="flex flex-col items-center gap-1">
                           {r.time_in_photo_url ? (
                             <a href={r.time_in_photo_url} target="_blank" rel="noopener noreferrer">
-                              <img src={r.time_in_photo_url} alt="Time in" className="h-20 w-20 object-cover rounded-full border" />
+                              <img src={r.time_in_photo_url} alt="Time in" loading="lazy" className="h-20 w-20 object-cover rounded-full border" />
                             </a>
                           ) : (
                             <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
@@ -1010,7 +1178,7 @@ const Attendance = () => {
                         <div className="flex flex-col items-center gap-1">
                           {r.time_out_photo_url ? (
                             <a href={r.time_out_photo_url} target="_blank" rel="noopener noreferrer">
-                              <img src={r.time_out_photo_url} alt="Time out" className="h-20 w-20 object-cover rounded-full border" />
+                              <img src={r.time_out_photo_url} alt="Time out" loading="lazy" className="h-20 w-20 object-cover rounded-full border" />
                             </a>
                           ) : (
                             <div className="h-20 w-20 rounded-full bg-muted flex items-center justify-center">
@@ -1035,12 +1203,24 @@ const Attendance = () => {
             {filtered.length === 0 && (
               <p className="text-center text-muted-foreground py-8">No attendance records found</p>
             )}
+            {filtered.length > 0 && (
+              <TablePagination
+                totalItems={filtered.length}
+                currentPage={page}
+                onPageChange={setPage}
+                pageSize={pageSize}
+                onPageSizeChange={setPageSize}
+              />
+            )}
           </div>
         )}
       </div>
+      )}
 
       {/* Desktop: Search & Date Filter */}
-      <div className="hidden lg:flex flex-col sm:flex-row gap-3">
+      {isDesktop && (
+      <>
+      <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -1100,12 +1280,15 @@ const Attendance = () => {
         </div>
       </div>
 
-      <Card className="hidden lg:block">
-        <CardHeader>
-          <CardTitle className="text-base">Attendance ({filtered.length})</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            From {formatDate(dateFrom)} to {formatDate(dateTo)}
-          </p>
+      <Card>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base">Attendance ({filtered.length})</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              From {formatDate(dateFrom)} to {formatDate(dateTo)}
+            </p>
+          </div>
+          {renderAttendanceQuickFilter()}
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -1249,6 +1432,8 @@ const Attendance = () => {
           )}
         </CardContent>
       </Card>
+      </>
+      )}
 
       {/* View Dialog */}
       <Dialog open={!!viewingRecord} onOpenChange={(open) => { if (!open) setViewingRecord(null); }}>
