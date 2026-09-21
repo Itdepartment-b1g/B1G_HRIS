@@ -1,10 +1,13 @@
 -- ============================================================
--- B1G HRIS — OT Approval Credits CTO Leave Balance
--- When supervisor approves an overtime request, credit OT hours
--- to employee's CTO balance. 1 OT hour = 0.125 CTO; 8 OT hours = 1 CTO.
--- Requires: overtime_requests, leave_balances, leave_type_config
+-- B1G HRIS — CTO credit uses 3 decimal places
+-- 1 OT hour = 0.125 CTO; 8 OT hours = 1 CTO
+-- Replaces ROUND(..., 2) which stored 0.13 instead of 0.125
 -- Safe to re-run.
 -- ============================================================
+
+UPDATE public.leave_type_config
+SET description = 'Time off earned from approved overtime (1 OT hour = 0.125 CTO; 8 OT hours = 1 CTO)'
+WHERE code = 'cto';
 
 CREATE OR REPLACE FUNCTION public.approve_overtime_request(
   p_ot_id UUID,

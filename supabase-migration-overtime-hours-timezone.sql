@@ -1,12 +1,17 @@
 -- ============================================================
--- B1G HRIS — Overtime RPC: validate_and_submit_overtime, approve_overtime_request
--- Requires: overtime_requests table, is_approver_of, has_role
--- OT rules: min 1hr, round down to 30-min increments
+-- B1G HRIS — Fix OT hours timezone mix-up
+-- validate_and_submit_overtime subtracted a Manila timestamptz from a
+-- timezone-less timestamp. On UTC databases that added +8 hours
+-- (7pm–10pm Manila stored as 11.00 instead of 3.00).
+-- Also backfills overtime_requests.hours from start_time/end_time,
+-- and corrects CTO already credited from inflated hours.
+-- Does NOT replace approve_overtime_request.
 -- Safe to re-run.
 -- ============================================================
 
--- 1. VALIDATE AND SUBMIT OVERTIME REQUEST
--- ============================================================
+ALTER TABLE public.overtime_requests
+  ALTER COLUMN hours TYPE NUMERIC(6,2);
+
 CREATE OR REPLACE FUNCTION public.validate_and_submit_overtime(
   p_ot_date DATE,
   p_reason TEXT,
@@ -21,21 +26,19 @@ DECLARE
   v_emp_id UUID := auth.uid();
   v_att RECORD;
   v_shift_end TIME;
+  v_end_time TIME;
   v_weekday TEXT;
   v_raw_mins INT;
   v_rounded_mins INT;
-  v_end_time TIME;
   v_ot_hours NUMERIC(6,2);
   v_time_out_local TIMESTAMP;
   v_shift_end_local TIMESTAMP;
   v_new_id UUID;
 BEGIN
-  -- 1. Eligibility: reject manager and executive
   IF public.has_role(v_emp_id, 'manager') OR public.has_role(v_emp_id, 'executive') THEN
     RETURN jsonb_build_object('success', false, 'error', 'Managers and executives are not eligible for overtime');
   END IF;
 
-  -- 2. Fetch attendance for OT date
   SELECT ar.time_in, ar.time_out, ar.status
   INTO v_att
   FROM attendance_records ar
@@ -53,7 +56,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'No overtime recorded. Time-out must be after shift end.');
   END IF;
 
-  -- 3. Get shift end_time for this weekday
   v_weekday := to_char(p_ot_date, 'Dy');
   SELECT s.end_time INTO v_shift_end
   FROM employee_shifts es
@@ -67,7 +69,7 @@ BEGIN
     v_shift_end := '19:00'::time;
   END IF;
 
-  -- 4. Manila wall-clock on both sides (never mix timestamptz with timestamp).
+  -- Manila wall-clock on both sides (never mix timestamptz with timestamp).
   v_time_out_local := v_att.time_out AT TIME ZONE 'Asia/Manila';
   v_shift_end_local := p_ot_date::timestamp + v_shift_end;
   v_end_time := v_time_out_local::time;
@@ -76,7 +78,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'No overtime recorded. Time-out must be after shift end.');
   END IF;
 
-  -- 5. Clock times vs shift end (same as File OT preview), overnight wrap, max 24h
   v_raw_mins := FLOOR(EXTRACT(EPOCH FROM (v_end_time - v_shift_end)) / 60)::int;
   IF v_raw_mins < 0 THEN
     v_raw_mins := v_raw_mins + (24 * 60);
@@ -94,7 +95,6 @@ BEGIN
 
   v_ot_hours := ROUND((v_rounded_mins / 60.0)::numeric, 2);
 
-  -- 6. No duplicate OT for same date (pending or approved)
   IF EXISTS (
     SELECT 1 FROM overtime_requests
     WHERE employee_id = v_emp_id
@@ -104,7 +104,6 @@ BEGIN
     RETURN jsonb_build_object('success', false, 'error', 'OT already filed for this date');
   END IF;
 
-  -- 7. Insert
   INSERT INTO overtime_requests (
     employee_id,
     date,
@@ -133,48 +132,57 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 2. APPROVE/REJECT OVERTIME REQUEST
--- ============================================================
-CREATE OR REPLACE FUNCTION public.approve_overtime_request(
-  p_ot_id UUID,
-  p_action TEXT
+-- Correct CTO first, while old hours are still on the row.
+WITH corrected AS (
+  SELECT
+    employee_id,
+    EXTRACT(YEAR FROM date)::int AS year,
+    ROUND((
+      (
+        FLOOR(
+          EXTRACT(EPOCH FROM (
+            CASE
+              WHEN end_time >= start_time THEN end_time - start_time
+              ELSE (end_time + INTERVAL '24 hours') - start_time
+            END
+          )) / 60 / 30
+        ) * 30 / 60.0
+      ) / 8
+    )::numeric, 3)
+    - ROUND((COALESCE(hours, 0) / 8)::numeric, 3) AS cto_delta
+  FROM public.overtime_requests
+  WHERE status = 'approved'
+    AND start_time IS NOT NULL
+    AND end_time IS NOT NULL
+),
+delta AS (
+  SELECT employee_id, year, SUM(cto_delta) AS cto_delta
+  FROM corrected
+  WHERE cto_delta <> 0
+  GROUP BY employee_id, year
 )
-RETURNS JSONB
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_rec RECORD;
-  v_approver_id UUID := auth.uid();
-BEGIN
-  IF p_action NOT IN ('approved', 'rejected') THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Invalid action');
-  END IF;
+UPDATE public.leave_balances lb
+SET
+  balances = jsonb_set(
+    COALESCE(lb.balances, '{}'::jsonb),
+    '{cto}',
+    to_jsonb(ROUND((GREATEST(0, COALESCE((lb.balances->>'cto')::numeric, 0) + d.cto_delta))::numeric, 3))
+  ),
+  updated_at = now()
+FROM delta d
+WHERE lb.employee_id = d.employee_id
+  AND lb.year = d.year;
 
-  SELECT * INTO v_rec
-  FROM overtime_requests
-  WHERE id = p_ot_id AND status = 'pending';
-
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object('success', false, 'error', 'OT request not found or not pending');
-  END IF;
-
-  IF NOT (
-    public.is_admin(v_approver_id)
-    OR public.is_supervisor_of(v_approver_id, v_rec.employee_id)
-    OR public.is_approver_of(v_approver_id, v_rec.employee_id)
-  ) THEN
-    RETURN jsonb_build_object('success', false, 'error', 'Not authorized to approve this request');
-  END IF;
-
-  UPDATE overtime_requests
-  SET status = p_action::overtime_status,
-      approved_by = v_approver_id,
-      approved_at = now(),
-      updated_at = now()
-  WHERE id = p_ot_id;
-
-  RETURN jsonb_build_object('success', true);
-END;
-$$;
+UPDATE public.overtime_requests
+SET hours = (
+  FLOOR(
+    EXTRACT(EPOCH FROM (
+      CASE
+        WHEN end_time >= start_time THEN end_time - start_time
+        ELSE (end_time + INTERVAL '24 hours') - start_time
+      END
+    )) / 60 / 30
+  ) * 30 / 60.0
+)
+WHERE start_time IS NOT NULL
+  AND end_time IS NOT NULL;

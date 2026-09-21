@@ -23,6 +23,15 @@ import {
   getUsedDays,
   type LeaveUsageMap,
 } from '@/lib/leaveUsageAggregation';
+import CtoHistoryDialog, { type CtoHistoryEmployee } from '@/components/CtoHistoryDialog';
+import {
+  QuickFilterSheet,
+  createQuickFilterAndClause,
+  matchesQuickFilterAndClauses,
+  type QuickFilterAndClause,
+  type QuickFilterColumn,
+} from '@/components/QuickFilterSheet';
+import { ALL_TIME_DATE_RANGE, type DateRangeFilterValue } from '@/components/DateRangeFilterPopover';
 
 interface LeaveTypeConfig {
   id: string;
@@ -36,6 +45,8 @@ interface EmployeeRow {
   employee_code: string;
   first_name: string;
   last_name: string;
+  department?: string | null;
+  position?: string | null;
 }
 
 interface LeaveBalanceRow {
@@ -74,6 +85,34 @@ function parseOptionalNumber(raw: string): number | null {
   return Number.isFinite(n) ? n : null;
 }
 
+type LeaveBalanceQuickColumn = 'employee' | 'employee_code' | 'department' | 'position';
+type LeaveBalanceStatusFilter = 'all' | 'has_credits' | 'no_credits';
+
+const LeaveBalanceQuickFilterSheet = QuickFilterSheet<LeaveBalanceQuickColumn, LeaveBalanceStatusFilter>;
+
+function uniqueOptions(items: Array<{ value: string; label: string }>) {
+  const seen = new Set<string>();
+  return items
+    .filter((item) => {
+      const key = item.value.trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function employeeHasCredits(lb: LeaveBalanceRow | null, codes: string[]): boolean {
+  if (!lb) return false;
+  const values = [
+    lb.vl_balance,
+    lb.sl_balance,
+    lb.pto_balance,
+    ...codes.map((code) => lb.balances?.[code]),
+  ];
+  return values.some((v) => Number(v ?? 0) > 0);
+}
+
 /** Frozen columns — opaque backgrounds so scrolled cells don't show through */
 const STICKY_FROZEN_BG = '!bg-white dark:!bg-[hsl(var(--card))]';
 const STICKY_CODE_COL = `sticky left-0 z-20 w-28 min-w-28 max-w-28 ${STICKY_FROZEN_BG} group-hover:!bg-muted`;
@@ -93,6 +132,12 @@ const AllEmployeeLeaveBalances = () => {
   const [editingEmployeeId, setEditingEmployeeId] = useState<string | null>(null);
   const [draftByCode, setDraftByCode] = useState<Record<string, string>>({});
   const [savingEmployeeId, setSavingEmployeeId] = useState<string | null>(null);
+  const [ctoDialogEmployee, setCtoDialogEmployee] = useState<CtoHistoryEmployee | null>(null);
+  const [dateRange, setDateRange] = useState<DateRangeFilterValue>(ALL_TIME_DATE_RANGE);
+  const [columnClauses, setColumnClauses] = useState<QuickFilterAndClause<LeaveBalanceQuickColumn>[]>([
+    createQuickFilterAndClause<LeaveBalanceQuickColumn>(),
+  ]);
+  const [statusFilter, setStatusFilter] = useState<LeaveBalanceStatusFilter>('all');
 
   const currentYear = new Date().getFullYear();
   const [selectedYear, setSelectedYear] = useState<number>(currentYear);
@@ -105,7 +150,7 @@ const AllEmployeeLeaveBalances = () => {
     const [empRes, lbRes, configRes] = await Promise.all([
       supabase
         .from('employees')
-        .select('id, employee_code, first_name, last_name')
+        .select('id, employee_code, first_name, last_name, department, position')
         .eq('is_active', true)
         .order('employee_code'),
       supabase.from('leave_balances').select('*').eq('year', selectedYear),
@@ -148,24 +193,101 @@ const AllEmployeeLeaveBalances = () => {
     fetchData();
   }, [fetchData]);
 
+  const employeeName = (e: EmployeeRow) => [e.first_name, e.last_name].filter(Boolean).join(' ') || '—';
+
+  const dynamicLeaveCodes = useMemo(
+    () => leaveTypeConfigs.map((c) => c.code).filter((code) => !['vl', 'sl', 'pto', 'lwop'].includes(code)),
+    [leaveTypeConfigs]
+  );
+
+  const quickColumns = useMemo((): QuickFilterColumn<LeaveBalanceQuickColumn>[] => {
+    return [
+      {
+        key: 'employee',
+        label: 'Employee Name',
+        searchPlaceholder: 'Search employee...',
+        options: uniqueOptions(employees.map((e) => ({ value: e.id, label: employeeName(e) }))),
+      },
+      {
+        key: 'employee_code',
+        label: 'Employee Code',
+        searchPlaceholder: 'Search code...',
+        options: uniqueOptions(
+          employees
+            .filter((e) => e.employee_code)
+            .map((e) => ({ value: e.employee_code, label: e.employee_code }))
+        ),
+      },
+      {
+        key: 'department',
+        label: 'Department',
+        searchPlaceholder: 'Search department...',
+        options: uniqueOptions(
+          employees
+            .filter((e) => e.department)
+            .map((e) => ({ value: e.department as string, label: e.department as string }))
+        ),
+      },
+      {
+        key: 'position',
+        label: 'Rank/Position',
+        searchPlaceholder: 'Search position...',
+        options: uniqueOptions(
+          employees
+            .filter((e) => e.position)
+            .map((e) => ({ value: e.position as string, label: e.position as string }))
+        ),
+      },
+    ];
+  }, [employees]);
+
+  const statusOptions = useMemo(() => {
+    const withCredits = employees.filter((e) =>
+      employeeHasCredits(balanceMap.get(e.id) ?? null, dynamicLeaveCodes)
+    ).length;
+    return [
+      { value: 'all' as const, label: 'All employees', count: employees.length },
+      { value: 'has_credits' as const, label: 'Has leave credits', count: withCredits },
+      { value: 'no_credits' as const, label: 'No leave credits', count: employees.length - withCredits },
+    ];
+  }, [employees, balanceMap, dynamicLeaveCodes]);
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return employees;
-    const q = search.toLowerCase();
-    return employees.filter(
-      (e) =>
-        (e.employee_code || '').toLowerCase().includes(q) ||
-        `${(e.first_name || '')} ${(e.last_name || '')}`.toLowerCase().trim().includes(q)
-    );
-  }, [employees, search]);
+    const q = search.trim().toLowerCase();
+    return employees.filter((e) => {
+      if (q) {
+        const name = `${e.first_name || ''} ${e.last_name || ''}`.toLowerCase().trim();
+        const matchesSearch = (e.employee_code || '').toLowerCase().includes(q) || name.includes(q);
+        if (!matchesSearch) return false;
+      }
+
+      const lb = balanceMap.get(e.id) ?? null;
+      const hasCredits = employeeHasCredits(lb, dynamicLeaveCodes);
+      if (statusFilter === 'has_credits' && !hasCredits) return false;
+      if (statusFilter === 'no_credits' && hasCredits) return false;
+
+      return matchesQuickFilterAndClauses(columnClauses, (field, value) => {
+        if (field === 'employee') return e.id === value;
+        if (field === 'employee_code') return e.employee_code === value;
+        if (field === 'department') return (e.department || '') === value;
+        if (field === 'position') return (e.position || '') === value;
+        return false;
+      });
+    });
+  }, [employees, search, columnClauses, statusFilter, balanceMap, dynamicLeaveCodes]);
 
   const paginated = useMemo(
     () => filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
     [filtered, page]
   );
 
-  useEffect(() => setPage(1), [search]);
+  useEffect(() => setPage(1), [search, columnClauses, statusFilter]);
 
-  const employeeName = (e: EmployeeRow) => [e.first_name, e.last_name].filter(Boolean).join(' ') || '—';
+  const clearQuickFilters = () => {
+    setDateRange(ALL_TIME_DATE_RANGE);
+    setColumnClauses([createQuickFilterAndClause<LeaveBalanceQuickColumn>()]);
+    setStatusFilter('all');
+  };
 
   const handleExport = async (format: 'pdf' | 'csv' | 'xlsx') => {
     setExportLoading(true);
@@ -258,11 +380,24 @@ const AllEmployeeLeaveBalances = () => {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Leave Balances ({filtered.length})</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Year {selectedYear} — Used days are summed from approved leave requests
-          </p>
+        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+          <div>
+            <CardTitle className="text-base">Leave Balances ({filtered.length})</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Year {selectedYear} — Used days are summed from approved leave requests. Click a CTO value to view overtime credit history.
+            </p>
+          </div>
+          <LeaveBalanceQuickFilterSheet
+            dateRange={dateRange}
+            onDateRangeChange={setDateRange}
+            columns={quickColumns}
+            columnClauses={columnClauses}
+            onColumnClausesChange={setColumnClauses}
+            status={statusFilter}
+            statusOptions={statusOptions}
+            onStatusChange={setStatusFilter}
+            onClear={clearQuickFilters}
+          />
         </CardHeader>
         <CardContent>
           {loading ? (
@@ -302,28 +437,52 @@ const AllEmployeeLeaveBalances = () => {
                           {e.employee_code || '—'}
                         </TableCell>
                         <TableCell className={`font-medium ${STICKY_NAME_COL}`}>{employeeName(e)}</TableCell>
-                        {leaveTypeConfigs.map((c) => (
-                          <Fragment key={c.id}>
-                            <TableCell className="font-mono text-sm text-center">
-                              {isEditing ? (
-                                <Input
-                                  type="number"
-                                  step="0.01"
-                                  value={draftByCode[c.code] ?? ''}
-                                  onChange={(ev) =>
-                                    setDraftByCode((prev) => ({ ...prev, [c.code]: ev.target.value }))
-                                  }
-                                  className="h-8 w-24 mx-auto"
-                                />
-                              ) : (
-                                getBalanceDisplayValue(lb, c.code)
-                              )}
-                            </TableCell>
-                            <TableCell className="font-mono text-sm text-center text-muted-foreground">
-                              {formatUsedDays(getUsedDays(usageMap, e.id, c.code))}
-                            </TableCell>
-                          </Fragment>
-                        ))}
+                        {leaveTypeConfigs.map((c) => {
+                          const isCto = c.code === 'cto';
+                          const usedDays = getUsedDays(usageMap, e.id, c.code);
+                          return (
+                            <Fragment key={c.id}>
+                              <TableCell className="font-mono text-sm text-center">
+                                {isEditing ? (
+                                  <Input
+                                    type="number"
+                                    step={isCto ? '0.001' : '0.01'}
+                                    value={draftByCode[c.code] ?? ''}
+                                    onChange={(ev) =>
+                                      setDraftByCode((prev) => ({ ...prev, [c.code]: ev.target.value }))
+                                    }
+                                    className="h-8 w-24 mx-auto"
+                                  />
+                                ) : isCto ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCtoDialogEmployee(e)}
+                                    title="View CTO history"
+                                    className="font-mono text-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                                  >
+                                    {getBalanceDisplayValue(lb, c.code)}
+                                  </button>
+                                ) : (
+                                  getBalanceDisplayValue(lb, c.code)
+                                )}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm text-center text-muted-foreground">
+                                {isCto && !isEditing ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCtoDialogEmployee(e)}
+                                    title="View CTO history"
+                                    className="font-mono text-sm text-primary underline-offset-2 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
+                                  >
+                                    {formatUsedDays(usedDays)}
+                                  </button>
+                                ) : (
+                                  formatUsedDays(usedDays)
+                                )}
+                              </TableCell>
+                            </Fragment>
+                          );
+                        })}
                         <TableCell className="text-right">
                           {isEditing ? (
                             <div className="inline-flex items-center gap-2">
@@ -433,6 +592,17 @@ const AllEmployeeLeaveBalances = () => {
           )}
         </CardContent>
       </Card>
+
+      <CtoHistoryDialog
+        open={!!ctoDialogEmployee}
+        onOpenChange={(open) => {
+          if (!open) setCtoDialogEmployee(null);
+        }}
+        employee={ctoDialogEmployee}
+        year={selectedYear}
+        currentBalance={ctoDialogEmployee ? getNumericValue(balanceMap.get(ctoDialogEmployee.id) ?? null, 'cto') : null}
+        usedDays={ctoDialogEmployee ? getUsedDays(usageMap, ctoDialogEmployee.id, 'cto') : 0}
+      />
     </div>
   );
 };
