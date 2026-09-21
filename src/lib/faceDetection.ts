@@ -7,11 +7,58 @@ import * as faceapi from '@vladmandic/face-api';
 
 const MODEL_URL = '/models';
 let modelsLoaded = false;
+let loadPromise: Promise<void> | null = null;
+
+type TfBackendApi = {
+  removeBackend: (name: string) => void;
+  setBackend: (name: string) => Promise<boolean>;
+  ready: () => Promise<void>;
+  getBackend: () => string;
+};
+
+/**
+ * WASM is TensorFlow's default highest-priority backend, but it often is not
+ * actually ready in Vite (wasm files / COOP-COEP). Using it first throws:
+ * "The highest priority backend 'wasm' has not yet been initialized."
+ */
+async function initTfBackend(): Promise<void> {
+  const tf = faceapi.tf as unknown as TfBackendApi;
+
+  try {
+    tf.removeBackend('wasm');
+  } catch {
+    // wasm may already be unregistered
+  }
+
+  for (const name of ['webgl', 'cpu'] as const) {
+    try {
+      const ok = await tf.setBackend(name);
+      if (!ok) continue;
+      await tf.ready();
+      if (tf.getBackend() === name) return;
+    } catch {
+      // try next backend
+    }
+  }
+
+  await tf.ready();
+}
+
+async function loadModels(): Promise<void> {
+  await initTfBackend();
+  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
+  modelsLoaded = true;
+}
 
 export async function ensureModelsLoaded(): Promise<void> {
   if (modelsLoaded) return;
-  await faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL);
-  modelsLoaded = true;
+  if (!loadPromise) {
+    loadPromise = loadModels().catch((err) => {
+      loadPromise = null;
+      throw err;
+    });
+  }
+  await loadPromise;
 }
 
 /**

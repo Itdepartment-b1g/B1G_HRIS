@@ -35,6 +35,7 @@ import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { exportAcknowledgements } from '@/lib/exportAcknowledgements';
 import { isImageUrl } from '@/lib/attachmentUtils';
 import { createActivityInAppNotification } from '@/lib/inAppNotifications';
+import { acknowledgePolicy } from '@/lib/activityAcknowledgements';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -156,15 +157,13 @@ const ActivityPoliciesTab = () => {
   const handleAcknowledge = async (policyId: string) => {
     if (!currentUser?.id) return;
     setAcknowledgementing(policyId);
-    const { error } = await supabase
-      .from('policy_acknowledgements')
-      .insert({ policy_id: policyId, employee_id: currentUser.id });
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      await acknowledgePolicy(currentUser.id, policyId);
       toast.success('Acknowledgement recorded.');
       fetchPolicies();
       refetchCompliance();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to record acknowledgement.');
     }
     setAcknowledgementing(null);
   };

@@ -282,10 +282,10 @@ const CtoHistoryDialog = ({
                 label="Current balance"
                 value={currentBalance == null ? '---' : formatCtoFixed(currentBalance)}
               />
-              <SummaryTile
+              {/* <SummaryTile
                 label="Total accumulated"
                 value={reconstructed == null ? '---' : formatCtoFixed(reconstructed)}
-              />
+              /> */}
             </div>
 
             {history && history.rows.length === 0 ? (
@@ -302,7 +302,7 @@ const CtoHistoryDialog = ({
                   <span>Date of approved OT</span>
                   <span className="text-right">OT hours</span>
                   <span className="text-right">CTO credited</span>
-                  <span className="text-right">Total accumulated</span>
+                  {/* <span className="text-right">Total accumulated</span> */}
                   <span />
                 </div>
                 <Accordion type="multiple" className="min-w-[28rem] md:min-w-0">
@@ -325,9 +325,9 @@ const CtoHistoryDialog = ({
                           >
                             {formatDelta(row.ctoDelta)}
                           </p>
-                          <p className="font-mono text-sm font-medium md:text-right">
+                          {/* <p className="font-mono text-sm font-medium md:text-right">
                             {formatCtoFixed(row.runningTotal)}
-                          </p>
+                          </p> */}
                         </div>
                       </AccordionTrigger>
                       <AccordionContent>
