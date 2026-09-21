@@ -132,11 +132,33 @@ function sortedOptions(map: Map<string, string>) {
 }
 
 function formatDate(dateStr: string) {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'long',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function formatDateLong(dateStr: string) {
-  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
+
+function formatAttendanceWeekday(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+}
+
+function formatAttendanceDateOnly(dateStr: string) {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function formatTime(iso: string | null): string | null {
@@ -1328,7 +1350,10 @@ const Attendance = () => {
                               )}
                             </Button>
                           </TableCell>
-                            <TableCell className="text-sm text-muted-foreground">{formatDate(r.date)}</TableCell>
+                            <TableCell className="text-sm text-muted-foreground">
+                              <div className="text-foreground font-medium">{formatAttendanceWeekday(r.date)}</div>
+                              <div>{formatAttendanceDateOnly(r.date)}</div>
+                            </TableCell>
                             <TableCell className="font-mono text-sm">{r.employee_code}</TableCell>
                             <TableCell className="font-medium">{r.employee_name}</TableCell>
                             <TableCell className="text-sm">{r.assigned_shift}</TableCell>
@@ -1449,7 +1474,11 @@ const Attendance = () => {
           {viewingRecord && (
             <div className="space-y-6">
               <div className="grid grid-cols-2 gap-4">
-                <div><span className="text-muted-foreground text-sm">Date</span><p className="font-medium">{formatDate(viewingRecord.date)}</p></div>
+                <div>
+                  <span className="text-muted-foreground text-sm">Date</span>
+                  <p className="font-medium">{formatAttendanceWeekday(viewingRecord.date)}</p>
+                  <p className="text-sm text-muted-foreground">{formatAttendanceDateOnly(viewingRecord.date)}</p>
+                </div>
                 <div><span className="text-muted-foreground text-sm">Employee Code</span><p className="font-mono">{viewingRecord.employee_code}</p></div>
                 <div><span className="text-muted-foreground text-sm">Employee</span><p className="font-medium">{viewingRecord.employee_name}</p></div>
                 <div><span className="text-muted-foreground text-sm">Assigned Shift</span><p>{viewingRecord.assigned_shift}</p></div>
