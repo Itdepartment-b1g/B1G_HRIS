@@ -12,7 +12,7 @@ ALTER TYPE public.leave_type ADD VALUE IF NOT EXISTS 'cto';
 
 -- 2. Ensure CTO exists in leave_type_config (earned via OT, not annual entitlement)
 INSERT INTO public.leave_type_config (code, name, description, annual_entitlement, resets_on_jan1, cap, sort_order, is_system)
-SELECT 'cto', 'Compensatory Time Off', 'Time off earned from approved overtime (8 OT hours = 1 CTO day)', 0, false, null, 7, false
+SELECT 'cto', 'Compensatory Time Off', 'Time off earned from approved overtime (1 OT hour = 0.125 CTO; 8 OT hours = 1 CTO)', 0, false, null, 7, false
 WHERE NOT EXISTS (SELECT 1 FROM public.leave_type_config WHERE code = 'cto');
 
 -- Mark paid if pay_type column exists
@@ -65,7 +65,7 @@ DECLARE
   v_num_days NUMERIC(5,2);
   v_day_factor NUMERIC := 1;
   v_balance RECORD;
-  v_json_bal NUMERIC(5,2);
+  v_json_bal NUMERIC(6,3);
   v_is_regular BOOLEAN;
   v_shift_start TIME;
   v_weekday TEXT;
@@ -184,7 +184,7 @@ DECLARE
   v_num_days NUMERIC(5,2);
   v_day_factor NUMERIC := 1;
   v_balance RECORD;
-  v_json_bal NUMERIC(5,2);
+  v_json_bal NUMERIC(6,3);
   v_is_regular BOOLEAN;
   v_new_id UUID;
   v_result JSONB;
@@ -309,7 +309,7 @@ DECLARE
   v_approver_id UUID := auth.uid();
   v_year INT;
   v_balance RECORD;
-  v_json_bal NUMERIC(5,2);
+  v_json_bal NUMERIC(6,3);
   v_leave_code TEXT;
   v_days NUMERIC(5,2);
 BEGIN
@@ -388,7 +388,7 @@ BEGIN
       SET balances = jsonb_set(
             COALESCE(balances, '{}'::jsonb),
             ARRAY[v_leave_code],
-            to_jsonb(ROUND((GREATEST(0, COALESCE((balances ->> v_leave_code)::numeric, 0) - v_days))::numeric, 2))
+            to_jsonb(ROUND((GREATEST(0, COALESCE((balances ->> v_leave_code)::numeric, 0) - v_days))::numeric, 3))
           ),
           updated_at = now()
       WHERE employee_id = v_rec.employee_id AND year = v_year;

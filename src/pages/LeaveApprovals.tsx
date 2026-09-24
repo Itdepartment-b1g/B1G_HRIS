@@ -30,6 +30,15 @@ import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
 import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { LeaveRequest, LeaveTypeConfigForBalance } from '@/types';
+import {
+  QuickFilterSheet,
+  createQuickFilterAndClause,
+  matchesQuickFilterAndClauses,
+  type QuickFilterAndClause,
+  type QuickFilterColumn,
+} from '@/components/QuickFilterSheet';
+import { ALL_TIME_DATE_RANGE, type DateRangeFilterValue } from '@/components/DateRangeFilterPopover';
+import { getDateRangeFromPreset, isDateInRange } from '@/lib/dateRangePresets';
 
 function formatDate(dateStr: string) {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
@@ -39,6 +48,40 @@ interface LeaveRequestWithEmployee extends LeaveRequest {
   employee_name: string;
   employee_avatar_url?: string | null;
   approver_name?: string | null;
+  department?: string | null;
+  position?: string | null;
+}
+
+type LeaveQuickColumn = 'employee' | 'department' | 'position' | 'duration';
+type LeaveQuickStatus = 'all' | 'pending' | 'approved' | 'rejected' | 'cancelled';
+type LeaveStatusTab = Exclude<LeaveQuickStatus, 'all'>;
+
+const LeaveQuickFilterSheet = QuickFilterSheet<LeaveQuickColumn, LeaveQuickStatus>;
+
+function uniqueOptions(items: Array<{ value: string; label: string }>) {
+  const seen = new Set<string>();
+  return items
+    .filter((item) => {
+      const key = item.value.trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function leaveOverlapsDateRange(
+  startDate: string,
+  endDate: string,
+  start?: Date,
+  end?: Date
+): boolean {
+  if (!start && !end) return true;
+  if (isDateInRange(startDate, start, end) || isDateInRange(endDate, start, end)) return true;
+  if (!start || !end) return false;
+  const leaveStart = new Date(`${startDate}T12:00:00`);
+  const leaveEnd = new Date(`${endDate}T12:00:00`);
+  return leaveStart <= end && leaveEnd >= start;
 }
 
 const DURATION_LABELS: Record<string, string> = {
@@ -90,6 +133,12 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
   const selectedLeaveType = useExternalFilter ? (filterCode ?? '') : internalFilter;
   const [viewingRequest, setViewingRequest] = useState<LeaveRequestWithEmployee | null>(null);
   const [leaveTypes, setLeaveTypes] = useState<LeaveTypeConfigForBalance[]>([]);
+  const [activeTab, setActiveTab] = useState<LeaveStatusTab>('pending');
+  const [dateRange, setDateRange] = useState<DateRangeFilterValue>(ALL_TIME_DATE_RANGE);
+  const [columnClauses, setColumnClauses] = useState<QuickFilterAndClause<LeaveQuickColumn>[]>([
+    createQuickFilterAndClause<LeaveQuickColumn>(),
+  ]);
+  const [quickStatusFilter, setQuickStatusFilter] = useState<LeaveQuickStatus>('all');
 
   const canCancelLeave = currentUser?.roles?.some((r) => r === 'super_admin' || r === 'admin') ?? false;
 
@@ -147,13 +196,15 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
     }
     const { data } = await supabase
       .from('leave_requests')
-      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name), canceller:employees!cancelled_by(first_name, last_name)')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url, department, position), approver:employees!approved_by(first_name, last_name), canceller:employees!cancelled_by(first_name, last_name)')
       .in('employee_id', ids)
       .order('created_at', { ascending: false });
     const withName = (data || []).map((r: any) => ({
       ...r,
       employee_name: r.employee ? `${r.employee.first_name} ${r.employee.last_name}` : 'Unknown',
       employee_avatar_url: r.employee?.avatar_url ?? null,
+      department: r.employee?.department ?? null,
+      position: r.employee?.position ?? null,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
       canceller_name: r.canceller ? `${r.canceller.first_name} ${r.canceller.last_name}` : null,
     }));
@@ -198,10 +249,105 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
   const filterByType = (list: LeaveRequestWithEmployee[]) =>
     !selectedLeaveType ? list : list.filter((r) => (r.leave_type || '').toLowerCase() === selectedLeaveType.toLowerCase());
 
-  const filteredPending = useMemo(() => filterByType(pending), [pending, selectedLeaveType]);
-  const filteredApproved = useMemo(() => filterByType(approved), [approved, selectedLeaveType]);
-  const filteredRejected = useMemo(() => filterByType(rejected), [rejected, selectedLeaveType]);
-  const filteredCancelled = useMemo(() => filterByType(cancelled), [cancelled, selectedLeaveType]);
+  const allRequests = useMemo(
+    () => [...pending, ...approved, ...rejected, ...cancelled],
+    [pending, approved, rejected, cancelled]
+  );
+
+  const typeFilteredAll = useMemo(() => filterByType(allRequests), [allRequests, selectedLeaveType]);
+
+  const applyQuickFilter = (list: LeaveRequestWithEmployee[]) => {
+    const { start, end } = getDateRangeFromPreset(dateRange.preset, dateRange.customStart, dateRange.customEnd);
+    return list.filter((r) => {
+      if (!leaveOverlapsDateRange(r.start_date, r.end_date, start, end)) return false;
+      if (quickStatusFilter !== 'all' && r.status !== quickStatusFilter) return false;
+      return matchesQuickFilterAndClauses(columnClauses, (field, value) => {
+        if (field === 'employee') return r.employee_id === value;
+        if (field === 'department') return (r.department || '') === value;
+        if (field === 'position') return (r.position || '') === value;
+        if (field === 'duration') return (r.leave_duration_type || 'fullday') === value;
+        return false;
+      });
+    });
+  };
+
+  const filteredPending = useMemo(
+    () => applyQuickFilter(filterByType(pending)),
+    [pending, selectedLeaveType, dateRange, columnClauses, quickStatusFilter]
+  );
+  const filteredApproved = useMemo(
+    () => applyQuickFilter(filterByType(approved)),
+    [approved, selectedLeaveType, dateRange, columnClauses, quickStatusFilter]
+  );
+  const filteredRejected = useMemo(
+    () => applyQuickFilter(filterByType(rejected)),
+    [rejected, selectedLeaveType, dateRange, columnClauses, quickStatusFilter]
+  );
+  const filteredCancelled = useMemo(
+    () => applyQuickFilter(filterByType(cancelled)),
+    [cancelled, selectedLeaveType, dateRange, columnClauses, quickStatusFilter]
+  );
+
+  const quickColumns = useMemo((): QuickFilterColumn<LeaveQuickColumn>[] => {
+    return [
+      {
+        key: 'employee',
+        label: 'Employee Name',
+        searchPlaceholder: 'Search employee...',
+        options: uniqueOptions(
+          typeFilteredAll.map((r) => ({ value: r.employee_id, label: r.employee_name }))
+        ),
+      },
+      {
+        key: 'department',
+        label: 'Department',
+        searchPlaceholder: 'Search department...',
+        options: uniqueOptions(
+          typeFilteredAll
+            .filter((r) => r.department)
+            .map((r) => ({ value: r.department as string, label: r.department as string }))
+        ),
+      },
+      {
+        key: 'position',
+        label: 'Rank/Position',
+        searchPlaceholder: 'Search position...',
+        options: uniqueOptions(
+          typeFilteredAll
+            .filter((r) => r.position)
+            .map((r) => ({ value: r.position as string, label: r.position as string }))
+        ),
+      },
+      {
+        key: 'duration',
+        label: 'Duration',
+        searchPlaceholder: 'Search duration...',
+        options: uniqueOptions(
+          typeFilteredAll.map((r) => {
+            const value = r.leave_duration_type || 'fullday';
+            return { value, label: DURATION_LABELS[value] ?? 'Full Day' };
+          })
+        ),
+      },
+    ];
+  }, [typeFilteredAll]);
+
+  const statusOptions = useMemo(() => {
+    const count = (status: LeaveStatusTab) => typeFilteredAll.filter((r) => r.status === status).length;
+    return [
+      { value: 'all' as const, label: 'All statuses', count: typeFilteredAll.length },
+      { value: 'pending' as const, label: 'Pending', count: count('pending') },
+      { value: 'approved' as const, label: 'Approved', count: count('approved') },
+      { value: 'rejected' as const, label: 'Rejected', count: count('rejected') },
+      { value: 'cancelled' as const, label: 'Cancelled', count: count('cancelled') },
+    ];
+  }, [typeFilteredAll]);
+
+  const clearQuickFilters = () => {
+    setDateRange(ALL_TIME_DATE_RANGE);
+    setColumnClauses([createQuickFilterAndClause<LeaveQuickColumn>()]);
+    setQuickStatusFilter('all');
+  };
 
   const openCancelDialog = (request: LeaveRequestWithEmployee) => {
     setCancellingRequest(request);
@@ -507,13 +653,29 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
           </div>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Leave Requests</CardTitle>
-              <CardDescription>
-                {selectedLeaveType
-                  ? `Showing ${sidebarLeaveItems.find((i) => i.value === selectedLeaveType)?.label || selectedLeaveType.toUpperCase()} requests.`
-                  : 'Pending requests require your approval. Approved and rejected requests are shown for reference.'}
-              </CardDescription>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+              <div>
+                <CardTitle className="text-base">Leave Requests</CardTitle>
+                <CardDescription>
+                  {selectedLeaveType
+                    ? `Showing ${sidebarLeaveItems.find((i) => i.value === selectedLeaveType)?.label || selectedLeaveType.toUpperCase()} requests.`
+                    : 'Pending requests require your approval. Approved and rejected requests are shown for reference.'}
+                </CardDescription>
+              </div>
+              <LeaveQuickFilterSheet
+                dateRange={dateRange}
+                onDateRangeChange={setDateRange}
+                columns={quickColumns}
+                columnClauses={columnClauses}
+                onColumnClausesChange={setColumnClauses}
+                status={quickStatusFilter}
+                statusOptions={statusOptions}
+                onStatusChange={(value) => {
+                  setQuickStatusFilter(value);
+                  if (value !== 'all') setActiveTab(value);
+                }}
+                onClear={clearQuickFilters}
+              />
             </CardHeader>
             <CardContent>
               {loading ? (
@@ -521,7 +683,11 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <Tabs defaultValue="pending" className="w-full">
+                <Tabs
+                  value={activeTab}
+                  onValueChange={(value) => setActiveTab(value as LeaveStatusTab)}
+                  className="w-full"
+                >
                   <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="pending">
                       Pending ({filteredPending.length})

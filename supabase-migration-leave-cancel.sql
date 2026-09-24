@@ -91,7 +91,7 @@ BEGIN
             to_jsonb(
               ROUND(
                 (COALESCE((balances ->> v_leave_code)::numeric, 0) + COALESCE(v_rec.number_of_days, 0))::numeric,
-                2
+                3
               )
             )
           ),

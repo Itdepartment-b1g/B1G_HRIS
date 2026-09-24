@@ -109,6 +109,9 @@ export function SelfieLocationCapture({ active, value, onChange, onHasPhotoChang
       onChange(null);
       onHasPhotoChange?.(true);
       stopCamera();
+    } catch (err) {
+      console.error(err);
+      toast.error('Face detection failed to start. Please try capturing again.');
     } finally {
       setFaceCheckLoading(false);
     }
