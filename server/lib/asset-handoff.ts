@@ -1,5 +1,10 @@
 import jwt from 'jsonwebtoken';
 
+export interface HandoffDepartment {
+  id: string;
+  name: string;
+}
+
 export interface HandoffEmployee {
   id: string;
   employee_code: string;
@@ -8,6 +13,7 @@ export interface HandoffEmployee {
   middle_name: string | null;
   last_name: string;
   is_active: boolean;
+  departments: HandoffDepartment[];
 }
 
 export interface HandoffPayload {
@@ -18,6 +24,7 @@ export interface HandoffPayload {
   middle_name: string | null;
   last_name: string;
   is_active: boolean;
+  departments: HandoffDepartment[];
   exp: number;
 }
 
@@ -41,7 +48,7 @@ function getAssetAppUrl(): string {
 
 /**
  * Create a short-lived signed JWT handoff for Asset Management.
- * Payload contains only the agreed identity fields (no passwords / extra HR data).
+ * Payload contains identity fields plus department names (no passwords).
  */
 export function createAssetHandoffToken(employee: HandoffEmployee): { token: string; redirectUrl: string } {
   if (!employee.company_email?.trim()) {
@@ -56,6 +63,7 @@ export function createAssetHandoffToken(employee: HandoffEmployee): { token: str
     middle_name: employee.middle_name,
     last_name: employee.last_name,
     is_active: employee.is_active,
+    departments: employee.departments,
   };
 
   const token = jwt.sign(payload, getHrisSsoSecret(), {
