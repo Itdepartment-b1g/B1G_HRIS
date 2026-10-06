@@ -1,12 +1,32 @@
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { navDropdowns } from '@/lib/navConfig';
+import { navDropdowns, type NavItem } from '@/lib/navConfig';
 import { cn } from '@/lib/utils';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { launchAssetManagement } from '@/store';
+import { useAppDispatch, useAppSelector } from '@/store/hooks';
+import { toast } from 'sonner';
 
 const FeaturesPage = () => {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
+  const dispatch = useAppDispatch();
+  const launchingAsset = useAppSelector((s) => s.assetManagement.status) === 'loading';
+
+  const handleNavItem = async (item: NavItem) => {
+    if (item.externalAction === 'asset-management') {
+      if (launchingAsset) return;
+      try {
+        const result = await dispatch(launchAssetManagement()).unwrap();
+        window.location.assign(result.redirect_url);
+      } catch (err) {
+        const message = typeof err === 'string' ? err : 'Unable to open Asset Management.';
+        toast.error(message);
+      }
+      return;
+    }
+    navigate(item.path);
+  };
 
   return (
     <div className="space-y-6 max-w-2xl mx-auto pb-24">
@@ -36,9 +56,11 @@ const FeaturesPage = () => {
                 return (
                   <button
                     key={item.path + item.label}
-                    onClick={() => navigate(item.path)}
+                    type="button"
+                    disabled={item.externalAction === 'asset-management' && launchingAsset}
+                    onClick={() => void handleNavItem(item)}
                     className={cn(
-                      'flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors hover:bg-gray-50 border border-transparent hover:border-gray-200'
+                      'flex items-center gap-3 w-full p-3 rounded-lg text-left transition-colors hover:bg-gray-50 border border-transparent hover:border-gray-200 disabled:opacity-50'
                     )}
                   >
                     <div className={cn('shrink-0 w-9 h-9 rounded-lg flex items-center justify-center', item.iconBg || 'bg-gray-100')}>

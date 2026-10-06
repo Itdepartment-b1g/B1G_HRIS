@@ -10,6 +10,16 @@ export default defineConfig(({ mode }) => ({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      "/apps": {
+        target: "http://127.0.0.1:3001",
+        changeOrigin: true,
+      },
+      "/health": {
+        target: "http://127.0.0.1:3001",
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     target: ["chrome64", "firefox67", "safari12", "edge79"],
