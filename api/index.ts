@@ -9,6 +9,7 @@ dotenv.config({ path: path.resolve(__dirname, '../.env') });
 const port = Number(process.env.PORT ?? 3001);
 const app = createApp();
 
-app.listen(port, '127.0.0.1', () => {
-  console.log(`[hris-api] listening on http://127.0.0.1:${port}`);
+app.listen(port, '0.0.0.0', () => {
+  console.log(`[hris-api] listening on http://0.0.0.0:${port}`);
 });
+
