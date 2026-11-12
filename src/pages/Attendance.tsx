@@ -113,7 +113,16 @@ function formatEmployeeNameLastFirstMI(opts: { first?: string | null; middle?: s
   return [base, mi].filter(Boolean).join(' ').trim() || 'Unknown';
 }
 
-const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave', 'holiday'] as const;
+const ATTENDANCE_STATUSES = ['present', 'late', 'absent', 'half_day', 'on_leave', 'holiday', 'official_business'] as const;
+const ATTENDANCE_STATUS_LABELS: Record<(typeof ATTENDANCE_STATUSES)[number], string> = {
+  present: 'Present',
+  late: 'Late',
+  absent: 'Absent',
+  half_day: 'Half Day',
+  on_leave: 'On Leave',
+  holiday: 'Holiday',
+  official_business: 'Official Business (OB)',
+};
 const HOLIDAY_TYPE_OPTIONS: { value: HolidayType; label: string }[] = [
   { value: 'regular', label: 'Regular Holiday' },
   { value: 'special', label: 'Special Non-Working' },
@@ -753,12 +762,13 @@ const Attendance = () => {
     }
     return [
       { value: 'all' as const, label: 'All statuses', count: records.length },
-      { value: 'present' as const, label: 'Present', count: counts.present || 0 },
-      { value: 'late' as const, label: 'Late', count: counts.late || 0 },
-      { value: 'absent' as const, label: 'Absent', count: counts.absent || 0 },
-      { value: 'half_day' as const, label: 'Half day', count: counts.half_day || 0 },
-      { value: 'on_leave' as const, label: 'On leave', count: counts.on_leave || 0 },
-      { value: 'holiday' as const, label: 'Holiday', count: counts.holiday || 0 },
+      { value: 'present' as const, label: ATTENDANCE_STATUS_LABELS.present, count: counts.present || 0 },
+      { value: 'late' as const, label: ATTENDANCE_STATUS_LABELS.late, count: counts.late || 0 },
+      { value: 'absent' as const, label: ATTENDANCE_STATUS_LABELS.absent, count: counts.absent || 0 },
+      { value: 'half_day' as const, label: ATTENDANCE_STATUS_LABELS.half_day, count: counts.half_day || 0 },
+      { value: 'on_leave' as const, label: ATTENDANCE_STATUS_LABELS.on_leave, count: counts.on_leave || 0 },
+      { value: 'holiday' as const, label: ATTENDANCE_STATUS_LABELS.holiday, count: counts.holiday || 0 },
+      { value: 'official_business' as const, label: ATTENDANCE_STATUS_LABELS.official_business, count: counts.official_business || 0 },
     ];
   }, [records]);
 
@@ -991,6 +1001,7 @@ const Attendance = () => {
       half_day: 'bg-blue-50 text-blue-700 border-blue-200',
       on_leave: 'bg-purple-50 text-purple-700 border-purple-200',
       holiday: opts?.holidayType ? holidayTypeBadgeClass(opts.holidayType) : 'bg-indigo-50 text-indigo-700 border-indigo-200',
+      official_business: 'bg-cyan-50 text-cyan-700 border-cyan-200',
     };
     const lateLabel = minutesLate != null && minutesLate > 0 && (displayStatus === 'present' || displayStatus === 'late')
       ? formatMinutesLateVisual(minutesLate)
@@ -1010,11 +1021,14 @@ const Attendance = () => {
         ? `On Leave${leaveCode ? ` (${leaveCode.toUpperCase()})` : ''}`
         : displayStatus === 'holiday'
           ? formatHolidayStatusLabel(opts?.holidayType)
+        : displayStatus === 'official_business'
+          ? ATTENDANCE_STATUS_LABELS.official_business
         : displayStatus === 'present' && opts?.businessTripId
           ? `Present (Business Trip)`
         : displayStatus === 'present' && isHalfDayLeave
           ? `Present (Half day)${leaveCode ? ` (${leaveCode.toUpperCase()})` : ''}`
-          : displayStatus.replace('_', ' ');
+          : ATTENDANCE_STATUS_LABELS[displayStatus as keyof typeof ATTENDANCE_STATUS_LABELS]
+            ?? displayStatus.replace(/_/g, ' ');
     return (
       <div className="flex flex-col gap-0.5">
         <Badge variant="outline" className={styles[displayStatus] || ''}>{badgeLabel}</Badge>
@@ -1553,7 +1567,7 @@ const Attendance = () => {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {ATTENDANCE_STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>{s.replace('_', ' ')}</SelectItem>
+                    <SelectItem key={s} value={s}>{ATTENDANCE_STATUS_LABELS[s]}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>

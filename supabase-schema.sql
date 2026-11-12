@@ -9,7 +9,7 @@
 CREATE TYPE public.app_role AS ENUM ('super_admin', 'admin', 'supervisor', 'employee');
 CREATE TYPE public.leave_type AS ENUM ('vacation', 'sick', 'personal', 'maternity', 'paternity');
 CREATE TYPE public.leave_status AS ENUM ('pending', 'approved', 'rejected');
-CREATE TYPE public.attendance_status AS ENUM ('present', 'late', 'absent', 'half_day', 'on_leave');
+CREATE TYPE public.attendance_status AS ENUM ('present', 'late', 'absent', 'half_day', 'on_leave', 'holiday', 'official_business');
 CREATE TYPE public.correction_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE public.overtime_status AS ENUM ('pending', 'approved', 'rejected');
 CREATE TYPE public.trip_status AS ENUM ('pending', 'approved', 'rejected', 'completed');

@@ -67,6 +67,7 @@ function formatMinutesLate(minutes: number | null): string {
 
 function formatStatus(status: string): string {
   if (!status) return '—';
+  if (status === 'official_business') return 'Official Business (OB)';
   return status
     .split('_')
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())

@@ -214,6 +214,15 @@ export async function aggregateAttendanceExport(
       continue;
     }
 
+    // Official Business (OB): credit full net shift hours; do not count as absence.
+    if (r.status === 'official_business') {
+      const netShiftHrs = shiftForDay
+        ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
+        : 8;
+      curr.totalWorkedHours += netShiftHrs;
+      continue;
+    }
+
     const leaveCode = (r as { leave_type_code?: string | null }).leave_type_code ?? null;
     const leaveFraction = ((r as { leave_day_fraction?: number | null }).leave_day_fraction as number | null) ?? null;
     const duration = (r as { leave_duration_type?: string | null }).leave_duration_type ?? null;

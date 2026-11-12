@@ -41,6 +41,7 @@ const statusVariant: Record<string, string> = {
   half_day: 'bg-blue-100 text-blue-700 border-blue-200',
   on_leave: 'bg-slate-100 text-slate-700 border-slate-200',
   holiday: 'bg-indigo-100 text-indigo-700 border-indigo-200',
+  official_business: 'bg-cyan-100 text-cyan-700 border-cyan-200',
 };
 
 function formatTime(t: string | null): string {
@@ -1563,7 +1564,9 @@ const Dashboard = () => {
                         >
                           {record.status === 'holiday'
                             ? formatHolidayStatusLabel(record.holiday_type)
-                            : record.status.replace('_', ' ')}
+                            : record.status === 'official_business'
+                              ? 'Official Business (OB)'
+                              : record.status.replace(/_/g, ' ')}
                         </Badge>
                       </TableCell>
                     </TableRow>

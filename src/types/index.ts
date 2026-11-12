@@ -36,7 +36,7 @@ export interface AttendanceRecord {
   lng_in: number | null;
   lat_out: number | null;
   lng_out: number | null;
-  status: 'present' | 'late' | 'absent' | 'half_day' | 'on_leave' | 'holiday';
+  status: 'present' | 'late' | 'absent' | 'half_day' | 'on_leave' | 'holiday' | 'official_business';
   /** Set when status is holiday; mirrors public.holidays.type */
   holiday_type?: 'regular' | 'special' | 'company' | null;
   notes?: string | null;

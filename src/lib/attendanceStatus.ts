@@ -48,7 +48,7 @@ function getMinutesFromMidnight(isoTimestamp: string): number {
   return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60;
 }
 
-export type AttendanceStatus = 'present' | 'late' | 'absent' | 'half_day' | 'on_leave' | 'holiday';
+export type AttendanceStatus = 'present' | 'late' | 'absent' | 'half_day' | 'on_leave' | 'holiday' | 'official_business';
 
 export interface AttendanceStatusResult {
   status: AttendanceStatus;
@@ -70,6 +70,11 @@ export function computeAttendanceStatusFromTimeIn(params: {
 
   if (!timeInIso) {
     return { status: currentStoredStatus ?? 'absent', minutesLate: 0 };
+  }
+
+  // Keep admin-tagged Official Business when time_in is edited / recomputed.
+  if (currentStoredStatus === 'official_business') {
+    return { status: 'official_business', minutesLate: 0 };
   }
 
   if (exemptions?.late_exempted || exemptions?.grace_period_exempted) {
