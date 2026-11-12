@@ -259,6 +259,16 @@ export async function exportAttendanceReport(options: ExportAttendanceReportOpti
       continue;
     }
 
+    // Official Business (OB): work-related assignment outside the office — credit full
+    // net shift hours, no absence / undertime (mirrors approved business trip days).
+    if (r.status === 'official_business') {
+      const netShiftHrs = shiftForDay
+        ? computeNetShiftHours(shiftForDay.start_time, shiftForDay.end_time, breakHrs)
+        : 8;
+      curr.totalWorkedHours += netShiftHrs;
+      continue;
+    }
+
     // --- Handle leave credit using pay_type for either:
     //  - full-day leave rows (status='on_leave')
     //  - half-day leave rows that remain status='present' but are tagged with leave_type_code + duration
