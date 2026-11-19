@@ -118,7 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_leave_balances_employee_year ON public.leave_bala
 -- 10. YEAR-END / YEAR-START LEAVE AUTOMATION (pg_cron)
 -- ============================================================
 
--- 10a. Year-end: Dec 31 - Reset SL and PTO to 0; carry VL to next year (cap 30)
+-- 10a. Year-end: Dec 31 - Reset SL and PTO to 0; carry VL to next year (max 7)
 CREATE OR REPLACE FUNCTION public.leave_year_end_processing()
 RETURNS void
 LANGUAGE plpgsql
@@ -139,11 +139,11 @@ BEGIN
     WHERE lb.year = EXTRACT(YEAR FROM (now() AT TIME ZONE 'Asia/Manila'))::int
       AND e.is_active = true
   LOOP
-    carried_vl := LEAST(emp.vl_balance, 30);
+    carried_vl := LEAST(GREATEST(COALESCE(emp.vl_balance, 0), 0), 7);
     INSERT INTO leave_balances (employee_id, year, vl_balance, sl_balance, pto_balance, lwop_days_used)
     VALUES (emp.employee_id, next_year, carried_vl, 0, 0, 0)
     ON CONFLICT (employee_id, year) DO UPDATE SET
-      vl_balance = LEAST(EXCLUDED.vl_balance, 30),
+      vl_balance = LEAST(GREATEST(COALESCE(EXCLUDED.vl_balance, 0), 0), 7),
       sl_balance = 0,
       pto_balance = 0,
       updated_at = now();
