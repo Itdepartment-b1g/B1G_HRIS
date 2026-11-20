@@ -18,7 +18,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { AssignmentFields } from '@/components/performance/AssignmentFields';
 import { loadPeopleDirectory, errorMessage, type PeopleDirectory } from '@/lib/performanceData';
 import { flushPerformanceEmails } from '@/lib/edgeFunctions';
-import type { FormTemplate } from '@/lib/performance';
+import { formatDate, type FormTemplate } from '@/lib/performance';
+
+interface ExistingEvaluation {
+  employee_id: string;
+  due_date: string;
+  period_label: string;
+  status: string;
+}
 
 interface CreateEvaluationDialogProps {
   open: boolean;
@@ -40,6 +47,7 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
   const [dueDate, setDueDate] = useState('');
   const [evaluatorIds, setEvaluatorIds] = useState<string[]>([]);
   const [hrSignerIds, setHrSignerIds] = useState<string[]>([]);
+  const [existing, setExisting] = useState<ExistingEvaluation[]>([]);
 
   const activeTemplates = useMemo(() => templates.filter((t) => t.is_active), [templates]);
   const template = activeTemplates.find((t) => t.id === templateId) ?? null;
@@ -54,6 +62,26 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
     );
   }, [directory, template]);
 
+  const existingByEmployee = useMemo(() => {
+    const map = new Map<string, ExistingEvaluation[]>();
+    for (const row of existing) {
+      const list = map.get(row.employee_id) ?? [];
+      list.push(row);
+      map.set(row.employee_id, list);
+    }
+    return map;
+  }, [existing]);
+
+  const takenOnDueDate = useMemo(() => {
+    if (!dueDate) return new Set<string>();
+    return new Set(existing.filter((row) => row.due_date === dueDate).map((row) => row.employee_id));
+  }, [existing, dueDate]);
+
+  const visibleEmployees = useMemo(
+    () => eligibleEmployees.filter((e) => !takenOnDueDate.has(e.id)),
+    [eligibleEmployees, takenOnDueDate]
+  );
+
   useEffect(() => {
     if (!open) return;
     setTemplateId('');
@@ -64,11 +92,38 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
     setDueDate('');
     setEvaluatorIds([]);
     setHrSignerIds([]);
+    setExisting([]);
     setProgress(null);
     loadPeopleDirectory()
       .then(setDirectory)
       .catch((err) => toast.error(errorMessage(err, 'Failed to load employees')));
   }, [open]);
+
+  useEffect(() => {
+    if (!open || !templateId) {
+      setExisting([]);
+      return;
+    }
+    let cancelled = false;
+    supabase
+      .from('performance_evaluations')
+      .select('employee_id, due_date, period_label, status')
+      .eq('template_id', templateId)
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          toast.error(errorMessage(error, 'Could not check existing evaluations'));
+          setExisting([]);
+          return;
+        }
+        setExisting((data ?? []) as ExistingEvaluation[]);
+      });
+    return () => { cancelled = true; };
+  }, [open, templateId]);
+
+  useEffect(() => {
+    setSelectedIds((cur) => cur.filter((id) => !takenOnDueDate.has(id)));
+  }, [takenOnDueDate]);
 
   // One employee selected: default evaluators to that employee's immediate superiors
   useEffect(() => {
@@ -185,8 +240,8 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
                   type="button"
                   variant="ghost"
                   size="sm"
-                  disabled={!template || eligibleEmployees.length === 0}
-                  onClick={() => setSelectedIds(eligibleEmployees.map((e) => e.id))}
+                  disabled={!template || visibleEmployees.length === 0}
+                  onClick={() => setSelectedIds(visibleEmployees.map((e) => e.id))}
                 >
                   Select all
                 </Button>
@@ -200,14 +255,26 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
                 <p className="text-sm text-muted-foreground">Choose a form first.</p>
               ) : eligibleEmployees.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No active employees have a status selected on this form.</p>
+              ) : visibleEmployees.length === 0 ? (
+                <p className="text-sm text-muted-foreground">Everyone with this status already has an evaluation on this due date.</p>
               ) : (
-                eligibleEmployees.map((e) => (
-                  <label key={e.id} className="flex items-center gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
-                    <Checkbox checked={selectedIds.includes(e.id)} onCheckedChange={() => toggleEmployee(e.id)} />
-                    <span className="text-sm">{e.name}</span>
-                    <span className="text-xs text-muted-foreground">({e.employee_code})</span>
-                  </label>
-                ))
+                visibleEmployees.map((e) => {
+                  const prior = existingByEmployee.get(e.id) ?? [];
+                  return (
+                    <label key={e.id} className="flex items-start gap-2 cursor-pointer hover:bg-muted/50 rounded px-2 py-1">
+                      <Checkbox className="mt-0.5" checked={selectedIds.includes(e.id)} onCheckedChange={() => toggleEmployee(e.id)} />
+                      <span className="min-w-0">
+                        <span className="text-sm">{e.name}</span>
+                        <span className="text-xs text-muted-foreground"> ({e.employee_code})</span>
+                        {prior.length > 0 && (
+                          <span className="block text-xs text-amber-700">
+                            Already has {prior.map((row) => `${row.period_label}, due ${formatDate(row.due_date)}${row.status === 'cancelled' ? ', cancelled' : ''}`).join('; ')}
+                          </span>
+                        )}
+                      </span>
+                    </label>
+                  );
+                })
               )}
             </div>
           </div>
@@ -232,7 +299,7 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
             </div>
           </div>
           <p className="text-xs text-muted-foreground">
-            Leave Period from blank to use each employee&apos;s date hired.
+            Leave Period from blank to use each employee&apos;s date hired. After you set a due date, people who already have this form on that date are hidden. A different due date, such as the 5th month, still shows them.
           </p>
 
           {selectedIds.length > 0 && (

@@ -24,6 +24,8 @@ export interface EvaluationSignatureExport {
   name: string;
   when: string;
   image: string | null;
+  imageWidth?: number;
+  imageHeight?: number;
   note: string;
 }
 
@@ -133,15 +135,88 @@ function factorText(factor: EvaluationFactorExport): string {
   return factor.description.trim() ? `${factor.title}\n${factor.description.trim()}` : factor.title;
 }
 
+function wrappedLineCount(text: string, charsPerLine: number): number {
+  return text.split('\n').reduce((count, line) => count + Math.max(1, Math.ceil(Math.max(line.length, 1) / charsPerLine)), 0);
+}
+
+/** Cut the blank canvas around a signature so the pen stroke can sit in the middle of the box. */
+function cropSignature(dataUrl: string): Promise<{ dataUrl: string; width: number; height: number } | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        resolve(null);
+        return;
+      }
+      ctx.drawImage(img, 0, 0);
+      const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let minX = canvas.width;
+      let minY = canvas.height;
+      let maxX = 0;
+      let maxY = 0;
+      for (let y = 0; y < canvas.height; y += 1) {
+        for (let x = 0; x < canvas.width; x += 1) {
+          const i = (y * canvas.width + x) * 4;
+          const ink = pixels[i + 3] > 16 && (pixels[i] < 245 || pixels[i + 1] < 245 || pixels[i + 2] < 245);
+          if (!ink) continue;
+          if (x < minX) minX = x;
+          if (y < minY) minY = y;
+          if (x > maxX) maxX = x;
+          if (y > maxY) maxY = y;
+        }
+      }
+      if (maxX <= minX || maxY <= minY) {
+        resolve(null);
+        return;
+      }
+      const pad = 10;
+      minX = Math.max(0, minX - pad);
+      minY = Math.max(0, minY - pad);
+      maxX = Math.min(canvas.width - 1, maxX + pad);
+      maxY = Math.min(canvas.height - 1, maxY + pad);
+      const width = maxX - minX + 1;
+      const height = maxY - minY + 1;
+      const out = document.createElement('canvas');
+      out.width = width;
+      out.height = height;
+      const outCtx = out.getContext('2d');
+      if (!outCtx) {
+        resolve(null);
+        return;
+      }
+      outCtx.fillStyle = '#ffffff';
+      outCtx.fillRect(0, 0, width, height);
+      outCtx.drawImage(canvas, minX, minY, width, height, 0, 0, width, height);
+      resolve({ dataUrl: out.toDataURL('image/png'), width, height });
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+async function withCenteredSignatures(sheet: EvaluationSheetExport): Promise<EvaluationSheetExport> {
+  const signatures = await Promise.all(sheet.signatures.map(async (sig) => {
+    if (!sig.image) return sig;
+    const cropped = await cropSignature(sig.image);
+    if (!cropped) return sig;
+    return { ...sig, image: cropped.dataUrl, imageWidth: cropped.width, imageHeight: cropped.height };
+  }));
+  return { ...sheet, signatures };
+}
+
 export async function downloadEvaluationSheet(format: 'pdf' | 'xlsx', sheet: EvaluationSheetExport): Promise<void> {
-  const [logo, companyName] = await Promise.all([loadLogo(), loadCompanyName()]);
-  const filename = `${fileBase(sheet.filenameBase)}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+  const [logo, companyName, prepared] = await Promise.all([loadLogo(), loadCompanyName(), withCenteredSignatures(sheet)]);
+  const filename = `${fileBase(prepared.filenameBase)}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
   if (format === 'pdf') {
-    const doc = buildPdf(sheet, companyName, logo);
+    const doc = buildPdf(prepared, companyName, logo);
     doc.save(filename);
     return;
   }
-  const buffer = await buildXlsx(sheet, companyName, logo);
+  const buffer = await buildXlsx(prepared, companyName, logo);
   saveBlob(buffer, filename, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
 }
 
@@ -149,9 +224,9 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
   const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
-  const margin = 10;
+  const margin = 8;
   const width = pageW - margin * 2;
-  let y = 8;
+  let y = 6;
 
   const ensure = (height: number) => {
     if (y + height <= pageH - margin) return;
@@ -171,34 +246,34 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
     y += 7;
   };
 
-  const logoW = 28;
-  const logoH = 11;
+  const logoW = 26;
+  const logoH = 10;
   if (logo) doc.addImage(logo, 'PNG', margin, y, logoW, logoH);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(13);
-  doc.setTextColor(...PURPLE_RGB);
-  doc.text(companySuffix(companyName), margin + (logo ? logoW + 1.5 : 0), y + 8);
-  y += 16;
   doc.setFontSize(12);
+  doc.setTextColor(...PURPLE_RGB);
+  doc.text(companySuffix(companyName), margin + (logo ? logoW + 1.5 : 0), y + 7);
+  y += 12;
+  doc.setFontSize(11);
   if (sheet.formName.trim()) {
     doc.text(sheet.formName.trim(), pageW / 2, y, { align: 'center' });
-    y += 6;
+    y += 4.5;
   }
   if (sheet.periodLabel.trim()) {
-    doc.setFontSize(11);
+    doc.setFontSize(10);
     doc.text(sheet.periodLabel.trim(), pageW / 2, y, { align: 'center' });
-    y += 6;
+    y += 4.5;
   }
   doc.setTextColor(0, 0, 0);
 
   doc.setFillColor(...PURPLE_RGB);
-  doc.rect(margin, y, width, 8, 'F');
+  doc.rect(margin, y, width, 7, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.text('EMPLOYEE EVALUATION FORM', pageW / 2, y + 5.5, { align: 'center' });
+  doc.setFontSize(11);
+  doc.text('EMPLOYEE EVALUATION FORM', pageW / 2, y + 4.8, { align: 'center' });
   doc.setTextColor(0, 0, 0);
-  y += 10;
+  y += 8;
 
   const info: [string, string, string, string][] = [
     ['Full Name', sheet.fullName, 'Evaluation Period', `From ${sheet.periodFrom}    To ${sheet.periodTo}`],
@@ -208,23 +283,23 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
   ];
   const half = width / 2;
   info.forEach(([leftLabel, leftValue, rightLabel, rightValue]) => {
-    ensure(8);
+    ensure(7);
     doc.setDrawColor(0);
     doc.setLineWidth(0.2);
-    doc.rect(margin, y, half, 8);
-    doc.rect(margin + half, y, half, 8);
+    doc.rect(margin, y, half, 6.5);
+    doc.rect(margin + half, y, half, 6.5);
     doc.setFontSize(8);
     doc.setFont('helvetica', 'bold');
-    doc.text(leftLabel, margin + 1.5, y + 5);
-    doc.text(rightLabel, margin + half + 1.5, y + 5);
+    doc.text(leftLabel, margin + 1.5, y + 4.3);
+    doc.text(rightLabel, margin + half + 1.5, y + 4.3);
     const leftLabelW = doc.getTextWidth(leftLabel) + 2;
     const rightLabelW = doc.getTextWidth(rightLabel) + 2;
     doc.setFont('helvetica', 'normal');
-    doc.text(doc.splitTextToSize(leftValue || '—', half - leftLabelW - 4)[0] ?? '—', margin + 1.5 + leftLabelW, y + 5);
-    doc.text(doc.splitTextToSize(rightValue || '—', half - rightLabelW - 4)[0] ?? '—', margin + half + 1.5 + rightLabelW, y + 5);
-    y += 8;
+    doc.text(doc.splitTextToSize(leftValue || '—', half - leftLabelW - 4)[0] ?? '—', margin + 1.5 + leftLabelW, y + 4.3);
+    doc.text(doc.splitTextToSize(rightValue || '—', half - rightLabelW - 4)[0] ?? '—', margin + half + 1.5 + rightLabelW, y + 4.3);
+    y += 6.5;
   });
-  y += 3;
+  y += 2;
 
   sectionBar('Performance factors');
   ensure(8);
@@ -239,7 +314,7 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
     head: [['Factor', 'Rating', 'Comment']],
     body: sheet.factors.map((factor) => [factorText(factor), factor.rating || '—', factor.comment || '—']),
     margin: { left: margin, right: margin },
-    styles: { fontSize: 8, cellPadding: 1.6, valign: 'middle', textColor: 20, lineColor: 0, lineWidth: 0.2 },
+    styles: { fontSize: 8.5, cellPadding: 1.5, valign: 'middle', textColor: 20, lineColor: 0, lineWidth: 0.2 },
     headStyles: { fillColor: PURPLE_RGB, textColor: 255, fontStyle: 'bold', halign: 'center' },
     columnStyles: {
       0: { cellWidth: 88 },
@@ -248,21 +323,21 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
     },
     theme: 'grid',
   });
-  y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 3;
+  y = (doc as jsPDF & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 2;
 
-  ensure(8);
+  ensure(7);
   doc.setDrawColor(0);
-  doc.rect(margin, y, width, 8);
+  doc.rect(margin, y, width, 7);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8);
-  doc.text('Average score', margin + 2, y + 5);
+  doc.text('Average score', margin + 2, y + 4.6);
   doc.setFont('helvetica', 'normal');
-  doc.text(sheet.averageScore || '—', margin + 32, y + 5);
+  doc.text(sheet.averageScore || '—', margin + 32, y + 4.6);
   doc.setFont('helvetica', 'bold');
-  doc.text('Overall rating', margin + half, y + 5);
+  doc.text('Overall rating', margin + half, y + 4.6);
   doc.setFont('helvetica', 'normal');
-  doc.text(sheet.overallRating || '—', margin + half + 32, y + 5);
-  y += 12;
+  doc.text(sheet.overallRating || '—', margin + half + 32, y + 4.6);
+  y += 9;
 
   const drawSectionBox = (x: number, boxW: number, title: string, body: string, headH: number, boxH: number) => {
     doc.setFillColor(...PURPLE_RGB);
@@ -288,11 +363,11 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
     doc.setFontSize(8);
     const leftTitle = doc.splitTextToSize(left.title, boxW - 4);
     const rightTitle = right ? doc.splitTextToSize(right.title, boxW - 4) : [];
-    const headH = Math.max(8, Math.max(leftTitle.length, rightTitle.length) * 4 + 3);
+    const headH = Math.max(7, Math.max(leftTitle.length, rightTitle.length) * 3.4 + 2);
     doc.setFont('helvetica', 'normal');
     const leftLines = doc.splitTextToSize(left.body || '—', boxW - 4);
     const rightLines = right ? doc.splitTextToSize(right.body || '—', boxW - 4) : [];
-    const boxH = Math.max(22, Math.max(leftLines.length, rightLines.length) * 4 + 4);
+    const boxH = Math.min(18, Math.max(12, Math.max(leftLines.length, rightLines.length) * 3.6 + 3));
     ensure(headH + boxH + 4);
     drawSectionBox(margin, boxW, left.title, left.body, headH, boxH);
     if (right) drawSectionBox(margin + half + 1, boxW, right.title, right.body, headH, boxH);
@@ -310,25 +385,39 @@ function buildPdf(sheet: EvaluationSheetExport, companyName: string, logo: strin
   }
 
   const sigW = width / 3;
-  const sigBlockH = 36;
-  ensure(sigBlockH + 4);
-  y += 2;
+  const sigBlockH = 34;
+  ensure(sigBlockH);
   sheet.signatures.forEach((sig, index) => {
     const x = margin + index * sigW;
+    const boxW = sigW - 2;
     doc.setDrawColor(180);
-    doc.rect(x, y, sigW - 2, sigBlockH);
+    doc.setLineWidth(0.2);
+    doc.rect(x, y, boxW, sigBlockH);
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
+    doc.setFontSize(7);
     doc.setTextColor(...PURPLE_RGB);
-    doc.text(sig.title.toUpperCase(), x + 2, y + 5);
+    const title = doc.splitTextToSize(sig.title.toUpperCase(), boxW - 4)[0] ?? '';
+    doc.text(title, x + boxW / 2, y + 4.5, { align: 'center' });
     doc.setTextColor(0, 0, 0);
     doc.setFont('helvetica', 'normal');
-    if (sig.image) doc.addImage(sig.image, 'PNG', x + 2, y + 7, 36, 12);
-    doc.text(sig.name || ' ', x + 2, y + 24);
+    const maxW = boxW - 10;
+    const maxH = 13;
+    const aspect = sig.imageWidth && sig.imageHeight ? sig.imageWidth / sig.imageHeight : 3;
+    let imgW = maxW;
+    let imgH = imgW / aspect;
+    if (imgH > maxH) {
+      imgH = maxH;
+      imgW = imgH * aspect;
+    }
+    const imgX = x + (boxW - imgW) / 2;
+    const imgY = y + 6 + (maxH - imgH) / 2;
+    if (sig.image) doc.addImage(sig.image, 'PNG', imgX, imgY, imgW, imgH);
+    doc.setFontSize(8);
+    doc.text(sig.name || ' ', x + boxW / 2, y + 24, { align: 'center' });
     doc.setFontSize(7);
     doc.setTextColor(80);
-    doc.text(sig.when || 'Pending', x + 2, y + 28);
-    if (sig.note) doc.text(doc.splitTextToSize(sig.note, sigW - 6)[0] ?? '', x + 2, y + 32);
+    doc.text(sig.when || 'Pending', x + boxW / 2, y + 28.5, { align: 'center' });
+    if (sig.note) doc.text(doc.splitTextToSize(sig.note, boxW - 6)[0] ?? '', x + boxW / 2, y + 32, { align: 'center' });
     doc.setTextColor(0, 0, 0);
   });
 
@@ -343,7 +432,7 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
       paperSize: 9,
       fitToPage: true,
       fitToWidth: 1,
-      fitToHeight: 0,
+      fitToHeight: 1,
       horizontalCentered: true,
       margins: { left: 0.4, right: 0.4, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 },
     },
@@ -358,7 +447,7 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
     { width: 26 },
   ];
 
-  const paint = (row: number, col: number, value: string, opts?: { bold?: boolean; size?: number; color?: string; fill?: string; align?: 'left' | 'center' | 'right'; italic?: boolean; wrap?: boolean }) => {
+  const paint = (row: number, col: number, value: string, opts?: { bold?: boolean; size?: number; color?: string; fill?: string; align?: 'left' | 'center' | 'right'; italic?: boolean; wrap?: boolean; vertical?: 'middle' | 'top' }) => {
     const cell = ws.getCell(row, col);
     cell.value = value;
     cell.font = {
@@ -368,7 +457,7 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
       italic: opts?.italic,
       color: { argb: opts?.color ?? 'FF000000' },
     };
-    cell.alignment = { vertical: 'middle', horizontal: opts?.align ?? 'left', wrapText: opts?.wrap ?? true };
+    cell.alignment = { vertical: opts?.vertical ?? 'middle', horizontal: opts?.align ?? 'left', wrapText: opts?.wrap ?? true };
     cell.border = border;
     if (opts?.fill) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: opts.fill } };
     return cell;
@@ -421,7 +510,7 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
   ws.getRow(r).height = 20;
   r += 1;
   merge(r, 1, 6, sheet.scaleLine, { italic: true, size: 10 });
-  ws.getRow(r).height = 32;
+  ws.getRow(r).height = 18;
   r += 1;
   merge(r, 1, 3, 'Factor', { bold: true, size: 11, color: 'FFFFFFFF', fill: PURPLE, align: 'center' });
   paint(r, 4, 'Rating', { bold: true, size: 11, color: 'FFFFFFFF', fill: PURPLE, align: 'center' });
@@ -431,11 +520,11 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
 
   sheet.factors.forEach((factor) => {
     const text = factorText(factor);
-    const lines = Math.max(2, Math.ceil(text.length / 55));
-    ws.getRow(r).height = Math.max(36, lines * 16);
-    merge(r, 1, 3, text, { size: 10 });
-    paint(r, 4, factor.rating || '—', { size: 10, align: 'center' });
-    merge(r, 5, 6, factor.comment || '—', { size: 10 });
+    const lines = wrappedLineCount(text, 42);
+    ws.getRow(r).height = Math.max(34, lines * 16 + 6);
+    merge(r, 1, 3, text, { size: 11, vertical: 'top' });
+    paint(r, 4, factor.rating || '—', { size: 11, align: 'center' });
+    merge(r, 5, 6, factor.comment || '—', { size: 11, vertical: 'top' });
     r += 1;
   });
 
@@ -453,10 +542,10 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
     if (right) {
       merge(r, 1, 3, left.title, { bold: true, size: 10, color: 'FFFFFFFF', fill: PURPLE, align: 'center' });
       merge(r, 4, 6, right.title, { bold: true, size: 10, color: 'FFFFFFFF', fill: PURPLE, align: 'center' });
-      ws.getRow(r).height = 36;
+      ws.getRow(r).height = 20;
       r += 1;
       const bodyLines = Math.max(left.body.length, right.body.length);
-      ws.getRow(r).height = Math.min(90, Math.max(48, Math.ceil(bodyLines / 40) * 16));
+      ws.getRow(r).height = Math.min(32, Math.max(22, Math.ceil(bodyLines / 50) * 12));
       merge(r, 1, 3, left.body || '—', { size: 10 });
       merge(r, 4, 6, right.body || '—', { size: 10 });
       r += 2;
@@ -480,25 +569,41 @@ async function buildXlsx(sheet: EvaluationSheetExport, companyName: string, logo
   }
 
   const sigRow = r;
-  ws.getRow(sigRow).height = 18;
-  ws.getRow(sigRow + 1).height = 46;
-  ws.getRow(sigRow + 2).height = 18;
-  ws.getRow(sigRow + 3).height = 16;
+  ws.getRow(sigRow).height = 16;
+  ws.getRow(sigRow + 1).height = 36;
+  ws.getRow(sigRow + 2).height = 16;
+  ws.getRow(sigRow + 3).height = 14;
   sheet.signatures.forEach((sig, index) => {
     const c = index * 2 + 1;
-    merge(sigRow, c, c + 1, sig.title, { bold: true, size: 10, color: PURPLE, align: 'center' });
+    merge(sigRow, c, c + 1, sig.title, { bold: true, size: 9, color: PURPLE, align: 'center' });
     merge(sigRow + 1, c, c + 1, '', { size: 10 });
     merge(sigRow + 2, c, c + 1, sig.name || ' ', { size: 10, align: 'center' });
     merge(sigRow + 3, c, c + 1, sig.when || 'Pending', { size: 9, align: 'center', color: 'FF666666' });
     if (sig.note) {
-      ws.getRow(sigRow + 4).height = 28;
+      ws.getRow(sigRow + 4).height = 16;
       merge(sigRow + 4, c, c + 1, sig.note, { size: 8, align: 'center', italic: true });
     }
     if (sig.image) {
       const imageId = workbook.addImage({ base64: pngBase64(sig.image), extension: 'png' });
+      const w1 = Number(ws.getColumn(c).width) || 10;
+      const w2 = Number(ws.getColumn(c + 1).width) || 10;
+      const span = w1 + w2;
+      const colPx = span * 7.5;
+      const rowPx = 36 * (96 / 72);
+      const aspect = sig.imageWidth && sig.imageHeight ? sig.imageWidth / sig.imageHeight : 3;
+      let drawW = colPx * 0.62;
+      let drawH = drawW / aspect;
+      const maxH = rowPx * 0.72;
+      if (drawH > maxH) {
+        drawH = maxH;
+        drawW = drawH * aspect;
+      }
+      const padX = (colPx - drawW) / 2;
+      const padY = (rowPx - drawH) / 2;
+      const at = (units: number) => (units <= w1 ? (c - 1) + units / w1 : c + (units - w1) / w2);
       ws.addImage(imageId, {
-        tl: { col: c - 1 + 0.4, row: sigRow + 1.05 },
-        ext: { width: 96, height: 32 },
+        tl: { col: at(padX / 7.5), row: sigRow + padY / rowPx },
+        ext: { width: drawW, height: drawH },
         editAs: 'oneCell',
       });
     }
