@@ -79,7 +79,7 @@ function blankDraft(statuses: EmploymentStatusOption[]): Draft {
     bands: DEFAULT_RATING_BANDS.map((b) => ({ ...b })),
     recOptionsText: '',
     recRequired: false,
-    isActive: true,
+    isActive: false,
   };
 }
 
@@ -476,8 +476,10 @@ function BasicsStep({
             <label className="flex items-start gap-2 cursor-pointer">
               <Checkbox checked={draft.isActive} onCheckedChange={(v) => onChange({ isActive: v === true })} className="mt-0.5" />
               <span>
-                <span className="text-sm font-medium">Active</span>
-                <span className="block text-xs text-muted-foreground">Due evaluations are created automatically. Save as draft turns this off.</span>
+                <span className="block text-sm font-medium">Active (create automatically)</span>
+                <span className="block text-xs text-muted-foreground mt-1">
+                  Leave this unchecked if you want to create each evaluation yourself with Create Evaluation. Check it to let the system create them on schedule, for example the 3rd and 5th month after the hire date. Reminders are sent to the immediate superior before each due date.
+                </span>
               </span>
             </label>
           </CardContent>

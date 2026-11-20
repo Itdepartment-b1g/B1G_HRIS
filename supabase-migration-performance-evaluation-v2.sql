@@ -144,11 +144,25 @@ AS $$
 DECLARE
   v_id UUID;
   v_evaluators UUID[];
+  v_hr_signers UUID[];
 BEGIN
   IF p_evaluator_ids IS NULL OR cardinality(p_evaluator_ids) = 0 THEN
     v_evaluators := public._perf_default_evaluators(p_employee_id);
   ELSE
     v_evaluators := p_evaluator_ids;
+  END IF;
+
+  -- Automatic creates pass no HR list. Use every active person in the HR department.
+  IF p_hr_signer_ids IS NULL OR cardinality(p_hr_signer_ids) = 0 THEN
+    SELECT COALESCE(array_agg(e.id), '{}'::UUID[])
+    INTO v_hr_signers
+    FROM public.performance_settings s
+    JOIN public.employee_departments ed ON ed.department_id = s.hr_department_id
+    JOIN public.employees e ON e.id = ed.employee_id AND e.is_active
+    WHERE s.id = 1
+      AND s.hr_department_id IS NOT NULL;
+  ELSE
+    v_hr_signers := p_hr_signer_ids;
   END IF;
 
   INSERT INTO public.performance_evaluations (
@@ -180,7 +194,7 @@ BEGIN
   ON CONFLICT DO NOTHING;
 
   INSERT INTO public.performance_hr_signers (evaluation_id, hr_signer_id)
-  SELECT DISTINCT v_id, x FROM unnest(p_hr_signer_ids) AS x WHERE x IS NOT NULL
+  SELECT DISTINCT v_id, x FROM unnest(v_hr_signers) AS x WHERE x IS NOT NULL
   ON CONFLICT DO NOTHING;
 
   PERFORM public._perf_log(v_id, 'created', jsonb_build_object(

@@ -81,6 +81,7 @@ const PerformanceEvaluationPage = () => {
 
   // Admin dialogs
   const [assignOpen, setAssignOpen] = useState(false);
+  const [signOpen, setSignOpen] = useState(false);
   const [assignEvaluatorIds, setAssignEvaluatorIds] = useState<string[]>([]);
   const [assignHrIds, setAssignHrIds] = useState<string[]>([]);
   const [reasonAction, setReasonAction] = useState<'cancel' | 'reopen' | null>(null);
@@ -161,14 +162,20 @@ const PerformanceEvaluationPage = () => {
       return 'Please select a recommendation';
     }
     if (preview?.average == null) return 'Rate at least one factor';
-    if (!evaluatorSig) return 'Please sign as the evaluator before submitting';
     return null;
+  };
+
+  const openSubmit = () => {
+    if (preview?.average == null) return;
+    const err = validateSubmit();
+    if (err) return toast.error(err);
+    setEvaluatorSig(null);
+    setSignOpen(true);
   };
 
   const submitEvaluation = async () => {
     if (!ev || !snap) return;
-    const err = validateSubmit();
-    if (err) return toast.error(err);
+    if (!evaluatorSig) return toast.error('Draw your signature before submitting');
 
     const payload: Record<string, FactorRating> = {};
     for (const f of snap.factors) {
@@ -188,6 +195,8 @@ const PerformanceEvaluationPage = () => {
     });
     setBusy(false);
     if (error) return toast.error(errorMessage(error, 'Could not submit evaluation'));
+    setSignOpen(false);
+    setEvaluatorSig(null);
     toast.success('Evaluation submitted. The employee has been notified.');
     load();
   };
@@ -364,13 +373,13 @@ const PerformanceEvaluationPage = () => {
     <div className="space-y-6 max-w-5xl mx-auto">
       {/* Top bar */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 print:hidden">
-        <Button variant="outline" onClick={() => navigate('/dashboard/performance')}>
+        <Button variant="outline" className="w-full sm:w-auto" onClick={() => navigate('/dashboard/performance')}>
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to Performance
         </Button>
         {showForm && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" disabled={exporting}>
+              <Button variant="outline" className="w-full sm:w-auto" disabled={exporting}>
                 {exporting ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
                 Download
               </Button>
@@ -385,7 +394,7 @@ const PerformanceEvaluationPage = () => {
 
       {/* Title + status */}
       <div className="space-y-2">
-        <h1 className="text-2xl font-bold text-foreground">
+        <h1 className="text-xl sm:text-2xl font-bold text-foreground break-words">
           {ev.period_label} Performance Evaluation
         </h1>
         <div className="flex flex-wrap items-center gap-2">
@@ -450,11 +459,65 @@ const PerformanceEvaluationPage = () => {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Performance factors</CardTitle>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-muted-foreground break-words">
               Rate each factor: {snap.rating_scale.map((s) => `${s.value} – ${s.label}`).join(' | ')}
             </p>
           </CardHeader>
-          <CardContent className="overflow-x-auto">
+          <CardContent>
+            <div className="md:hidden space-y-3">
+              {snap.factors.map((f) => {
+                const current = editable ? ratings[f.id] : ev.ratings?.[f.id];
+                return (
+                  <div key={f.id} className="rounded-xl border p-4 space-y-3">
+                    <div>
+                      <p className="font-medium text-sm">
+                        {f.title}
+                        {!f.required && <span className="text-xs text-muted-foreground"> (optional)</span>}
+                      </p>
+                      {f.description && <p className="text-xs text-muted-foreground mt-1">{f.description}</p>}
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">Rating</p>
+                      {editable ? (
+                        <Select
+                          value={current?.rating != null ? String(current.rating) : ''}
+                          onValueChange={(v) => setRating(f.id, Number(v))}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select rating" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {snap.rating_scale.map((s) => (
+                              <SelectItem key={s.value} value={String(s.value)}>
+                                {s.value} – {s.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <p className="text-sm">{scaleLabel(current?.rating)}</p>
+                      )}
+                    </div>
+                    {(editable ? f.has_comment : !!current?.comment) && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-muted-foreground">Comment</p>
+                        {editable && f.has_comment ? (
+                          <Textarea
+                            rows={2}
+                            value={current?.comment ?? ''}
+                            onChange={(e) => setComment(f.id, e.target.value)}
+                            placeholder="Optional comment"
+                          />
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap">{current?.comment}</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -513,6 +576,7 @@ const PerformanceEvaluationPage = () => {
                 })}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
@@ -560,31 +624,30 @@ const PerformanceEvaluationPage = () => {
               </div>
             )}
 
-            <div className="rounded-md border p-4 flex flex-wrap items-center gap-6">
+            <div className="rounded-md border p-4 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-4 sm:gap-6">
               <div>
                 <div className="text-xs text-muted-foreground">Average score</div>
                 <div className="text-2xl font-bold">{displayAverage != null ? displayAverage.toFixed(1) : '—'}</div>
               </div>
               <div>
                 <div className="text-xs text-muted-foreground">Overall rating</div>
-                <div className="text-lg font-semibold">{displayLabel ?? '—'}</div>
+                <div className="text-lg font-semibold break-words">{displayLabel ?? '—'}</div>
               </div>
               {editable && (
-                <p className="text-xs text-muted-foreground ml-auto max-w-xs">
+                <p className="text-xs text-muted-foreground sm:ml-auto sm:max-w-xs">
                   Average = sum of rated factors ÷ number of factors rated. Optional factors left blank are not counted.
                 </p>
               )}
             </div>
 
             {editable && (
-              <div className="rounded-md border p-4 print:hidden">
-                <SignaturePad label="Evaluator signature" onChange={setEvaluatorSig} disabled={busy} />
-              </div>
-            )}
-
-            {editable && (
-              <div className="flex justify-end print:hidden">
-                <Button onClick={submitEvaluation} disabled={busy} className="bg-primary hover:bg-primary/90 text-white">
+              <div className="flex print:hidden">
+                <Button
+                  onClick={openSubmit}
+                  disabled={busy || preview?.average == null}
+                  title={preview?.average == null ? 'Rate at least one factor to submit' : undefined}
+                  className="w-full sm:w-auto sm:ml-auto bg-primary hover:bg-primary/90 text-white"
+                >
                   {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Submit Evaluation
                 </Button>
@@ -630,7 +693,7 @@ const PerformanceEvaluationPage = () => {
       {canAck && (
         <Card className="border-violet-200">
           <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-violet-600" /> Acknowledge your evaluation</CardTitle>
+            <CardTitle className="text-base flex items-start sm:items-center gap-2"><ShieldCheck className="h-5 w-5 shrink-0 text-violet-600" /> Acknowledge your evaluation</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex items-start gap-2">
@@ -642,8 +705,8 @@ const PerformanceEvaluationPage = () => {
               <Textarea rows={3} value={ackComment} onChange={(e) => setAckComment(e.target.value)} />
               <p className="text-xs text-muted-foreground">Acknowledging confirms you received and reviewed this evaluation. It does not mean you agree with it.</p>
             </div>
-            <div className="flex justify-end">
-              <Button onClick={acknowledge} disabled={busy || !ackChecked} className="bg-primary hover:bg-primary/90 text-white">
+            <div className="flex">
+              <Button onClick={acknowledge} disabled={busy || !ackChecked} className="w-full sm:w-auto sm:ml-auto bg-primary hover:bg-primary/90 text-white">
                 {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Acknowledge
               </Button>
@@ -669,18 +732,16 @@ const PerformanceEvaluationPage = () => {
             <div className="rounded-md border p-4">
               <SignaturePad label="HR signature" onChange={setHrSig} disabled={busy} />
             </div>
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-col sm:flex-row sm:flex-wrap sm:justify-end gap-2">
               {ev.status === 'submitted' && (
                 <div className="w-full space-y-2">
                   <Label>Reason for signing without employee acknowledgement</Label>
                   <Textarea rows={2} value={skipReason} onChange={(e) => setSkipReason(e.target.value)} />
-                  <div className="flex justify-end">
-                    <Button variant="outline" onClick={() => hrSign(true)} disabled={busy}>Sign without acknowledgement</Button>
-                  </div>
+                  <Button variant="outline" className="w-full sm:w-auto" onClick={() => hrSign(true)} disabled={busy}>Sign without acknowledgement</Button>
                 </div>
               )}
               {ev.status === 'acknowledged' && (
-                <Button onClick={() => hrSign(false)} disabled={busy} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                <Button onClick={() => hrSign(false)} disabled={busy} className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white">
                   {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Sign as HR
                 </Button>
@@ -696,17 +757,17 @@ const PerformanceEvaluationPage = () => {
           <CardHeader>
             <CardTitle className="text-base">Admin actions</CardTitle>
           </CardHeader>
-          <CardContent className="flex flex-wrap gap-2">
+          <CardContent className="flex flex-col sm:flex-row sm:flex-wrap gap-2">
             {canAssign && (
-              <Button variant="outline" onClick={openAssign}>Change evaluators / HR signers</Button>
+              <Button variant="outline" className="w-full sm:w-auto" onClick={openAssign}>Change evaluators / HR signers</Button>
             )}
             {canReopen && (
-              <Button variant="outline" onClick={() => { setReason(''); setReasonAction('reopen'); }}>
+              <Button variant="outline" className="w-full sm:w-auto" onClick={() => { setReason(''); setReasonAction('reopen'); }}>
                 <RotateCcw className="h-4 w-4 mr-2" /> Reopen for correction
               </Button>
             )}
             {canCancel && (
-              <Button variant="outline" className="text-red-600" onClick={() => { setReason(''); setReasonAction('cancel'); }}>
+              <Button variant="outline" className="w-full sm:w-auto text-red-600" onClick={() => { setReason(''); setReasonAction('cancel'); }}>
                 <XCircle className="h-4 w-4 mr-2" /> Cancel evaluation
               </Button>
             )}
@@ -721,6 +782,19 @@ const PerformanceEvaluationPage = () => {
             <CardTitle className="text-base flex items-center gap-2"><History className="h-5 w-5" /> Audit trail</CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="md:hidden space-y-3">
+              {events.map((e) => (
+                <div key={e.id} className="rounded-xl border p-4 space-y-2 text-sm">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="font-medium">{EVENT_LABELS[e.action] ?? e.action}</p>
+                    <p className="text-xs text-muted-foreground text-right">{formatDateTime(e.created_at)}</p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{fullName(e.actor) === '—' ? 'System' : fullName(e.actor)}</p>
+                  {describeEvent(e) && <p className="text-sm break-words">{describeEvent(e)}</p>}
+                </div>
+              ))}
+            </div>
+            <div className="hidden md:block">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -741,9 +815,29 @@ const PerformanceEvaluationPage = () => {
                 ))}
               </TableBody>
             </Table>
+            </div>
           </CardContent>
         </Card>
       )}
+
+      <Dialog open={signOpen} onOpenChange={(open) => { if (!busy) setSignOpen(open); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Sign and submit</DialogTitle>
+            <DialogDescription>
+              Draw your signature to submit this evaluation. The employee will be asked to acknowledge it.
+            </DialogDescription>
+          </DialogHeader>
+          {signOpen && <SignaturePad label="Evaluator signature" onChange={setEvaluatorSig} disabled={busy} />}
+          <DialogFooter className="flex-col gap-2 sm:flex-row">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setSignOpen(false)} disabled={busy}>Cancel</Button>
+            <Button onClick={submitEvaluation} disabled={busy || !evaluatorSig} className="w-full sm:w-auto bg-primary hover:bg-primary/90 text-white">
+              {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Submit Evaluation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Assignment dialog */}
       <Dialog open={assignOpen} onOpenChange={setAssignOpen}>
@@ -806,9 +900,9 @@ const PerformanceEvaluationPage = () => {
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex gap-2">
-      <span className="w-40 shrink-0 text-muted-foreground">{label}</span>
-      <span className="font-medium">{value}</span>
+    <div className="flex flex-col gap-0.5 sm:flex-row sm:gap-2">
+      <span className="sm:w-40 shrink-0 text-muted-foreground">{label}</span>
+      <span className="font-medium break-words">{value}</span>
     </div>
   );
 }

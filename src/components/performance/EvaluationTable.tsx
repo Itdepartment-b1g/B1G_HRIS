@@ -18,8 +18,76 @@ interface EvaluationTableProps {
   emptyText?: string;
 }
 
+function evaluatorLabel(row: EvaluationRow) {
+  if (row.evaluators && row.evaluators.length > 0) {
+    return row.evaluators.map((v) => fullName(v.evaluator)).join(', ');
+  }
+  return null;
+}
+
+function scoreLabel(row: EvaluationRow) {
+  if (row.average_score == null) return '—';
+  const score = Number(row.average_score).toFixed(1);
+  return row.rating_label ? `${score} · ${row.rating_label}` : score;
+}
+
 export function EvaluationTable({ rows, showEmployee = true, onOpen, emptyText = 'No evaluations found' }: EvaluationTableProps) {
+  if (rows.length === 0) {
+    return <p className="text-center py-8 text-sm text-muted-foreground">{emptyText}</p>;
+  }
+
   return (
+    <>
+      <div className="md:hidden space-y-3">
+        {rows.map((r) => {
+          const dk = dueKey(r);
+          const dm = DUE_META[dk];
+          const sm = STATUS_META[r.status];
+          const evaluators = evaluatorLabel(r);
+          return (
+            <div key={r.id} className="rounded-xl border bg-card p-4 shadow-sm space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  {showEmployee && (
+                    <>
+                      <p className="font-medium leading-tight">{fullName(r.employee)}</p>
+                      <p className="text-xs text-muted-foreground">{r.employee?.employee_code}</p>
+                    </>
+                  )}
+                  <p className={showEmployee ? 'mt-2 font-medium leading-tight' : 'font-medium leading-tight'}>{r.period_label}</p>
+                  <p className="text-xs text-muted-foreground">{r.template_name}</p>
+                </div>
+                <Button variant="outline" size="sm" className="shrink-0" onClick={() => onOpen(r)}>
+                  <ExternalLink className="h-4 w-4 mr-1" /> Open
+                </Button>
+              </div>
+              <dl className="grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
+                <div>
+                  <dt className="text-xs text-muted-foreground">Due</dt>
+                  <dd>{formatDate(r.due_date)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Score</dt>
+                  <dd>{scoreLabel(r)}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Due state</dt>
+                  <dd className="mt-1"><Badge variant="outline" className={dm.className}>{dm.label}</Badge></dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-muted-foreground">Status</dt>
+                  <dd className="mt-1"><Badge variant="outline" className={sm.className}>{sm.label}</Badge></dd>
+                </div>
+                <div className="col-span-2">
+                  <dt className="text-xs text-muted-foreground">Evaluators</dt>
+                  <dd>{evaluators ?? <span className="text-amber-700 text-xs">Unassigned</span>}</dd>
+                </div>
+              </dl>
+            </div>
+          );
+        })}
+      </div>
+      <div className="hidden md:block">
     <Table>
       <TableHeader>
         <TableRow>
@@ -28,7 +96,7 @@ export function EvaluationTable({ rows, showEmployee = true, onOpen, emptyText =
           <TableHead>Due</TableHead>
           <TableHead>Due State</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead className="hidden md:table-cell">Evaluators</TableHead>
+          <TableHead>Evaluators</TableHead>
           <TableHead>Score</TableHead>
           <TableHead className="text-right">Open</TableHead>
         </TableRow>
@@ -38,6 +106,7 @@ export function EvaluationTable({ rows, showEmployee = true, onOpen, emptyText =
           const dk = dueKey(r);
           const dm = DUE_META[dk];
           const sm = STATUS_META[r.status];
+          const evaluators = evaluatorLabel(r);
           return (
             <TableRow key={r.id}>
               {showEmployee && (
@@ -57,21 +126,10 @@ export function EvaluationTable({ rows, showEmployee = true, onOpen, emptyText =
               <TableCell>
                 <Badge variant="outline" className={sm.className}>{sm.label}</Badge>
               </TableCell>
-              <TableCell className="hidden md:table-cell text-sm">
-                {r.evaluators && r.evaluators.length > 0
-                  ? r.evaluators.map((v) => fullName(v.evaluator)).join(', ')
-                  : <span className="text-amber-700 text-xs">Unassigned</span>}
-              </TableCell>
               <TableCell className="text-sm">
-                {r.average_score != null ? (
-                  <span>
-                    <span className="font-semibold">{Number(r.average_score).toFixed(1)}</span>
-                    {r.rating_label && <span className="text-muted-foreground"> · {r.rating_label}</span>}
-                  </span>
-                ) : (
-                  '—'
-                )}
+                {evaluators ?? <span className="text-amber-700 text-xs">Unassigned</span>}
               </TableCell>
+              <TableCell className="text-sm">{scoreLabel(r)}</TableCell>
               <TableCell className="text-right">
                 <Button variant="ghost" size="sm" onClick={() => onOpen(r)}>
                   <ExternalLink className="h-4 w-4 mr-1" /> Open
@@ -80,14 +138,9 @@ export function EvaluationTable({ rows, showEmployee = true, onOpen, emptyText =
             </TableRow>
           );
         })}
-        {rows.length === 0 && (
-          <TableRow>
-            <TableCell colSpan={showEmployee ? 8 : 7} className="text-center py-8 text-muted-foreground">
-              {emptyText}
-            </TableCell>
-          </TableRow>
-        )}
       </TableBody>
     </Table>
+      </div>
+    </>
   );
 }

@@ -89,7 +89,7 @@ export function SignaturePad({ label, onChange, disabled }: SignaturePadProps) {
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-medium">{label}</span>
         <Button type="button" variant="ghost" size="sm" onClick={clear} disabled={disabled || !hasInk}>
           <Eraser className="h-4 w-4 mr-1" /> Clear
