@@ -50,6 +50,7 @@ export interface FormTemplate {
   recommendation_required: boolean;
   version: number;
   is_active: boolean;
+  auto_create: boolean;
   created_at: string;
 }
 

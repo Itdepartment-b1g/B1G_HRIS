@@ -274,6 +274,14 @@ export async function sendRequestNotification(payload: SendRequestNotificationPa
   });
 }
 
+/** Send any probationary evaluation emails that the daily job queued. Safe to call more than once. */
+export async function flushPerformanceEmails(): Promise<void> {
+  await callEdgeFunction<{ success: boolean }>('send-performance-emails', {}, {
+    useUserAuth: true,
+    onAuthFailure: 'throw',
+  });
+}
+
 /**
  * Seed the database with sample data
  * 

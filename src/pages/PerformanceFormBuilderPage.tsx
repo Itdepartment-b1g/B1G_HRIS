@@ -60,6 +60,7 @@ interface Draft {
   recOptionsText: string;
   recRequired: boolean;
   isActive: boolean;
+  autoCreate: boolean;
 }
 
 const newId = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
@@ -80,6 +81,7 @@ function blankDraft(statuses: EmploymentStatusOption[]): Draft {
     recOptionsText: '',
     recRequired: false,
     isActive: false,
+    autoCreate: false,
   };
 }
 
@@ -98,6 +100,7 @@ function draftFromTemplate(template: FormTemplate): Draft {
     recOptionsText: (template.recommendation_options ?? []).join('\n'),
     recRequired: template.recommendation_required,
     isActive: template.is_active,
+    autoCreate: !!template.auto_create,
   };
 }
 
@@ -259,6 +262,7 @@ const PerformanceFormBuilderPage = () => {
       recommendation_options: draft.recOptionsText.split('\n').map((x) => x.trim()).filter(Boolean),
       recommendation_required: draft.recRequired,
       is_active: asDraft ? false : draft.isActive,
+      auto_create: !asDraft && draft.isActive && draft.scheduleType !== 'manual' && draft.autoCreate,
     };
 
     setSaving(true);
@@ -474,14 +478,34 @@ function BasicsStep({
           </CardHeader>
           <CardContent className="space-y-3">
             <label className="flex items-start gap-2 cursor-pointer">
-              <Checkbox checked={draft.isActive} onCheckedChange={(v) => onChange({ isActive: v === true })} className="mt-0.5" />
+              <Checkbox
+                checked={draft.isActive}
+                onCheckedChange={(v) => onChange({ isActive: v === true, autoCreate: v === true ? draft.autoCreate : false })}
+                className="mt-0.5"
+              />
               <span>
-                <span className="block text-sm font-medium">Active (create automatically)</span>
+                <span className="block text-sm font-medium">Active (available to use)</span>
                 <span className="block text-xs text-muted-foreground mt-1">
-                  Leave this unchecked if you want to create each evaluation yourself with Create Evaluation. Check it to let the system create them on schedule, for example the 3rd and 5th month after the hire date. Reminders are sent to the immediate superior before each due date.
+                  Check this to use the form at all. You can then create evaluations for people by hand with Create Evaluation. Inactive forms cannot be used.
                 </span>
               </span>
             </label>
+            {draft.scheduleType !== 'manual' && (
+              <label className={`flex items-start gap-2 ${draft.isActive ? 'cursor-pointer' : 'opacity-60'}`}>
+                <Checkbox
+                  checked={draft.autoCreate}
+                  disabled={!draft.isActive}
+                  onCheckedChange={(v) => onChange({ autoCreate: v === true })}
+                  className="mt-0.5"
+                />
+                <span>
+                  <span className="block text-sm font-medium">Create evaluations automatically on schedule</span>
+                  <span className="block text-xs text-muted-foreground mt-1">
+                    Check this if the system should create these evaluations by itself on their due dates, for example the 3rd and 5th month after the hire date. Uncheck it if you will create each one yourself with Create Evaluation. Probation forms then send HR, admin, and super admin one reminder before each due date. Needs Active checked first.
+                  </span>
+                </span>
+              </label>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -874,7 +898,14 @@ function ReviewStep({
     { label: 'Rating scale', value: draft.scale.map((s) => `${s.value} ${s.label}`).join(', ') },
     { label: 'Overall rating', value: draft.bands.map((b) => `${b.min}+ ${b.label}`).join(', ') || '—' },
     { label: 'Recommendation', value: options.length ? options.join(', ') : 'None' },
-    { label: 'Publishing', value: draft.isActive ? 'Active' : 'Inactive' },
+    {
+      label: 'Publishing',
+      value: !draft.isActive
+        ? 'Inactive'
+        : draft.scheduleType !== 'manual' && draft.autoCreate
+          ? 'Active. The system creates evaluations on schedule'
+          : 'Active. You create evaluations by hand',
+    },
   ];
 
   return (
@@ -883,7 +914,7 @@ function ReviewStep({
         <h2 className="text-lg font-semibold">Review</h2>
         <p className="text-sm text-muted-foreground">
           {isNew
-            ? 'Saving creates the form. Turn Active on if it should be scheduled.'
+            ? 'Saving creates the form. Active makes it available. Create evaluations automatically on schedule lets the system create them on their due dates.'
             : 'Evaluations already created keep the form they started with. New ones use this version.'}
         </p>
       </div>

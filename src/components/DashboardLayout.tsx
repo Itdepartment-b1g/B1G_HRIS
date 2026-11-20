@@ -24,6 +24,7 @@ import MobileBottomNav from '@/components/MobileBottomNav';
 import ActivityPopup from '@/components/ActivityPopup';
 import { ActivityComplianceProvider } from '@/contexts/ActivityComplianceContext';
 import { useNotifications } from '@/hooks/useNotifications';
+import { flushPerformanceEmails } from '@/lib/edgeFunctions';
 import { launchAssetManagement } from '@/store';
 import { useAppDispatch, useAppSelector } from '@/store/hooks';
 import { toast } from 'sonner';
@@ -52,6 +53,12 @@ const DashboardLayout = () => {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const canFlushPerformanceEmails = !!user?.roles?.some((role) => role === 'admin' || role === 'super_admin');
+  useEffect(() => {
+    if (!canFlushPerformanceEmails) return;
+    flushPerformanceEmails().catch(() => {});
+  }, [canFlushPerformanceEmails, user?.id]);
 
   const flattenedNavItems = useMemo(() => {
     const items: Array<{

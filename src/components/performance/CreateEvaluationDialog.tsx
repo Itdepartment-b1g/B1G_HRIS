@@ -17,6 +17,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { AssignmentFields } from '@/components/performance/AssignmentFields';
 import { loadPeopleDirectory, errorMessage, type PeopleDirectory } from '@/lib/performanceData';
+import { flushPerformanceEmails } from '@/lib/edgeFunctions';
 import type { FormTemplate } from '@/lib/performance';
 
 interface CreateEvaluationDialogProps {
@@ -136,6 +137,7 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
     if (created > 0) {
       toast.success(`Created ${created} evaluation${created === 1 ? '' : 's'}`);
       onCreated();
+      flushPerformanceEmails().catch(() => {});
     }
     if (failures.length > 0) {
       toast.error(`${failures.length} not created. ${failures.join(' | ')}`);
@@ -154,7 +156,7 @@ export function CreateEvaluationDialog({ open, onOpenChange, templates, onCreate
             <Plus className="h-5 w-5 text-primary" /> Create Evaluation
           </DialogTitle>
           <DialogDescription>
-            Tick one or more employees. One evaluation is created for each. Probation evaluations are also created automatically from the hire date.
+            Tick one or more employees, and one evaluation is created for each. Forms set to create evaluations automatically on schedule create their own on the due dates, so you only use this for the rest.
           </DialogDescription>
         </DialogHeader>
 

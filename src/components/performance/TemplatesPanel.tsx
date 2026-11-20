@@ -6,6 +6,16 @@ import { supabase } from '@/lib/supabase';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,7 +28,8 @@ import {
   type EmploymentStatusOption,
   type PerformanceSettings,
 } from '@/lib/performanceData';
-import { scheduleSummary, type FormTemplate } from '@/lib/performance';
+import { formatDate, scheduleSummary, type FormTemplate } from '@/lib/performance';
+import { flushPerformanceEmails } from '@/lib/edgeFunctions';
 
 interface TemplatesPanelProps {
   templates: FormTemplate[];
@@ -34,6 +45,7 @@ export function TemplatesPanel({ templates, userId, onChanged }: TemplatesPanelP
   const [departments, setDepartments] = useState<{ id: string; name: string }[]>([]);
   const [savingSettings, setSavingSettings] = useState(false);
   const [running, setRunning] = useState(false);
+  const [confirmRunOpen, setConfirmRunOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
@@ -98,6 +110,7 @@ export function TemplatesPanel({ templates, userId, onChanged }: TemplatesPanelP
     if (error) return toast.error(errorMessage(error, 'Could not run schedule'));
     const result = data as { evaluations_created?: number; reminders_sent?: number } | null;
     toast.success(`Schedule ran: ${result?.evaluations_created ?? 0} created, ${result?.reminders_sent ?? 0} reminders sent`);
+    flushPerformanceEmails().catch(() => {});
     onChanged();
   };
 
@@ -136,7 +149,7 @@ export function TemplatesPanel({ templates, userId, onChanged }: TemplatesPanelP
                   value={settings.reminder_days_before}
                   onChange={(e) => setSettings({ ...settings, reminder_days_before: Number(e.target.value) })}
                 />
-                <p className="text-xs text-muted-foreground">They also get a notice on the due date, then every day it stays overdue.</p>
+                <p className="text-xs text-muted-foreground">They also get a notice on the due date, then every day it stays overdue. The same number of days is used once to remind HR, admin, and super admin when a probationary evaluation still needs to be created.</p>
               </div>
               <div className="space-y-2">
                 <Label>Start creating evaluations from</Label>
@@ -154,10 +167,56 @@ export function TemplatesPanel({ templates, userId, onChanged }: TemplatesPanelP
               {savingSettings ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Save className="h-4 w-4 mr-2" />}
               Save settings
             </Button>
-            <Button variant="outline" onClick={runNow} disabled={running}>
+            <Button variant="outline" onClick={() => setConfirmRunOpen(true)} disabled={running}>
               {running ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Play className="h-4 w-4 mr-2" />}
               Create due evaluations now
             </Button>
+            <AlertDialog open={confirmRunOpen} onOpenChange={setConfirmRunOpen}>
+              <AlertDialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Create evaluations now?</AlertDialogTitle>
+                  <AlertDialogDescription asChild>
+                    <div className="space-y-3 text-sm text-muted-foreground">
+                      <p>
+                        This runs the same job the system runs every night. Evaluations it creates cannot be removed with one click. Each one can be cancelled separately later.
+                      </p>
+                      <div className="space-y-2">
+                        <p className="font-medium text-foreground">What it will do</p>
+                        <ol className="list-decimal pl-5 space-y-1">
+                          <li>
+                            For each form with <span className="font-medium text-foreground">Create evaluations automatically on schedule</span> turned on, it creates the evaluations that are due.
+                          </li>
+                          <li>
+                            Only due dates on or after <span className="font-medium text-foreground">{formatDate(settings?.go_live_date ?? null)}</span> are used. Earlier due dates are skipped, so older hires are not marked overdue.
+                          </li>
+                          <li>
+                            It creates them now, even if the due date is months away. They wait until their due date.
+                          </li>
+                          <li>
+                            If an evaluation already exists for that person and due date, it is not created again.
+                          </li>
+                          <li>
+                            Probation forms with the automatic setting off do not create anything. Instead, HR, admin, and super admin get one reminder for each person whose evaluation is due in {settings?.reminder_days_before ?? 7} days and still has not been created.
+                          </li>
+                        </ol>
+                      </div>
+                      <div className="rounded-md border bg-muted/40 p-3 space-y-1">
+                        <p className="font-medium text-foreground">Example</p>
+                        <p>
+                          An employee hired on August 19, 2026 has a 3rd-month evaluation due November 19, 2026 and a 5th-month evaluation due January 19, 2027. If the probation form is set to create automatically, clicking now creates both today. The January one is created two months early, and it waits until January 19, 2027 to be due.
+                        </p>
+                      </div>
+                    </div>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel disabled={running}>Cancel</AlertDialogCancel>
+                  <AlertDialogAction onClick={runNow} disabled={running}>
+                    Create evaluations now
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </div>
         </CardContent>
       </Card>
