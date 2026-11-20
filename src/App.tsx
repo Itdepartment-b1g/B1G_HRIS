@@ -58,6 +58,9 @@ import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 import LeaveOnBehalf from "./pages/LeaveOnBehalf";
 import BusinessTripOnBehalf from "./pages/BusinessTripOnBehalf";
+import Performance from "./pages/Performance";
+import PerformanceEvaluationPage from "./pages/PerformanceEvaluationPage";
+import PerformanceFormBuilderPage from "./pages/PerformanceFormBuilderPage";
 
 const queryClient = new QueryClient();
 
@@ -92,6 +95,16 @@ const App = () => (
               element={
                 <RequireRole roles={['super_admin', 'admin', 'supervisor', 'manager', 'executive']}>
                   <BusinessTripOnBehalf />
+                </RequireRole>
+              }
+            />
+            <Route path="performance" element={<Performance />} />
+            <Route path="performance/evaluations/:id" element={<PerformanceEvaluationPage />} />
+            <Route
+              path="performance/forms/:templateId"
+              element={
+                <RequireRole roles={['admin', 'super_admin']}>
+                  <PerformanceFormBuilderPage />
                 </RequireRole>
               }
             />

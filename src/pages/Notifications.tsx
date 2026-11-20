@@ -37,6 +37,7 @@ const Notifications = () => {
     if (type === 'survey') return 'SV';
     if (type === 'announcement') return 'AN';
     if (type === 'policy') return 'PL';
+    if (type === 'performance') return 'PE';
     return 'NT';
   };
 
