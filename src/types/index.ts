@@ -142,7 +142,7 @@ export interface AnnouncementAcknowledgement {
   acknowledged_at: string;
 }
 
-export type SurveyAnswerType = 'multiple_choice' | 'rating' | 'text';
+export type SurveyAnswerType = 'multiple_choice' | 'checkbox' | 'rating' | 'text';
 
 export interface Survey {
   id: string;

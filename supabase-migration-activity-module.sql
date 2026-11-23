@@ -85,7 +85,7 @@ CREATE TABLE IF NOT EXISTS public.survey_questions (
   survey_id UUID NOT NULL REFERENCES public.surveys(id) ON DELETE CASCADE,
   sort_order INT NOT NULL DEFAULT 0,
   question_text TEXT NOT NULL,
-  answer_type TEXT NOT NULL CHECK (answer_type IN ('multiple_choice', 'rating', 'text')),
+  answer_type TEXT NOT NULL CHECK (answer_type IN ('multiple_choice', 'checkbox', 'rating', 'text')),
   options JSONB DEFAULT '[]'
 );
 
@@ -131,6 +131,11 @@ CREATE POLICY "Admins read all survey responses"
   ON public.survey_responses FOR SELECT
   TO authenticated
   USING (public.is_admin(auth.uid()));
+
+CREATE POLICY "Users read own survey responses"
+  ON public.survey_responses FOR SELECT
+  TO authenticated
+  USING (employee_id = auth.uid() OR employee_id IS NULL);
 
 CREATE POLICY "Insert own response or anonymous"
   ON public.survey_responses FOR INSERT
@@ -201,6 +206,11 @@ CREATE POLICY "Admins read survey completions"
   ON public.survey_completions FOR SELECT
   TO authenticated
   USING (public.is_admin(auth.uid()));
+
+CREATE POLICY "Users read own survey completions"
+  ON public.survey_completions FOR SELECT
+  TO authenticated
+  USING (employee_id = auth.uid());
 
 CREATE POLICY "Insert own completion"
   ON public.survey_completions FOR INSERT
