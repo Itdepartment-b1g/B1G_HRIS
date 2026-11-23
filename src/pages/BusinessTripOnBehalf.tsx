@@ -396,7 +396,6 @@ const BusinessTripOnBehalf = () => {
                               start_date: d ? toDateInput(d) : '',
                             }))
                           }
-                          disabled={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
                           initialFocus
                         />
                       </PopoverContent>
@@ -428,8 +427,12 @@ const BusinessTripOnBehalf = () => {
                             }))
                           }
                           disabled={(d) => {
-                            const min = form.start_date ? new Date(form.start_date + 'T12:00:00') : new Date();
-                            return d < min;
+                            // Date-only compare so same-day start/end is allowed
+                            if (!form.start_date) return false;
+                            const min = new Date(form.start_date + 'T00:00:00');
+                            const day = new Date(d);
+                            day.setHours(0, 0, 0, 0);
+                            return day < min;
                           }}
                           initialFocus
                         />
