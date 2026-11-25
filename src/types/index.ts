@@ -116,6 +116,8 @@ export interface OvertimeRequest {
   approved_by?: string | null;
   approved_at?: string | null;
   approver_name?: string | null;
+  filed_by_id?: string | null;
+  filed_by_name?: string | null;
   employee_name?: string;
 }
 

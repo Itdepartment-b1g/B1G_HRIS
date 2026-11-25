@@ -58,6 +58,7 @@ import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 import LeaveOnBehalf from "./pages/LeaveOnBehalf";
 import BusinessTripOnBehalf from "./pages/BusinessTripOnBehalf";
+import OvertimeOnBehalf from "./pages/OvertimeOnBehalf";
 import Performance from "./pages/Performance";
 import PerformanceEvaluationPage from "./pages/PerformanceEvaluationPage";
 import PerformanceFormBuilderPage from "./pages/PerformanceFormBuilderPage";
@@ -89,6 +90,14 @@ const App = () => (
             <Route path="leave-balance" element={<MyLeaveBalance />} />
             <Route path="employee-leave-balances" element={<RequireRole roles={['admin', 'super_admin']}><AllEmployeeLeaveBalances /></RequireRole>} />
             <Route path="overtime" element={<Overtime />} />
+            <Route
+              path="overtime-on-behalf"
+              element={
+                <RequireRole roles={['super_admin', 'admin', 'supervisor', 'manager']}>
+                  <OvertimeOnBehalf />
+                </RequireRole>
+              }
+            />
             <Route path="business-trip" element={<BusinessTrip />} />
             <Route
               path="business-trip-on-behalf"

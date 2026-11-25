@@ -24,6 +24,7 @@ import { Loader2, Plus, Timer, Eye, Paperclip, CalendarDays } from 'lucide-react
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { getWeekdayForDate } from '@/lib/attendanceStatus';
+import { computeOTHours } from '@/lib/overtimeHours';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
 import { createRequestInAppNotification } from '@/lib/inAppNotifications';
 import type { OvertimeRequest } from '@/types';
@@ -47,23 +48,6 @@ function formatTime(timeStr: string) {
   const [h, m] = timeStr.split(':').map(Number);
   const d = new Date(2000, 0, 1, h, m);
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
-}
-
-/** Parse "19:00:00" to minutes from midnight */
-function parseTimeToMinutes(timeStr: string): number {
-  const parts = (timeStr || '00:00').toString().split(':').map(Number);
-  return (parts[0] ?? 0) * 60 + (parts[1] ?? 0);
-}
-
-/** Compute OT: (time_out_mins - shift_end_mins), round down to 30, return hours. Min 1hr to qualify. */
-function computeOTHours(timeOutStr: string, shiftEndStr: string): { valid: boolean; hours: number } {
-  const timeOutMins = parseTimeToMinutes(timeOutStr);
-  const shiftEndMins = parseTimeToMinutes(shiftEndStr);
-  const rawMins = timeOutMins - shiftEndMins;
-  if (rawMins < 30) return { valid: false, hours: 0 };
-  const roundedMins = Math.floor(rawMins / 30) * 30;
-  if (roundedMins < 60) return { valid: false, hours: 0 };
-  return { valid: true, hours: roundedMins / 60 };
 }
 
 const Overtime = () => {
@@ -113,7 +97,7 @@ const Overtime = () => {
     if (!currentUser?.id) return;
     const { data } = await supabase
       .from('overtime_requests')
-      .select('*, approver:employees!approved_by(first_name, last_name)')
+      .select('*, approver:employees!approved_by(first_name, last_name), filer:employees!filed_by_id(first_name, last_name)')
       .eq('employee_id', currentUser.id)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false })
@@ -122,6 +106,9 @@ const Overtime = () => {
       ...r,
       approver_name: r.approver
         ? `${r.approver.first_name} ${r.approver.last_name}`
+        : null,
+      filed_by_name: r.filer
+        ? `${r.filer.first_name} ${r.filer.last_name}`
         : null,
     }));
     setMyRequests(withApprover as OvertimeRequest[]);
@@ -189,18 +176,11 @@ const Overtime = () => {
         return;
       }
 
-      const timeOutRaw = att.time_out;
-      const timeOutStr =
-        typeof timeOutRaw === 'string' && timeOutRaw.length <= 10
-          ? timeOutRaw
-          : (() => {
-              const d = new Date(timeOutRaw as string);
-              const h = d.getHours();
-              const m = d.getMinutes();
-              const s = d.getSeconds();
-              return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-            })();
-      const { valid, hours } = computeOTHours(timeOutStr, shiftEnd);
+      const { valid, hours, timeOutStr } = computeOTHours(
+        att.time_out as string,
+        shiftEnd,
+        dateStr
+      );
 
       setOtPreview({
         loading: false,
@@ -219,14 +199,12 @@ const Overtime = () => {
     setEligibleDatesLoading(true);
     try {
       const today = new Date().toISOString().slice(0, 10);
-      const sixtyDaysAgo = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
       const [attRes, shiftRes, existingRes] = await Promise.all([
         supabase
           .from('attendance_records')
           .select('date, time_in, time_out, status')
           .eq('employee_id', currentUser.id)
-          .gte('date', sixtyDaysAgo)
           .lte('date', today)
           .not('time_out', 'is', null),
         supabase
@@ -249,15 +227,7 @@ const Overtime = () => {
         const shiftForDay = shifts.find((s: any) => !s.days?.length || s.days.includes(weekday)) || shifts[0];
         if (shiftForDay?.is_flexible) continue;
         const shiftEnd = shiftForDay?.end_time ?? '19:00:00';
-        const timeOutRaw = att.time_out;
-        const timeOutStr =
-          typeof timeOutRaw === 'string' && timeOutRaw.length <= 10
-            ? timeOutRaw
-            : (() => {
-                const d = new Date(timeOutRaw as string);
-                return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
-              })();
-        const { valid, hours } = computeOTHours(timeOutStr, shiftEnd);
+        const { valid, hours } = computeOTHours(att.time_out as string, shiftEnd, att.date);
         if (valid && hours >= 1) eligible.push({ date: att.date, hours });
       }
       eligible.sort((a, b) => b.date.localeCompare(a.date));
@@ -613,7 +583,7 @@ const Overtime = () => {
                 </div>
               ) : eligibleDates.length === 0 ? (
                 <p className="text-sm text-muted-foreground py-2">
-                  No dates with 1hr+ overtime in the last 60 days. OT is only available when time-out is at least 1 hour after your shift end.
+                  No dates with 1hr+ overtime. OT is only available when time-out is at least 1 hour after your shift end.
                 </p>
               ) : (
                 <>
@@ -654,7 +624,6 @@ const Overtime = () => {
                           if (dateStr > today) return true;
                           return !eligibleDateSet.has(dateStr);
                         }}
-                        fromDate={new Date(Date.now() - 60 * 24 * 60 * 60 * 1000)}
                         toDate={new Date()}
                       />
                     </PopoverContent>
@@ -767,6 +736,15 @@ const Overtime = () => {
                       <Paperclip className="h-3.5 w-3.5" />
                       View attachment
                     </a>
+                  </div>
+                )}
+                {viewingRequest.filed_by_name && (
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Filed by</p>
+                    <p className="font-medium mt-0.5">
+                      {viewingRequest.filed_by_name}
+                      <span className="text-muted-foreground font-normal"> (on behalf)</span>
+                    </p>
                   </div>
                 )}
                 {(viewingRequest.status === 'approved' || viewingRequest.status === 'rejected') &&
