@@ -62,6 +62,9 @@ import OvertimeOnBehalf from "./pages/OvertimeOnBehalf";
 import Performance from "./pages/Performance";
 import PerformanceEvaluationPage from "./pages/PerformanceEvaluationPage";
 import PerformanceFormBuilderPage from "./pages/PerformanceFormBuilderPage";
+import Offboarding from "./pages/Offboarding";
+import OffboardingTemplate from "./pages/OffboardingTemplate";
+import OffboardingClearance from "./pages/OffboardingClearance";
 
 const queryClient = new QueryClient();
 
@@ -107,6 +110,16 @@ const App = () => (
                 </RequireRole>
               }
             />
+            <Route path="offboarding" element={<Offboarding />} />
+            <Route
+              path="offboarding/template"
+              element={
+                <RequireRole roles={['admin', 'super_admin']}>
+                  <OffboardingTemplate />
+                </RequireRole>
+              }
+            />
+            <Route path="offboarding/:id" element={<OffboardingClearance />} />
             <Route path="performance" element={<Performance />} />
             <Route path="performance/evaluations/:id" element={<PerformanceEvaluationPage />} />
             <Route

@@ -15,6 +15,7 @@ import {
   Award,
   Package,
   ClipboardCheck,
+  UserMinus,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -49,6 +50,7 @@ export const navDropdowns: NavDropdown[] = [
     items: [
       { label: 'Company', path: '/dashboard/company', description: 'Company related data', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Building2 },
       { label: 'Performance', path: '/dashboard/performance', description: 'Performance evaluations and sign-off', iconBg: 'bg-rose-100', iconColor: 'text-rose-600', icon: ClipboardCheck },
+      { label: 'Offboarding', path: '/dashboard/offboarding', description: 'Resignation and exit clearance', iconBg: 'bg-orange-100', iconColor: 'text-orange-700', icon: UserMinus },
       { label: 'Employee', path: '/dashboard/employee/personal-data', description: 'Employee related data', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', icon: Users },
       { label: 'Master Data Setting', path: '/dashboard/master-data/employees', description: 'Employees, departments & shifts', iconBg: 'bg-slate-100', iconColor: 'text-slate-600', icon: Settings, roles: ['super_admin', 'admin'] },
     ],
