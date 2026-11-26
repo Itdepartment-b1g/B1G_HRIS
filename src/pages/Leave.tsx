@@ -648,12 +648,12 @@ const Leave = () => {
             />
           </div>
         ) : (
-        <div className="flex flex-col flex-1 min-h-0">
-        {/* Leave balances row - horizontal scroll, above leave requests table */}
-        <div className="shrink-0 overflow-x-auto pb-1 -mx-1 scroll-smooth snap-x snap-mandatory">
-          <div className="flex gap-3 min-w-max">
+        <div className="flex flex-col flex-1 min-h-0 gap-4">
+        {/* Leave balances: two columns on a phone, a scrolling row on larger screens */}
+        <div className="shrink-0 sm:overflow-x-auto sm:pb-1 sm:-mx-1 sm:scroll-smooth sm:snap-x sm:snap-mandatory">
+          <div className="grid grid-cols-2 gap-3 sm:flex sm:min-w-max">
             {!isRegular ? (
-              <div className="shrink-0 rounded-lg border border-l-4 border-l-slate-400 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-[100px] snap-start">
+              <div className="col-span-2 rounded-lg border border-l-4 border-l-slate-400 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-0 sm:col-span-1 sm:shrink-0 sm:min-w-[100px] sm:snap-start">
                 <div className="flex items-center gap-1.5">
                   <CalendarX className="h-4 w-4 text-muted-foreground" />
                   <span className="text-xs text-muted-foreground">LWOP used</span>
@@ -661,7 +661,7 @@ const Leave = () => {
                 <span className="text-xl font-bold tabular-nums">{balance?.lwop_days_used ?? 0}</span>
               </div>
             ) : loading ? (
-              <div className="shrink-0 rounded-lg border bg-muted/50 px-4 py-3 min-w-[100px] snap-start">
+              <div className="rounded-lg border bg-muted/50 px-4 py-3 min-w-0 sm:shrink-0 sm:min-w-[100px] sm:snap-start">
                 <span className="text-xs text-muted-foreground">Loading...</span>
               </div>
             ) : balance && fileLeaveOptions.filter((t) => t.code !== 'lwop').length > 0 ? (
@@ -677,14 +677,14 @@ const Leave = () => {
                     <div
                       key={cfg.code}
                       className={cn(
-                        'shrink-0 rounded-lg border border-l-4 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-[100px] hover:bg-muted/30 transition-colors snap-start',
+                        'rounded-lg border border-l-4 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-0 hover:bg-muted/30 transition-colors sm:shrink-0 sm:min-w-[100px] sm:snap-start',
                         borderCls,
                         isLow && 'ring-1 ring-amber-200'
                       )}
                     >
                       <div className="flex items-center gap-1.5">
                         <Icon className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="text-xs text-muted-foreground truncate max-w-[90px]">{label}</span>
+                        <span className="text-xs text-muted-foreground truncate">{label}</span>
                       </div>
                       <span className="text-xl font-bold tabular-nums">{val}</span>
                       {maxVal != null && cfg.code !== 'lwop' && (
@@ -694,7 +694,7 @@ const Leave = () => {
                   );
                 })}
                 {fileLeaveOptions.some((t) => t.code === 'lwop') && (
-                  <div className="shrink-0 rounded-lg border border-l-4 border-l-slate-400 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-[100px] snap-start">
+                  <div className="rounded-lg border border-l-4 border-l-slate-400 bg-card px-4 py-3 flex flex-col gap-0.5 min-w-0 sm:shrink-0 sm:min-w-[100px] sm:snap-start">
                     <div className="flex items-center gap-1.5">
                       <CalendarX className="h-4 w-4 text-muted-foreground" />
                       <span className="text-xs text-muted-foreground">LWOP used</span>
@@ -704,7 +704,7 @@ const Leave = () => {
                 )}
                 <Link
                   to="/dashboard/leave-balance"
-                  className="shrink-0 rounded-lg border border-dashed border-muted-foreground/30 px-4 py-3 flex items-center justify-center gap-1 text-xs font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors min-w-[100px] snap-start"
+                  className="col-span-2 rounded-lg border border-dashed border-muted-foreground/30 px-4 py-3 flex items-center justify-center gap-1 text-xs font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors sm:col-span-1 sm:shrink-0 sm:min-w-[140px] sm:snap-start"
                 >
                   View full balance <ChevronRight className="h-3 w-3" />
                 </Link>
@@ -712,7 +712,7 @@ const Leave = () => {
             ) : (
               <Link
                 to="/dashboard/leave-balance"
-                className="shrink-0 rounded-lg border border-dashed border-muted-foreground/30 px-4 py-3 flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors min-w-[100px] snap-start"
+                className="col-span-2 rounded-lg border border-dashed border-muted-foreground/30 px-4 py-3 flex items-center gap-1 text-xs font-medium text-primary hover:bg-primary/5 hover:border-primary/30 transition-colors sm:col-span-1 sm:shrink-0 sm:min-w-[140px] sm:snap-start"
               >
                 View full balance <ChevronRight className="h-3 w-3" />
               </Link>
@@ -748,7 +748,7 @@ const Leave = () => {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="space-y-6">
           <Card>
-            <CardHeader className="flex flex-row items-center justify-between">
+            <CardHeader className="flex flex-col items-stretch gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
               <CardTitle className="text-base">My Leave Requests</CardTitle>
               <Button
                 onClick={() => {
@@ -768,6 +768,7 @@ const Leave = () => {
                   setFileDialogOpen(true);
                 }}
                 size="sm"
+                className="w-full sm:w-auto"
               >
                 <Plus className="h-4 w-4 mr-2" />
                 File Leave
@@ -780,6 +781,57 @@ const Leave = () => {
                 </p>
               ) : (
                 <>
+                  <div className="space-y-3 md:hidden">
+                    {paginatedMyRequests.map((r) => (
+                      <div key={r.id} className="rounded-lg border p-3 space-y-2">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold uppercase">{r.leave_type}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {formatDate(r.start_date)} – {formatDate(r.end_date)}
+                              {r.number_of_days != null && (
+                                <span> • {r.number_of_days} day{r.number_of_days !== 1 ? 's' : ''}</span>
+                              )}
+                            </p>
+                          </div>
+                          <Badge variant="outline" className={cn('shrink-0 capitalize', leaveStatusBadgeClass(r.status))}>
+                            {r.status}
+                          </Badge>
+                        </div>
+                        {r.reason && (
+                          <p className="text-sm text-muted-foreground line-clamp-2">{r.reason}</p>
+                        )}
+                        {(r.status === 'approved' || r.status === 'rejected') && r.approver_name && (
+                          <p className="text-xs text-muted-foreground">
+                            {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.approver_name}
+                          </p>
+                        )}
+                        <div className="flex gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => setViewingRequest(r)}
+                          >
+                            <Eye className="h-4 w-4 mr-1.5" />
+                            View
+                          </Button>
+                          {r.status === 'pending' && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1 text-destructive hover:text-destructive"
+                              onClick={() => openCancelDialog(r)}
+                            >
+                              <Ban className="h-4 w-4 mr-1.5" />
+                              Cancel
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="hidden md:block">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -837,6 +889,7 @@ const Leave = () => {
                     ))}
                     </TableBody>
                   </Table>
+                  </div>
                   <TablePagination
                     totalItems={filteredMyRequests.length}
                     currentPage={leavePage}

@@ -37,8 +37,11 @@ export interface ClearanceSection {
   department_id: string | null;
   title: string;
   assignee_id: string | null;
+  /** Person chosen for this clearance only, when the usual signer is unavailable. */
+  signer_override_id: string | null;
   sort_order: number;
   assignee: PersonRef | null;
+  signer_override: PersonRef | null;
   department: ClearanceDepartment | null;
   items: ClearanceItem[];
 }
@@ -116,7 +119,7 @@ const LIST_SELECT = `
     employee_supervisors!employee_supervisors_employee_id_fkey(supervisor_id)
   ),
   clearance_sections(
-    id, title, section_kind, assignee_id, sort_order, department_id,
+    id, title, section_kind, assignee_id, signer_override_id, sort_order, department_id,
     department:departments(id, name, head_id),
     clearance_items(id, label, sort_order, cleared_on, signed_by, signed_name, remarks, deduction, added_during_case)
   )
@@ -137,8 +140,9 @@ const DETAIL_SELECT = `
     )
   ),
   clearance_sections(
-    id, section_kind, department_id, title, assignee_id, sort_order,
+    id, section_kind, department_id, title, assignee_id, signer_override_id, sort_order,
     assignee:employees!assignee_id(id, first_name, last_name),
+    signer_override:employees!signer_override_id(id, first_name, last_name),
     department:departments(
       id, name, head_id,
       head:employees!head_id(id, first_name, last_name)
@@ -189,6 +193,9 @@ export function formatClearanceDate(value: string | null | undefined): string {
 
 export function dbMessage(error: DbError | null | undefined, fallback: string): string {
   const message = error?.message ?? '';
+  if (/signer_override|clearance_set_section_signer|clearance_section_signer_options/i.test(message)) {
+    return 'Run supabase-migration-exit-clearance-signer.sql in the Supabase SQL editor, then refresh.';
+  }
   if (
     error?.code === '42P01' ||
     error?.code === 'PGRST202' ||
@@ -255,6 +262,8 @@ export function normalizeClearance(row: Record<string, unknown>): ClearanceRecor
   const sections = asArray(row.clearance_sections as ClearanceSection[]).map((section) => ({
     ...section,
     assignee: asOne(section.assignee),
+    signer_override: asOne(section.signer_override),
+    signer_override_id: section.signer_override_id ?? null,
     department: normalizeDepartment(section.department),
     items: asArray(section.items ?? (section as { clearance_items?: ClearanceItem[] }).clearance_items)
       .map((item) => normalizeItem(item))
@@ -298,6 +307,7 @@ export function clearanceProgress(sections: ClearanceSection[]) {
 
 /** People who must sign this section today. */
 export function sectionSignerIds(clearance: ClearanceRecord, section: ClearanceSection): string[] {
+  if (section.signer_override_id) return [section.signer_override_id];
   if (section.section_kind === 'immediate_superior') {
     const ids = clearance.employee?.supervisor_ids ?? [];
     if (ids.length > 0) return ids;
@@ -310,6 +320,9 @@ export function sectionSignerIds(clearance: ClearanceRecord, section: ClearanceS
 }
 
 export function sectionSignerName(clearance: ClearanceRecord, section: ClearanceSection): string {
+  if (section.signer_override_id) {
+    return personName(section.signer_override) || 'Substitute signer';
+  }
   if (section.section_kind === 'immediate_superior') {
     const names = (clearance.employee?.supervisors ?? []).map(personName).filter(Boolean);
     if (names.length > 0) return names.join(', ');
@@ -463,6 +476,22 @@ export function unsignClearanceItem(itemId: string) {
 
 export function cancelClearance(id: string, note: string) {
   return rpc<void>('clearance_cancel', { p_clearance_id: id, p_note: note }, 'Failed to cancel the clearance');
+}
+
+export async function fetchSectionSignerOptions(sectionId: string): Promise<PersonRef[]> {
+  const { data, error } = await supabase.rpc('clearance_section_signer_options', { p_section_id: sectionId });
+  if (error) throw new Error(dbMessage(error, 'Failed to load people who can sign'));
+  return (data ?? []) as PersonRef[];
+}
+
+export async function setSectionSigner(sectionId: string, employeeId: string | null) {
+  const sent = await rpc<number>(
+    'clearance_set_section_signer',
+    { p_section_id: sectionId, p_employee_id: employeeId },
+    'Failed to change the signer'
+  );
+  void flushClearanceEmails();
+  return sent ?? 0;
 }
 
 export async function remindClearance(id: string) {

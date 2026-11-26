@@ -441,9 +441,9 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
               showActions && 'hover:border-primary/30'
             )}
           >
-            <CardContent className="pt-4 pb-4">
-              <div className="flex items-start justify-between gap-4">
-                <div className="flex items-start gap-3 min-w-0 flex-1">
+            <CardContent className="p-3 sm:p-6 sm:pt-4 sm:pb-4">
+              <div className="flex w-full flex-col gap-3">
+                <div className="flex w-full items-start gap-3">
                   <Avatar className="h-10 w-10 shrink-0">
                     <AvatarImage src={r.employee_avatar_url ?? undefined} alt="" />
                     <AvatarFallback className="bg-primary/10 text-primary text-xs font-semibold">
@@ -451,111 +451,151 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                     </AvatarFallback>
                   </Avatar>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold text-foreground flex items-center gap-1.5">
-                      <Calendar className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                      {r.employee_name}
-                      <span className="uppercase text-muted-foreground font-medium">— {r.leave_type}</span>
-                    </p>
-                    <p className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
-                      <Clock className="h-3 w-3 shrink-0" />
-                      {formatDate(r.start_date)} – {formatDate(r.end_date)}
-                      {r.number_of_days != null && (
-                        <span> • {r.number_of_days} day{r.number_of_days !== 1 ? 's' : ''}</span>
-                      )}
-                    </p>
-                    {r.reason && (
-                      <p className="text-sm text-muted-foreground mt-2 line-clamp-2">{r.reason}</p>
-                    )}
-                    {r.attachment_url && (
-                      <a
-                        href={r.attachment_url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-primary hover:underline flex items-center gap-1 mt-1.5"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <Paperclip className="h-3 w-3" />
-                        Attachment
-                      </a>
-                    )}
-                    {(r.status === 'approved' || r.status === 'rejected') && r.approver_name && (
-                      <p className="text-xs text-muted-foreground mt-2">
-                        {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.approver_name}
-                      </p>
-                    )}
-                    {r.status === 'cancelled' && r.cancellation_note && (
-                      <div className="mt-2 rounded-md border border-yellow-300 bg-yellow-100 px-2.5 py-2 dark:border-yellow-700 dark:bg-yellow-950/40">
-                        <p className="text-[11px] font-semibold uppercase tracking-wide text-yellow-800 dark:text-yellow-300">Cancellation note</p>
-                        <p className="mt-1 text-xs text-foreground">{r.cancellation_note}</p>
-                        {r.canceller_name && (
-                          <p className="mt-1 text-[11px] text-muted-foreground">Cancelled by {r.canceller_name}</p>
-                        )}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground leading-snug break-words">
+                          {r.employee_name}
+                        </p>
+                        <p className="text-xs font-medium uppercase text-muted-foreground mt-0.5">
+                          {r.leave_type}
+                        </p>
                       </div>
-                    )}
-                    {r.status === 'cancelled' && r.canceller_name && !r.cancellation_note && (
-                      <p className="text-xs text-muted-foreground mt-2">Cancelled by {r.canceller_name}</p>
-                    )}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <span
+                          className={cn(
+                            'rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
+                            statusBadgeClass(r.status)
+                          )}
+                        >
+                          {r.status}
+                        </span>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 shrink-0"
+                              disabled={approving === r.id || cancelling === r.id}
+                              aria-label="More actions"
+                            >
+                              {approving === r.id || cancelling === r.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <MoreVertical className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end" className="w-44">
+                            <DropdownMenuItem onClick={() => setViewingRequest(r)}>
+                              <Eye className="h-4 w-4 mr-2" />
+                              View
+                            </DropdownMenuItem>
+                            {showActions && (
+                              <>
+                                <DropdownMenuItem
+                                  onClick={() => handleApprove(r.id, 'approved')}
+                                  className="hidden sm:flex"
+                                >
+                                  <Check className="h-4 w-4 mr-2" />
+                                  Approve
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onClick={() => handleApprove(r.id, 'rejected')}
+                                  className="hidden text-destructive focus:text-destructive sm:flex"
+                                >
+                                  <X className="h-4 w-4 mr-2" />
+                                  Reject
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                            {showCancel && canCancelLeave && (r.status === 'pending' || r.status === 'approved') && (
+                              <>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => openCancelDialog(r)}
+                                  className="text-destructive focus:text-destructive"
+                                >
+                                  <Ban className="h-4 w-4 mr-2" />
+                                  Cancel
+                                </DropdownMenuItem>
+                              </>
+                            )}
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
+                    </div>
                   </div>
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <span
-                    className={cn(
-                      'rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize',
-                      statusBadgeClass(r.status)
+
+                <div className="w-full min-w-0 space-y-2">
+                  <p className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1 gap-y-0.5">
+                    <Clock className="h-3 w-3 shrink-0" />
+                    <span>{formatDate(r.start_date)} – {formatDate(r.end_date)}</span>
+                    {r.number_of_days != null && (
+                      <span>• {r.number_of_days} day{r.number_of_days !== 1 ? 's' : ''}</span>
                     )}
-                  >
-                    {r.status}
-                  </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 shrink-0"
-                        disabled={approving === r.id || cancelling === r.id}
-                      >
-                        {approving === r.id || cancelling === r.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <MoreVertical className="h-4 w-4" />
-                        )}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem onClick={() => setViewingRequest(r)}>
-                        <Eye className="h-4 w-4 mr-2" />
-                        View
-                      </DropdownMenuItem>
-                      {showActions && (
-                        <>
-                          <DropdownMenuItem onClick={() => handleApprove(r.id, 'approved')}>
-                            <Check className="h-4 w-4 mr-2" />
-                            Approve
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onClick={() => handleApprove(r.id, 'rejected')}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <X className="h-4 w-4 mr-2" />
-                            Reject
-                          </DropdownMenuItem>
-                        </>
+                  </p>
+                  {r.reason && (
+                    <p className="text-sm text-muted-foreground break-words">{r.reason}</p>
+                  )}
+                  {r.attachment_url && (
+                    <a
+                      href={r.attachment_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-primary hover:underline inline-flex items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Paperclip className="h-3 w-3" />
+                      Attachment
+                    </a>
+                  )}
+                  {(r.status === 'approved' || r.status === 'rejected') && r.approver_name && (
+                    <p className="text-xs text-muted-foreground">
+                      {r.status === 'approved' ? 'Approved' : 'Rejected'} by {r.approver_name}
+                    </p>
+                  )}
+                  {r.status === 'cancelled' && r.cancellation_note && (
+                    <div className="rounded-md border border-yellow-300 bg-yellow-100 px-2.5 py-2 dark:border-yellow-700 dark:bg-yellow-950/40">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-yellow-800 dark:text-yellow-300">Cancellation note</p>
+                      <p className="mt-1 text-xs text-foreground">{r.cancellation_note}</p>
+                      {r.canceller_name && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">Cancelled by {r.canceller_name}</p>
                       )}
-                      {showCancel && canCancelLeave && (r.status === 'pending' || r.status === 'approved') && (
-                        <>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem
-                            onClick={() => openCancelDialog(r)}
-                            className="text-destructive focus:text-destructive"
-                          >
-                            <Ban className="h-4 w-4 mr-2" />
-                            Cancel
-                          </DropdownMenuItem>
-                        </>
-                      )}
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                    </div>
+                  )}
+                  {r.status === 'cancelled' && r.canceller_name && !r.cancellation_note && (
+                    <p className="text-xs text-muted-foreground">Cancelled by {r.canceller_name}</p>
+                  )}
                 </div>
+
+                {showActions && (
+                  <div className="grid w-full grid-cols-2 gap-2 sm:hidden">
+                    <Button
+                      size="sm"
+                      className="w-full"
+                      disabled={approving === r.id}
+                      onClick={() => handleApprove(r.id, 'approved')}
+                    >
+                      {approving === r.id ? (
+                        <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                      ) : (
+                        <Check className="h-4 w-4 mr-1" />
+                      )}
+                      Approve
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="w-full text-destructive hover:text-destructive"
+                      disabled={approving === r.id}
+                      onClick={() => handleApprove(r.id, 'rejected')}
+                    >
+                      <X className="h-4 w-4 mr-1" />
+                      Reject
+                    </Button>
+                  </div>
+                )}
               </div>
             </CardContent>
           </Card>
@@ -653,7 +693,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
           </div>
 
           <Card>
-            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between space-y-0">
+            <CardHeader className="flex flex-col gap-3 px-3 sm:px-6 sm:flex-row sm:items-start sm:justify-between space-y-0">
               <div>
                 <CardTitle className="text-base">Leave Requests</CardTitle>
                 <CardDescription>
@@ -677,7 +717,7 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                 onClear={clearQuickFilters}
               />
             </CardHeader>
-            <CardContent>
+            <CardContent className="px-3 sm:px-6">
               {loading ? (
                 <div className="flex justify-center py-16">
                   <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
@@ -688,13 +728,19 @@ const LeaveApprovals = ({ embedded, filterCode, onFilterChange }: LeaveApprovals
                   onValueChange={(value) => setActiveTab(value as LeaveStatusTab)}
                   className="w-full"
                 >
-                  <TabsList className="grid w-full grid-cols-4">
-                    <TabsTrigger value="pending">
+                  <TabsList className="flex h-auto w-full justify-start gap-1 overflow-x-auto sm:grid sm:grid-cols-4">
+                    <TabsTrigger value="pending" className="shrink-0 px-2.5 text-xs sm:px-3 sm:text-sm">
                       Pending ({filteredPending.length})
                     </TabsTrigger>
-                    <TabsTrigger value="approved">Approved ({filteredApproved.length})</TabsTrigger>
-                    <TabsTrigger value="rejected">Rejected ({filteredRejected.length})</TabsTrigger>
-                    <TabsTrigger value="cancelled">Cancelled ({filteredCancelled.length})</TabsTrigger>
+                    <TabsTrigger value="approved" className="shrink-0 px-2.5 text-xs sm:px-3 sm:text-sm">
+                      Approved ({filteredApproved.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="rejected" className="shrink-0 px-2.5 text-xs sm:px-3 sm:text-sm">
+                      Rejected ({filteredRejected.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="cancelled" className="shrink-0 px-2.5 text-xs sm:px-3 sm:text-sm">
+                      Cancelled ({filteredCancelled.length})
+                    </TabsTrigger>
                   </TabsList>
                   <TabsContent value="pending" className="mt-5">
                     {renderRequests(filteredPending, true, true)}

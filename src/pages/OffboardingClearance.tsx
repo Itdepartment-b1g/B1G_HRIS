@@ -26,6 +26,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { SignaturePad } from '@/components/performance/SignaturePad';
 import { cn } from '@/lib/utils';
 import { downloadClearancePdf } from '@/lib/exportClearance';
@@ -38,17 +39,22 @@ import {
   clearanceProgress,
   deleteClearanceItem,
   fetchClearance,
+  fetchSectionSignerOptions,
   formatClearanceDate,
   isHrAdmin,
   manilaToday,
+  personName,
   remindClearance,
   runClearanceSchedule,
   sectionSignerName,
+  setSectionSigner,
   signClearanceItem,
   unsignClearanceItem,
   updateClearanceDetails,
   type ClearanceItem,
   type ClearanceRecord,
+  type ClearanceSection,
+  type PersonRef,
 } from '@/lib/offboarding';
 
 function show(value: string | null | undefined): string {
@@ -84,6 +90,10 @@ const OffboardingClearance = () => {
   const [cancelOpen, setCancelOpen] = useState(false);
   const [cancelNote, setCancelNote] = useState('');
   const [unsignId, setUnsignId] = useState<string | null>(null);
+  const [signerSection, setSignerSection] = useState<ClearanceSection | null>(null);
+  const [signerOptions, setSignerOptions] = useState<PersonRef[]>([]);
+  const [signerChoice, setSignerChoice] = useState('default');
+  const [signerLoading, setSignerLoading] = useState(false);
 
   const load = useCallback(async (silent = false) => {
     if (!id) return;
@@ -115,6 +125,45 @@ const OffboardingClearance = () => {
       toast.error(error instanceof Error ? error.message : 'Something went wrong');
     }
     setBusy(false);
+  };
+
+  const openSigner = async (section: ClearanceSection) => {
+    setSignerSection(section);
+    setSignerChoice(section.signer_override_id ?? 'default');
+    setSignerOptions([]);
+    setSignerLoading(true);
+    try {
+      const options = await fetchSectionSignerOptions(section.id);
+      if (section.signer_override && !options.some((person) => person.id === section.signer_override?.id)) {
+        options.unshift(section.signer_override);
+      }
+      setSignerOptions(options);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Failed to load people who can sign');
+      setSignerSection(null);
+    }
+    setSignerLoading(false);
+  };
+
+  const saveSigner = () => {
+    if (!signerSection) return;
+    const next = signerChoice === 'default' ? null : signerChoice;
+    if (next === (signerSection.signer_override_id ?? null)) {
+      setSignerSection(null);
+      return;
+    }
+    const sectionId = signerSection.id;
+    void run(async () => {
+      const sent = await setSectionSigner(sectionId, next);
+      setSignerSection(null);
+      toast.success(
+        sent > 0
+          ? 'Signer updated. They were notified by the app and by email.'
+          : next
+            ? 'Signer updated for this clearance.'
+            : 'This section is back to the usual signer.'
+      );
+    });
   };
 
   const openSign = (item: ClearanceItem) => {
@@ -329,9 +378,18 @@ const OffboardingClearance = () => {
                   <td colSpan={7} className="px-3 py-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <span className="font-semibold">{section.title}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {sectionDone ? 'Cleared' : `To be signed by ${sectionSignerName(clearance, section)}`}
-                      </span>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs text-muted-foreground">
+                          {sectionDone
+                            ? 'Cleared'
+                            : `To be signed by ${sectionSignerName(clearance, section)}${section.signer_override_id ? ' (substitute)' : ''}`}
+                        </span>
+                        {admin && clearance.status === 'in_progress' && !sectionDone && section.items.length > 0 && (
+                          <Button size="sm" variant="outline" className="h-7" disabled={busy} onClick={() => void openSigner(section)}>
+                            Change signer
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </td>
                 </tr>
@@ -424,6 +482,43 @@ const OffboardingClearance = () => {
           })}
         </table>
       </div>
+
+      <Dialog open={!!signerSection} onOpenChange={(open) => { if (!open) setSignerSection(null); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change signer: {signerSection?.title}</DialogTitle>
+            <DialogDescription>
+              {signerSection?.section_kind === 'immediate_superior'
+                ? 'Choose this employee’s supervisor, or someone in the employee’s department, if the usual signer is unavailable. This applies only to this clearance.'
+                : 'Choose someone in this department if the usual signer is unavailable. The department head in Master Data stays the same.'}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label>Who must sign</Label>
+            <Select value={signerChoice} onValueChange={setSignerChoice} disabled={signerLoading || busy}>
+              <SelectTrigger>
+                <SelectValue placeholder={signerLoading ? 'Loading…' : 'Choose a signer'} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="default">Usual signer</SelectItem>
+                {signerOptions.map((person) => (
+                  <SelectItem key={person.id} value={person.id}>{personName(person)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!signerLoading && signerOptions.length === 0 && (
+              <p className="text-xs text-muted-foreground">No one else in this department can be selected. You can still sign this section as HR.</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSignerSection(null)}>Cancel</Button>
+            <Button onClick={saveSigner} disabled={busy || signerLoading}>
+              {busy && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+              Save signer
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!signItem} onOpenChange={(open) => { if (!open) setSignItem(null); }}>
         <DialogContent className="max-w-lg">
