@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -28,6 +29,8 @@ import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
 import { useActivityCompliance } from '@/hooks/useActivityCompliance';
 import { createActivityInAppNotification } from '@/lib/inAppNotifications';
+import { isChoiceAnswerType } from '@/lib/surveyAnswers';
+import { submitSurveyResponse, type SurveyAnswerValue } from '@/lib/surveyCompletion';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -41,7 +44,8 @@ import {
 import type { Survey, SurveyQuestion, SurveyAnswerType } from '@/types';
 
 const ANSWER_TYPES: { value: SurveyAnswerType; label: string }[] = [
-  { value: 'multiple_choice', label: 'Multiple Choice' },
+  { value: 'multiple_choice', label: 'Single Choice' },
+  { value: 'checkbox', label: 'Checkboxes (multi)' },
   { value: 'rating', label: 'Rating (1-5)' },
   { value: 'text', label: 'Text' },
 ];
@@ -58,7 +62,7 @@ const ActivitySurveyTab = () => {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [answerSurvey, setAnswerSurvey] = useState<Survey | null>(null);
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string | number>>({});
+  const [answers, setAnswers] = useState<Record<string, SurveyAnswerValue>>({});
   const [submitting, setSubmitting] = useState(false);
   const [myResponses, setMyResponses] = useState<Set<string>>(new Set());
   const [employees, setEmployees] = useState<Array<{ id: string; first_name: string; last_name: string }>>([]);
@@ -168,51 +172,50 @@ const ActivitySurveyTab = () => {
     setAnswerSurvey(survey);
   };
 
+  const isAnswerMissing = (q: SurveyQuestion) => {
+    const v = answers[q.id];
+    if (q.answer_type === 'checkbox') {
+      return !Array.isArray(v) || v.length === 0;
+    }
+    return v === undefined || v === '';
+  };
+
+  const toggleCheckboxAnswer = (questionId: string, option: string, checked: boolean) => {
+    setAnswers((a) => {
+      const current = Array.isArray(a[questionId]) ? (a[questionId] as string[]) : [];
+      const next = checked
+        ? current.includes(option) ? current : [...current, option]
+        : current.filter((o) => o !== option);
+      return { ...a, [questionId]: next };
+    });
+  };
+
   const handleSubmitAnswer = async () => {
     if (!answerSurvey || !currentUser?.id) return;
     const survey = answerSurvey;
-    const qIds = questions.map((q) => q.id);
-    const missing = qIds.filter((id) => answers[id] === undefined || answers[id] === '');
+    const missing = questions.filter(isAnswerMissing);
     if (missing.length > 0) {
       toast.error('Please answer all questions.');
       return;
     }
     setSubmitting(true);
 
-    const { data: respRow, error: respErr } = await supabase
-      .from('survey_responses')
-      .insert({
-        survey_id: survey.id,
-        employee_id: survey.is_anonymous ? null : currentUser.id,
-      })
-      .select('id')
-      .single();
-
-    if (respErr) {
-      toast.error(respErr.message);
-      setSubmitting(false);
-      return;
-    }
-
-    if (survey.is_anonymous) {
-      await supabase.from('survey_completions').insert({ survey_id: survey.id, employee_id: currentUser.id });
-    }
-
-    const answerRows = questions.map((q) => {
-      const v = answers[q.id];
-      return {
-        response_id: respRow.id,
-        question_id: q.id,
-        answer_text: q.answer_type === 'text' ? String(v) : null,
-        answer_rating: q.answer_type === 'rating' ? (v as number) : null,
-        answer_choice: q.answer_type === 'multiple_choice' ? String(v) : null,
-      };
+    const { error } = await submitSurveyResponse({
+      surveyId: survey.id,
+      employeeId: currentUser.id,
+      isAnonymous: survey.is_anonymous,
+      questions,
+      answers,
     });
-    const { error: ansErr } = await supabase.from('survey_answers').insert(answerRows);
 
-    if (ansErr) {
-      toast.error(ansErr.message);
+    if (error) {
+      toast.error(error);
       setSubmitting(false);
+      if (error.includes('already completed')) {
+        setAnswerSurvey(null);
+        fetchSurveys();
+        refetchCompliance();
+      }
       return;
     }
     toast.success('Survey submitted.');
@@ -313,7 +316,7 @@ const ActivitySurveyTab = () => {
         sort_order: i,
         question_text: q.question_text,
         answer_type: q.answer_type,
-        options: q.answer_type === 'multiple_choice' ? q.options : [],
+        options: isChoiceAnswerType(q.answer_type) ? q.options : [],
       }));
       const { error: qErr } = await supabase.from('survey_questions').insert(questionRows);
       if (qErr) toast.error(qErr.message);
@@ -362,7 +365,7 @@ const ActivitySurveyTab = () => {
         sort_order: i,
         question_text: q.question_text,
         answer_type: q.answer_type,
-        options: q.answer_type === 'multiple_choice' ? q.options : [],
+        options: isChoiceAnswerType(q.answer_type) ? q.options : [],
       }));
       const { error: qErr } = await supabase.from('survey_questions').insert(questionRows);
 
@@ -434,7 +437,7 @@ const ActivitySurveyTab = () => {
     setForm((f) => ({
       ...f,
       questions: f.questions.map((q, i) =>
-        i === qIdx && q.answer_type === 'multiple_choice' ? { ...q, options: [...q.options, ''] } : q
+        i === qIdx && isChoiceAnswerType(q.answer_type) ? { ...q, options: [...q.options, ''] } : q
       ),
     }));
   };
@@ -443,7 +446,7 @@ const ActivitySurveyTab = () => {
     setForm((f) => ({
       ...f,
       questions: f.questions.map((q, i) =>
-        i === qIdx && q.answer_type === 'multiple_choice'
+        i === qIdx && isChoiceAnswerType(q.answer_type)
           ? { ...q, options: q.options.map((o, j) => (j === optIdx ? val : o)) }
           : q
       ),
@@ -533,6 +536,7 @@ const ActivitySurveyTab = () => {
                 <Label>
                   {q.question_text}
                   {q.answer_type === 'rating' && ' (1-5)'}
+                  {q.answer_type === 'checkbox' && ' (select all that apply)'}
                 </Label>
                 {q.answer_type === 'multiple_choice' && (
                   <RadioGroup
@@ -546,6 +550,23 @@ const ActivitySurveyTab = () => {
                       </div>
                     ))}
                   </RadioGroup>
+                )}
+                {q.answer_type === 'checkbox' && (
+                  <div className="space-y-2">
+                    {q.options.map((opt, i) => {
+                      const selected = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
+                      return (
+                        <div key={i} className="flex items-center gap-2">
+                          <Checkbox
+                            id={`${q.id}-cb-${i}`}
+                            checked={selected.includes(opt)}
+                            onCheckedChange={(v) => toggleCheckboxAnswer(q.id, opt, v === true)}
+                          />
+                          <Label htmlFor={`${q.id}-cb-${i}`} className="font-normal cursor-pointer">{opt}</Label>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
                 {q.answer_type === 'rating' && (
                   <div className="flex gap-2">
@@ -694,9 +715,17 @@ const ActivitySurveyTab = () => {
                       />
                       <Select
                         value={q.answer_type}
-                        onValueChange={(v) => updateQuestion(idx, { answer_type: v as SurveyAnswerType })}
+                        onValueChange={(v) => {
+                          const nextType = v as SurveyAnswerType;
+                          updateQuestion(idx, {
+                            answer_type: nextType,
+                            options: isChoiceAnswerType(nextType)
+                              ? (q.options.length ? q.options : [''])
+                              : [],
+                          });
+                        }}
                       >
-                        <SelectTrigger className="w-[160px]">
+                        <SelectTrigger className="w-[190px]">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -707,7 +736,7 @@ const ActivitySurveyTab = () => {
                       </Select>
                       <Button variant="ghost" size="icon" onClick={() => removeQuestion(idx)}>×</Button>
                     </div>
-                    {q.answer_type === 'multiple_choice' && (
+                    {isChoiceAnswerType(q.answer_type) && (
                       <div className="pl-4 space-y-2">
                         {q.options.map((opt, oi) => (
                           <div key={oi} className="flex gap-2">

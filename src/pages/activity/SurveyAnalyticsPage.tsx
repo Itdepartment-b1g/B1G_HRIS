@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,10 +18,62 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Loader2, ArrowLeft, Download, ChevronDown, Users } from 'lucide-react';
+import { Loader2, ArrowLeft, Download, ChevronDown, ChevronUp, Users } from 'lucide-react';
 import { toast } from 'sonner';
+import { cn } from '@/lib/utils';
 import { exportSurveyResults } from '@/lib/exportSurveyResults';
+import { choiceLabelsFromAnswer, isChoiceAnswerType } from '@/lib/surveyAnswers';
+import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
+import { SurveyQuestionChart } from '@/components/SurveyQuestionChart';
 import type { Survey, SurveyQuestion } from '@/types';
+
+const GO_UP_BG = '#472160';
+
+/** Client-side slice + reusable TablePagination for nested answer lists. */
+function PaginatedSection<T>({
+  items,
+  children,
+}: {
+  items: T[];
+  children: (pageItems: T[]) => ReactNode;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+
+  useEffect(() => {
+    setPage(1);
+  }, [pageSize, items.length]);
+
+  const pageItems = useMemo(() => {
+    const start = (page - 1) * pageSize;
+    return items.slice(start, start + pageSize);
+  }, [items, page, pageSize]);
+
+  const scrollSectionIntoView = () => {
+    rootRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  return (
+    <div ref={rootRef} className="space-y-2">
+      {children(pageItems)}
+      <TablePagination
+        totalItems={items.length}
+        currentPage={page}
+        onPageChange={(p) => {
+          setPage(p);
+          scrollSectionIntoView();
+        }}
+        pageSize={pageSize}
+        onPageSizeChange={(s) => {
+          setPageSize(s);
+          scrollSectionIntoView();
+        }}
+        className="pr-0 lg:pr-0"
+      />
+    </div>
+  );
+}
 
 interface SurveyWithMeta extends Survey {
   response_count?: number;
@@ -57,6 +109,27 @@ const SurveyAnalyticsPage = () => {
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [expandedQuestions, setExpandedQuestions] = useState<Set<string>>(new Set());
+  const [questionPage, setQuestionPage] = useState(1);
+  const [questionPageSize, setQuestionPageSize] = useState(PAGE_SIZE);
+  const [showGoUp, setShowGoUp] = useState(false);
+  const pageTopRef = useRef<HTMLDivElement>(null);
+
+  const scrollToTop = useCallback(() => {
+    pageTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  useEffect(() => {
+    const onScroll = () => setShowGoUp(window.scrollY > 200);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSurveyId) return;
+    scrollToTop();
+  }, [questionPage, questionPageSize, selectedSurveyId, scrollToTop]);
 
   const fetchSurveys = useCallback(async () => {
     const { data } = await supabase
@@ -84,6 +157,11 @@ const SurveyAnalyticsPage = () => {
   useEffect(() => {
     fetchSurveys();
   }, [fetchSurveys]);
+
+  useEffect(() => {
+    setQuestionPage(1);
+    setExpandedQuestions(new Set());
+  }, [selectedSurveyId, questionPageSize]);
 
   useEffect(() => {
     if (!selectedSurveyId) {
@@ -186,15 +264,18 @@ const SurveyAnalyticsPage = () => {
         // Get employee info for this answer
         const emp = respEmployeeMap.get(ans.response_id);
 
-        if (q.answer_type === 'multiple_choice' && ans.answer_choice) {
+        if (isChoiceAnswerType(q.answer_type) && ans.answer_choice) {
+          const choices = choiceLabelsFromAnswer(q.answer_type, ans.answer_choice);
           an.mc_counts = an.mc_counts || {};
-          an.mc_counts[ans.answer_choice] = (an.mc_counts[ans.answer_choice] || 0) + 1;
+          for (const choice of choices) {
+            an.mc_counts[choice] = (an.mc_counts[choice] || 0) + 1;
+          }
           if (emp) {
             an.employee_answers = an.employee_answers || [];
             an.employee_answers.push({
               employee_id: emp.employee_id,
               employee_name: emp.employee_name,
-              answer: ans.answer_choice,
+              answer: choices.join(', '),
             });
           }
         }
@@ -248,6 +329,11 @@ const SurveyAnalyticsPage = () => {
   const selectedSurveyInfo = surveys.find((s) => s.id === selectedSurveyId);
   const displaySurvey = selectedSurvey || selectedSurveyInfo;
 
+  const pagedAnalytics = useMemo(() => {
+    const start = (questionPage - 1) * questionPageSize;
+    return analytics.slice(start, start + questionPageSize);
+  }, [analytics, questionPage, questionPageSize]);
+
   const toggleQuestionExpand = (questionId: string) => {
     setExpandedQuestions((prev) => {
       const next = new Set(prev);
@@ -289,7 +375,7 @@ const SurveyAnalyticsPage = () => {
   }
 
   return (
-    <div className="space-y-6">
+    <div ref={pageTopRef} className="space-y-6">
       <div className="flex items-center gap-4">
         <Button variant="ghost" size="icon" onClick={() => navigate('/dashboard/activity/survey')}>
           <ArrowLeft className="h-5 w-5" />
@@ -357,64 +443,39 @@ const SurveyAnalyticsPage = () => {
                 </CardHeader>
               </Card>
 
-              {analytics.map((a) => (
+              {pagedAnalytics.map((a) => (
                 <Card key={a.question_id}>
                   <CardHeader>
                     <CardTitle className="text-sm font-medium">{a.question_text}</CardTitle>
                     <p className="text-xs text-muted-foreground">{a.answer_type}</p>
                   </CardHeader>
                   <CardContent>
-                    {a.answer_type === 'multiple_choice' && a.mc_counts && (
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Choice</TableHead>
-                            <TableHead>Count</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {Object.entries(a.mc_counts).map(([choice, count]) => (
-                            <TableRow key={choice}>
-                              <TableCell>{choice}</TableCell>
-                              <TableCell>{count}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                    {isChoiceAnswerType(a.answer_type) && a.mc_counts && (
+                      <SurveyQuestionChart
+                        answerType={a.answer_type}
+                        mcCounts={a.mc_counts}
+                        options={a.options}
+                      />
                     )}
                     {a.answer_type === 'rating' && (
-                      <div className="space-y-2">
-                        <p className="text-sm">
-                          Average: <strong>{a.rating_avg?.toFixed(2) ?? '—'}</strong>
-                        </p>
-                        {a.rating_counts && (
-                          <Table>
-                            <TableHeader>
-                              <TableRow>
-                                <TableHead>Rating</TableHead>
-                                <TableHead>Count</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {[1, 2, 3, 4, 5].map((n) => (
-                                <TableRow key={n}>
-                                  <TableCell>{n}</TableCell>
-                                  <TableCell>{a.rating_counts[n] ?? 0}</TableCell>
-                                </TableRow>
-                              ))}
-                            </TableBody>
-                          </Table>
-                        )}
-                      </div>
+                      <SurveyQuestionChart
+                        answerType={a.answer_type}
+                        ratingCounts={a.rating_counts}
+                        ratingAvg={a.rating_avg}
+                      />
                     )}
                     {a.answer_type === 'text' && a.text_responses && a.text_responses.length > 0 && (
-                      <div className="space-y-2 max-h-60 overflow-y-auto">
-                        {a.text_responses.map((t, i) => (
-                          <p key={i} className="text-sm border-b pb-2 last:border-0">
-                            {t}
-                          </p>
-                        ))}
-                      </div>
+                      <PaginatedSection items={a.text_responses}>
+                        {(pageItems) => (
+                          <div className="space-y-2">
+                            {pageItems.map((t, i) => (
+                              <p key={`${a.question_id}-text-${i}`} className="text-sm border-b pb-2 last:border-0">
+                                {t}
+                              </p>
+                            ))}
+                          </div>
+                        )}
+                      </PaginatedSection>
                     )}
                     {a.answer_type === 'text' && (!a.text_responses || a.text_responses.length === 0) && (
                       <p className="text-sm text-muted-foreground">No text responses.</p>
@@ -441,23 +502,27 @@ const SurveyAnalyticsPage = () => {
                           </Button>
                         </CollapsibleTrigger>
                         <CollapsibleContent>
-                          <div className="mt-2 max-h-80 overflow-y-auto">
-                            <Table>
-                              <TableHeader>
-                                <TableRow>
-                                  <TableHead className="w-1/2">Employee</TableHead>
-                                  <TableHead>Answer</TableHead>
-                                </TableRow>
-                              </TableHeader>
-                              <TableBody>
-                                {a.employee_answers.map((ea) => (
-                                  <TableRow key={ea.employee_id}>
-                                    <TableCell className="font-medium">{ea.employee_name}</TableCell>
-                                    <TableCell>{ea.answer}</TableCell>
-                                  </TableRow>
-                                ))}
-                              </TableBody>
-                            </Table>
+                          <div className="mt-2">
+                            <PaginatedSection items={a.employee_answers}>
+                              {(pageItems) => (
+                                <Table>
+                                  <TableHeader>
+                                    <TableRow>
+                                      <TableHead className="w-1/2">Employee</TableHead>
+                                      <TableHead>Answer</TableHead>
+                                    </TableRow>
+                                  </TableHeader>
+                                  <TableBody>
+                                    {pageItems.map((ea, i) => (
+                                      <TableRow key={`${ea.employee_id}-${i}`}>
+                                        <TableCell className="font-medium">{ea.employee_name}</TableCell>
+                                        <TableCell>{ea.answer}</TableCell>
+                                      </TableRow>
+                                    ))}
+                                  </TableBody>
+                                </Table>
+                              )}
+                            </PaginatedSection>
                           </div>
                         </CollapsibleContent>
                       </Collapsible>
@@ -475,6 +540,16 @@ const SurveyAnalyticsPage = () => {
                 </Card>
               ))}
 
+              {analytics.length > 0 && (
+                <TablePagination
+                  totalItems={analytics.length}
+                  currentPage={questionPage}
+                  onPageChange={setQuestionPage}
+                  pageSize={questionPageSize}
+                  onPageSizeChange={setQuestionPageSize}
+                />
+              )}
+
               {analytics.length === 0 && !analyticsLoading && (
                 <Card>
                   <CardContent className="py-8 text-center text-muted-foreground">
@@ -486,6 +561,20 @@ const SurveyAnalyticsPage = () => {
           )}
         </>
       )}
+
+      <button
+        type="button"
+        aria-label="Go to top"
+        onClick={scrollToTop}
+        className={cn(
+          'fixed z-50 flex h-12 w-12 items-center justify-center rounded-full text-white shadow-lg transition-opacity hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+          'bottom-24 right-4 lg:bottom-8 lg:right-8',
+          showGoUp ? 'opacity-100' : 'pointer-events-none opacity-0'
+        )}
+        style={{ backgroundColor: GO_UP_BG }}
+      >
+        <ChevronUp className="h-6 w-6" strokeWidth={2.5} />
+      </button>
     </div>
   );
 };

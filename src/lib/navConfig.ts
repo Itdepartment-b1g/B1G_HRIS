@@ -14,6 +14,8 @@ import {
   Layers,
   Award,
   Package,
+  ClipboardCheck,
+  UserMinus,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -47,6 +49,8 @@ export const navDropdowns: NavDropdown[] = [
     grid: false,
     items: [
       { label: 'Company', path: '/dashboard/company', description: 'Company related data', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Building2 },
+      { label: 'Performance', path: '/dashboard/performance', description: 'Performance evaluations and sign-off', iconBg: 'bg-rose-100', iconColor: 'text-rose-600', icon: ClipboardCheck },
+      { label: 'Offboarding', path: '/dashboard/offboarding', description: 'Resignation and exit clearance', iconBg: 'bg-orange-100', iconColor: 'text-orange-700', icon: UserMinus },
       { label: 'Employee', path: '/dashboard/employee/personal-data', description: 'Employee related data', iconBg: 'bg-emerald-100', iconColor: 'text-emerald-600', icon: Users },
       { label: 'Master Data Setting', path: '/dashboard/master-data/employees', description: 'Employees, departments & shifts', iconBg: 'bg-slate-100', iconColor: 'text-slate-600', icon: Settings, roles: ['super_admin', 'admin'] },
     ],
@@ -58,6 +62,7 @@ export const navDropdowns: NavDropdown[] = [
       { label: 'Leave', path: '/dashboard/leave', description: 'Leave and approvals', iconBg: 'bg-blue-100', iconColor: 'text-blue-600', icon: Calendar },
       { label: 'Employee Leave Filing', path: '/dashboard/leave-on-behalf', description: 'File leave requests for employees', iconBg: 'bg-blue-50', iconColor: 'text-blue-700', icon: Calendar, roles: ['super_admin', 'admin'] },
       { label: 'Overtime', path: '/dashboard/overtime', description: 'Overtime and approvals', iconBg: 'bg-sky-100', iconColor: 'text-sky-600', icon: Timer },
+      { label: 'Employee Overtime Filing', path: '/dashboard/overtime-on-behalf', description: 'File overtime requests for employees', iconBg: 'bg-sky-50', iconColor: 'text-sky-700', icon: Timer, roles: ['super_admin', 'admin', 'supervisor', 'manager'] },
       { label: 'Business Trip', path: '/dashboard/business-trip', description: 'Business trip related data', iconBg: 'bg-indigo-100', iconColor: 'text-indigo-600', icon: Briefcase },
       { label: 'Employee Business Trip Filing', path: '/dashboard/business-trip-on-behalf', description: 'File business trip requests for employees', iconBg: 'bg-indigo-50', iconColor: 'text-indigo-700', icon: Briefcase, roles: ['super_admin', 'admin', 'supervisor', 'manager', 'executive'] },
       { label: 'Employee Leave Credits', path: '/dashboard/employee-leave-balances', description: 'All employees leave credits', iconBg: 'bg-amber-100', iconColor: 'text-amber-600', icon: Layers, roles: ['super_admin', 'admin'] },

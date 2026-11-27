@@ -20,7 +20,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
-import { Loader2, Plus, Briefcase, Eye, Paperclip, MapPin, CalendarDays, ClipboardList, ChevronRight } from 'lucide-react';
+import { Loader2, Plus, Briefcase, Eye, Paperclip, MapPin, CalendarDays, ClipboardList, ChevronRight, Search } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
@@ -64,6 +64,7 @@ const BusinessTrip = () => {
   const [viewingTrip, setViewingTrip] = useState<BusinessTrip | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [tripPage, setTripPage] = useState(1);
+  const [tripSearch, setTripSearch] = useState('');
   const [tripAttachmentFile, setTripAttachmentFile] = useState<File | null>(null);
 
   const [form, setForm] = useState({
@@ -120,10 +121,29 @@ const BusinessTrip = () => {
     };
   }, [currentUser?.id, fetchMyTrips]);
 
+  const filteredTrips = useMemo(() => {
+    const q = tripSearch.trim().toLowerCase();
+    if (!q) return myTrips;
+    return myTrips.filter((t) => {
+      const typeLabel = (TRIP_TYPE_LABELS[t.trip_type ?? ''] ?? t.trip_type ?? '').toLowerCase();
+      return (
+        (t.destination || '').toLowerCase().includes(q) ||
+        (t.purpose || '').toLowerCase().includes(q) ||
+        typeLabel.includes(q) ||
+        (t.status || '').toLowerCase().includes(q) ||
+        (t.approver_name || '').toLowerCase().includes(q)
+      );
+    });
+  }, [myTrips, tripSearch]);
+
+  useEffect(() => {
+    setTripPage(1);
+  }, [tripSearch]);
+
   const paginatedTrips = useMemo(() => {
     const start = (tripPage - 1) * PAGE_SIZE;
-    return myTrips.slice(start, start + PAGE_SIZE);
-  }, [myTrips, tripPage]);
+    return filteredTrips.slice(start, start + PAGE_SIZE);
+  }, [filteredTrips, tripPage]);
 
   const handleSubmit = async () => {
     if (!currentUser?.id) return;
@@ -358,30 +378,47 @@ const BusinessTrip = () => {
           ) : (
             <div className="flex flex-col flex-1 min-h-0">
               <Card className="flex flex-col flex-1 min-h-0">
-                <CardHeader className="flex flex-row items-center justify-between shrink-0">
-                <CardTitle className="text-base">My Business Trip Requests</CardTitle>
-                <Button
-                  onClick={() => {
-                    setForm({
-                      trip_type: 'work_visit_domestic',
-                      location: '',
-                      purpose: '',
-                      start_date: '',
-                      end_date: '',
-                    });
-                    setTripAttachmentFile(null);
-                    setFileDialogOpen(true);
-                  }}
-                  size="sm"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  File Trip
-                </Button>
-              </CardHeader>
+                <CardHeader className="shrink-0 space-y-3">
+                  <div className="flex flex-row items-center justify-between gap-3">
+                    <CardTitle className="text-base">My Business Trip Requests</CardTitle>
+                    <Button
+                      onClick={() => {
+                        setForm({
+                          trip_type: 'work_visit_domestic',
+                          location: '',
+                          purpose: '',
+                          start_date: '',
+                          end_date: '',
+                        });
+                        setTripAttachmentFile(null);
+                        setFileDialogOpen(true);
+                      }}
+                      size="sm"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      File Trip
+                    </Button>
+                  </div>
+                  {myTrips.length > 0 && (
+                    <div className="relative max-w-md">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                      <Input
+                        placeholder="Search by location, purpose, type, or status..."
+                        value={tripSearch}
+                        onChange={(e) => setTripSearch(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  )}
+                </CardHeader>
               <CardContent className="flex-1 min-h-0 overflow-y-auto">
                 {myTrips.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">
                     No business trip requests yet
+                  </p>
+                ) : filteredTrips.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-8 text-center">
+                    No requests match your search
                   </p>
                 ) : (
                   <>
@@ -443,7 +480,7 @@ const BusinessTrip = () => {
                       </TableBody>
                     </Table>
                     <TablePagination
-                      totalItems={myTrips.length}
+                      totalItems={filteredTrips.length}
                       currentPage={tripPage}
                       onPageChange={setTripPage}
                       pageSize={PAGE_SIZE}
@@ -530,7 +567,6 @@ const BusinessTrip = () => {
                             String(d.getDate()).padStart(2, '0') : '',
                         }))
                       }
-                      disabled={(d) => d < new Date(new Date().setHours(0, 0, 0, 0))}
                       initialFocus
                     />
                   </PopoverContent>
@@ -564,8 +600,12 @@ const BusinessTrip = () => {
                         }))
                       }
                       disabled={(d) => {
-                        const min = form.start_date ? new Date(form.start_date + 'T12:00:00') : new Date();
-                        return d < min;
+                        // Date-only compare so same-day start/end is allowed
+                        if (!form.start_date) return false;
+                        const min = new Date(form.start_date + 'T00:00:00');
+                        const day = new Date(d);
+                        day.setHours(0, 0, 0, 0);
+                        return day < min;
                       }}
                       initialFocus
                     />

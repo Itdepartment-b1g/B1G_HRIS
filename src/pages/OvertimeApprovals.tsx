@@ -119,7 +119,7 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
     }
     const { data } = await supabase
       .from('overtime_requests')
-      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url, department, position), approver:employees!approved_by(first_name, last_name)')
+      .select('*, employee:employees!employee_id(first_name, last_name, avatar_url, department, position), approver:employees!approved_by(first_name, last_name), filer:employees!filed_by_id(first_name, last_name)')
       .in('employee_id', ids)
       .order('date', { ascending: false })
       .order('created_at', { ascending: false });
@@ -130,6 +130,7 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
       department: r.employee?.department ?? null,
       position: r.employee?.position ?? null,
       approver_name: r.approver ? `${r.approver.first_name} ${r.approver.last_name}` : null,
+      filed_by_name: r.filer ? `${r.filer.first_name} ${r.filer.last_name}` : null,
     }));
     setAllRequests(withName);
     if (!silent) setLoading(false);
@@ -463,6 +464,15 @@ const OvertimeApprovals = ({ embedded }: OvertimeApprovalsProps) => {
                       <Paperclip className="h-3.5 w-3.5" />
                       View attachment
                     </a>
+                  </div>
+                )}
+                {viewingRequest.filed_by_name && (
+                  <div className="col-span-2">
+                    <p className="text-muted-foreground">Filed by</p>
+                    <p className="font-medium mt-0.5">
+                      {viewingRequest.filed_by_name}
+                      <span className="text-muted-foreground font-normal"> (on behalf)</span>
+                    </p>
                   </div>
                 )}
                 {(viewingRequest.status === 'approved' || viewingRequest.status === 'rejected') &&

@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { supabase } from '@/lib/supabase';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getAvatarFallbackFromFullName } from '@/lib/utils';
-import { Loader2, Check, X, MapPin, Eye, Paperclip, Briefcase, CalendarDays } from 'lucide-react';
+import { Loader2, Check, X, MapPin, Eye, Paperclip, Briefcase, CalendarDays, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   Dialog,
@@ -19,6 +20,16 @@ import { RequireRole } from '@/components/RequireRole';
 import { cn } from '@/lib/utils';
 import { sendRequestNotification } from '@/lib/edgeFunctions';
 import { createRequestInAppNotification } from '@/lib/inAppNotifications';
+import { TablePagination, PAGE_SIZE } from '@/components/TablePagination';
+import {
+  QuickFilterSheet,
+  createQuickFilterAndClause,
+  matchesQuickFilterAndClauses,
+  type QuickFilterAndClause,
+  type QuickFilterColumn,
+} from '@/components/QuickFilterSheet';
+import { ALL_TIME_DATE_RANGE, type DateRangeFilterValue } from '@/components/DateRangeFilterPopover';
+import { getDateRangeFromPreset, isDateInRange } from '@/lib/dateRangePresets';
 import type { BusinessTrip } from '@/types';
 
 const TRIP_TYPE_LABELS: Record<string, string> = {
@@ -38,6 +49,25 @@ function formatDate(dateStr: string) {
 interface BusinessTripWithEmployee extends BusinessTrip {
   employee_name: string;
   employee_avatar_url?: string | null;
+  department?: string | null;
+  position?: string | null;
+}
+
+type TripQuickColumn = 'employee' | 'department' | 'position' | 'trip_type';
+type TripStatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
+
+const TripQuickFilterSheet = QuickFilterSheet<TripQuickColumn, TripStatusFilter>;
+
+function uniqueOptions(items: Array<{ value: string; label: string }>) {
+  const seen = new Set<string>();
+  return items
+    .filter((item) => {
+      const key = item.value.trim();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 interface BusinessTripApprovalsProps {
@@ -50,6 +80,13 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
   const [loading, setLoading] = useState(true);
   const [approving, setApproving] = useState<string | null>(null);
   const [viewingRequest, setViewingRequest] = useState<BusinessTripWithEmployee | null>(null);
+  const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [dateRange, setDateRange] = useState<DateRangeFilterValue>(ALL_TIME_DATE_RANGE);
+  const [columnClauses, setColumnClauses] = useState<QuickFilterAndClause<TripQuickColumn>[]>([
+    createQuickFilterAndClause<TripQuickColumn>(),
+  ]);
+  const [statusFilter, setStatusFilter] = useState<TripStatusFilter>('all');
 
   const fetchSupervisedIds = useCallback(async (): Promise<string[]> => {
     if (!currentUser?.id) return [];
@@ -84,26 +121,35 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
     const { data } = await supabase
       .from('business_trips')
       .select(
-        '*, employee:employees!employee_id(first_name, last_name, avatar_url), approver:employees!approved_by(first_name, last_name)'
+        '*, employee:employees!employee_id(first_name, last_name, avatar_url, department, position), approver:employees!approved_by(first_name, last_name)'
       )
       .in('employee_id', ids)
       .order('start_date', { ascending: false })
       .order('created_at', { ascending: false });
-    const withName = (data || []).map((r: Record<string, unknown>) => ({
-      ...r,
-      employee_name:
-        r.employee && typeof r.employee === 'object' && 'first_name' in r.employee && 'last_name' in r.employee
-          ? `${(r.employee as { first_name: string }).first_name} ${(r.employee as { last_name: string }).last_name}`
-          : 'Unknown',
-      employee_avatar_url:
-        r.employee && typeof r.employee === 'object' && 'avatar_url' in r.employee
-          ? (r.employee as { avatar_url: string | null }).avatar_url
-          : null,
-      approver_name:
-        r.approver && typeof r.approver === 'object' && 'first_name' in r.approver && 'last_name' in r.approver
-          ? `${(r.approver as { first_name: string }).first_name} ${(r.approver as { last_name: string }).last_name}`
-          : null,
-    }));
+    const withName = (data || []).map((r: Record<string, unknown>) => {
+      const emp = r.employee as
+        | {
+            first_name?: string;
+            last_name?: string;
+            avatar_url?: string | null;
+            department?: string | null;
+            position?: string | null;
+          }
+        | null
+        | undefined;
+      const approver = r.approver as { first_name?: string; last_name?: string } | null | undefined;
+      return {
+        ...r,
+        employee_name: emp?.first_name && emp?.last_name ? `${emp.first_name} ${emp.last_name}` : 'Unknown',
+        employee_avatar_url: emp?.avatar_url ?? null,
+        department: emp?.department ?? null,
+        position: emp?.position ?? null,
+        approver_name:
+          approver?.first_name && approver?.last_name
+            ? `${approver.first_name} ${approver.last_name}`
+            : null,
+      };
+    });
     setAllRequests(withName as BusinessTripWithEmployee[]);
     if (!silent) setLoading(false);
   }, [currentUser?.id, fetchSupervisedIds]);
@@ -125,6 +171,110 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
       supabase.removeChannel(channel);
     };
   }, [currentUser?.id, fetchRequests]);
+
+  const quickColumns = useMemo((): QuickFilterColumn<TripQuickColumn>[] => {
+    return [
+      {
+        key: 'employee',
+        label: 'Employee Name',
+        searchPlaceholder: 'Search employee...',
+        options: uniqueOptions(
+          allRequests.map((r) => ({ value: r.employee_id, label: r.employee_name }))
+        ),
+      },
+      {
+        key: 'department',
+        label: 'Department',
+        searchPlaceholder: 'Search department...',
+        options: uniqueOptions(
+          allRequests
+            .filter((r) => r.department)
+            .map((r) => ({ value: r.department as string, label: r.department as string }))
+        ),
+      },
+      {
+        key: 'position',
+        label: 'Rank/Position',
+        searchPlaceholder: 'Search position...',
+        options: uniqueOptions(
+          allRequests
+            .filter((r) => r.position)
+            .map((r) => ({ value: r.position as string, label: r.position as string }))
+        ),
+      },
+      {
+        key: 'trip_type',
+        label: 'Trip Type',
+        searchPlaceholder: 'Search trip type...',
+        options: uniqueOptions(
+          allRequests
+            .filter((r) => r.trip_type)
+            .map((r) => ({
+              value: r.trip_type as string,
+              label: TRIP_TYPE_LABELS[r.trip_type ?? ''] ?? (r.trip_type as string),
+            }))
+        ),
+      },
+    ];
+  }, [allRequests]);
+
+  const filteredRequests = useMemo(() => {
+    const { start, end } = getDateRangeFromPreset(dateRange.preset, dateRange.customStart, dateRange.customEnd);
+    const q = search.trim().toLowerCase();
+    return allRequests.filter((r) => {
+      if (!isDateInRange(r.start_date, start, end)) return false;
+      if (statusFilter !== 'all' && r.status !== statusFilter) return false;
+      if (
+        !matchesQuickFilterAndClauses(columnClauses, (field, value) => {
+          if (field === 'employee') return r.employee_id === value;
+          if (field === 'department') return (r.department || '') === value;
+          if (field === 'position') return (r.position || '') === value;
+          if (field === 'trip_type') return (r.trip_type || '') === value;
+          return false;
+        })
+      ) {
+        return false;
+      }
+      if (!q) return true;
+      const typeLabel = (TRIP_TYPE_LABELS[r.trip_type ?? ''] ?? r.trip_type ?? '').toLowerCase();
+      return (
+        r.employee_name.toLowerCase().includes(q) ||
+        (r.destination || '').toLowerCase().includes(q) ||
+        (r.purpose || '').toLowerCase().includes(q) ||
+        typeLabel.includes(q) ||
+        (r.status || '').toLowerCase().includes(q) ||
+        (r.department || '').toLowerCase().includes(q) ||
+        (r.position || '').toLowerCase().includes(q) ||
+        (r.approver_name || '').toLowerCase().includes(q)
+      );
+    });
+  }, [allRequests, dateRange, columnClauses, statusFilter, search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [dateRange, columnClauses, statusFilter, search]);
+
+  const paginatedRequests = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE;
+    return filteredRequests.slice(start, start + PAGE_SIZE);
+  }, [filteredRequests, page]);
+
+  const statusOptions = useMemo(
+    () => [
+      { value: 'all' as const, label: 'All statuses', count: allRequests.length },
+      { value: 'pending' as const, label: 'Pending', count: allRequests.filter((r) => r.status === 'pending').length },
+      { value: 'approved' as const, label: 'Approved', count: allRequests.filter((r) => r.status === 'approved').length },
+      { value: 'rejected' as const, label: 'Rejected', count: allRequests.filter((r) => r.status === 'rejected').length },
+    ],
+    [allRequests]
+  );
+
+  const clearQuickFilters = () => {
+    setDateRange(ALL_TIME_DATE_RANGE);
+    setColumnClauses([createQuickFilterAndClause<TripQuickColumn>()]);
+    setStatusFilter('all');
+    setSearch('');
+  };
 
   const handleApprove = async (id: string, action: 'approved' | 'rejected') => {
     setApproving(id);
@@ -163,7 +313,9 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
       return (
         <div className="flex flex-col items-center justify-center py-12 text-center">
           <Briefcase className="h-12 w-12 text-muted-foreground/50 mb-3" />
-          <p className="text-sm text-muted-foreground">No business trip requests</p>
+          <p className="text-sm text-muted-foreground">
+            {allRequests.length === 0 ? 'No business trip requests' : 'No requests match your filters'}
+          </p>
         </div>
       );
     }
@@ -285,11 +437,39 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
         )}
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">All Business Trip Requests</CardTitle>
-            <CardDescription>
-              Review and approve business trip requests. Pending requests require your action.
-            </CardDescription>
+          <CardHeader className="space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <CardTitle className="text-base">
+                  All Business Trip Requests ({filteredRequests.length})
+                </CardTitle>
+                <CardDescription>
+                  Review and approve business trip requests. Pending requests require your action.
+                </CardDescription>
+              </div>
+              <TripQuickFilterSheet
+                dateRange={dateRange}
+                onDateRangeChange={setDateRange}
+                columns={quickColumns}
+                columnClauses={columnClauses}
+                onColumnClausesChange={setColumnClauses}
+                status={statusFilter}
+                statusOptions={statusOptions}
+                onStatusChange={setStatusFilter}
+                onClear={clearQuickFilters}
+              />
+            </div>
+            {allRequests.length > 0 && (
+              <div className="relative max-w-md">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search by employee, location, purpose, type, or status..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             {loading ? (
@@ -297,7 +477,16 @@ const BusinessTripApprovals = ({ embedded }: BusinessTripApprovalsProps) => {
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
               </div>
             ) : (
-              renderRequests(allRequests, true)
+              <>
+                {renderRequests(paginatedRequests, true)}
+                <TablePagination
+                  totalItems={filteredRequests.length}
+                  currentPage={page}
+                  onPageChange={setPage}
+                  pageSize={PAGE_SIZE}
+                  className="pt-2"
+                />
+              </>
             )}
           </CardContent>
         </Card>

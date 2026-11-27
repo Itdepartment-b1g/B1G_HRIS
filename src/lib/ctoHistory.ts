@@ -60,6 +60,7 @@ interface OvertimeCreditRow {
   approved_at?: string | null;
   employee?: CtoHistoryPerson | CtoHistoryPerson[] | null;
   approver?: CtoHistoryPerson | CtoHistoryPerson[] | null;
+  filer?: CtoHistoryPerson | CtoHistoryPerson[] | null;
 }
 
 interface CtoLeaveUsageRow {
@@ -139,7 +140,7 @@ export async function fetchCtoHistory(employeeId: string, year: number): Promise
     supabase
       .from('overtime_requests')
       .select(
-        'id, date, hours, start_time, end_time, reason, attachment_url, status, created_at, approved_at, employee:employees!employee_id(first_name, last_name, employee_code), approver:employees!approved_by(first_name, last_name, employee_code)'
+        'id, date, hours, start_time, end_time, reason, attachment_url, status, created_at, approved_at, employee:employees!employee_id(first_name, last_name, employee_code), approver:employees!approved_by(first_name, last_name, employee_code), filer:employees!filed_by_id(first_name, last_name, employee_code)'
       )
       .eq('employee_id', employeeId)
       .eq('status', 'approved')
@@ -168,6 +169,7 @@ export async function fetchCtoHistory(employeeId: string, year: number): Promise
     const hours = Number(row.hours ?? 0);
     const credited = otHoursToCtoDays(hours);
     if (credited <= 0) return;
+    const filer = firstPerson(row.filer);
     pending.push({
       id: `ot-${row.id}`,
       date: row.date,
@@ -177,9 +179,9 @@ export async function fetchCtoHistory(employeeId: string, year: number): Promise
       ctoDelta: credited,
       details: {
         ...emptyDetails(),
-        filedBy: formatPersonName(row.employee),
+        filedBy: filer ? formatPersonName(filer) : formatPersonName(row.employee),
         filedAt: row.created_at ?? null,
-        filedOnBehalf: false,
+        filedOnBehalf: !!filer,
         approvedBy: formatPersonName(row.approver),
         approvedAt: row.approved_at ?? null,
         status: row.status || 'approved',

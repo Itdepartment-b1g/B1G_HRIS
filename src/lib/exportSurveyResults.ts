@@ -7,6 +7,7 @@ import * as XLSX from 'xlsx';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { supabase } from '@/lib/supabase';
+import { choiceLabelsFromAnswer, isChoiceAnswerType } from '@/lib/surveyAnswers';
 
 export interface EmployeeAnswer {
   employee_id: string;
@@ -53,7 +54,7 @@ function escapeCsvField(val: string | number): string {
 function buildReportRows(analytics: QuestionAnalytics[]): SurveyReportRow[] {
   const rows: SurveyReportRow[] = [];
   for (const a of analytics) {
-    if (a.answer_type === 'multiple_choice' && a.mc_counts) {
+    if (isChoiceAnswerType(a.answer_type) && a.mc_counts) {
       for (const [choice, count] of Object.entries(a.mc_counts)) {
         rows.push({
           question: a.question_text,
@@ -210,12 +211,19 @@ async function fetchAnalytics(surveyId: string): Promise<{
     const ans = a as { answer_choice?: string; answer_rating?: number; answer_text?: string; response_id: string };
     const emp = respEmployeeMap.get(ans.response_id);
 
-    if (q.answer_type === 'multiple_choice' && ans.answer_choice) {
+    if (isChoiceAnswerType(q.answer_type) && ans.answer_choice) {
+      const choices = choiceLabelsFromAnswer(q.answer_type, ans.answer_choice);
       an.mc_counts = an.mc_counts || {};
-      an.mc_counts[ans.answer_choice] = (an.mc_counts[ans.answer_choice] || 0) + 1;
+      for (const choice of choices) {
+        an.mc_counts[choice] = (an.mc_counts[choice] || 0) + 1;
+      }
       if (emp) {
         an.employee_answers = an.employee_answers || [];
-        an.employee_answers.push({ employee_id: emp.employee_id, employee_name: emp.employee_name, answer: ans.answer_choice });
+        an.employee_answers.push({
+          employee_id: emp.employee_id,
+          employee_name: emp.employee_name,
+          answer: choices.join(', '),
+        });
       }
     }
     if (q.answer_type === 'rating' && ans.answer_rating != null) {

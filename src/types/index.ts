@@ -116,6 +116,8 @@ export interface OvertimeRequest {
   approved_by?: string | null;
   approved_at?: string | null;
   approver_name?: string | null;
+  filed_by_id?: string | null;
+  filed_by_name?: string | null;
   employee_name?: string;
 }
 
@@ -142,7 +144,7 @@ export interface AnnouncementAcknowledgement {
   acknowledged_at: string;
 }
 
-export type SurveyAnswerType = 'multiple_choice' | 'rating' | 'text';
+export type SurveyAnswerType = 'multiple_choice' | 'checkbox' | 'rating' | 'text';
 
 export interface Survey {
   id: string;

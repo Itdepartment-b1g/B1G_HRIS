@@ -274,6 +274,26 @@ export async function sendRequestNotification(payload: SendRequestNotificationPa
   });
 }
 
+/** Send any probationary evaluation emails that the daily job queued. Safe to call more than once. */
+export async function flushPerformanceEmails(): Promise<void> {
+  await callEdgeFunction<{ success: boolean }>('send-performance-emails', {}, {
+    useUserAuth: true,
+    onAuthFailure: 'throw',
+  });
+}
+
+/** Send queued exit-clearance emails. Safe to call more than once. Never throws. */
+export async function flushClearanceEmails(): Promise<void> {
+  try {
+    await callEdgeFunction<{ success: boolean }>('send-clearance-emails', {}, {
+      useUserAuth: true,
+      onAuthFailure: 'throw',
+    });
+  } catch {
+    // The clearance still succeeds if this function is not deployed yet.
+  }
+}
+
 /**
  * Seed the database with sample data
  * 

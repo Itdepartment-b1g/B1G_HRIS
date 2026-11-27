@@ -37,3 +37,9 @@ verify_jwt = false
 
 [functions.seed-attendance]
 verify_jwt = false
+
+[functions.send-performance-emails]
+verify_jwt = false
+
+[functions.send-clearance-emails]
+verify_jwt = false

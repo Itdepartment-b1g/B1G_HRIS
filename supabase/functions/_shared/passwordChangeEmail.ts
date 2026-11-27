@@ -6,6 +6,36 @@
 
 import nodemailer from 'npm:nodemailer@6.9.10'
 
+// Yellow confidentiality footnote appended to every outbound email.
+const CONFIDENTIALITY_PARAGRAPHS = [
+  'The information contained in this email and any attachments is confidential and intended solely for the use of the individual or entity to whom it is addressed and other authorized recipients. It may contain confidential employee or company information and should not be disclosed, copied, distributed, or used by any unauthorized person.',
+  'If you are not the intended recipient, please notify the sender immediately and delete this email and any attachments from your system. If you have received this email in error, please do not disclose, copy, or use any information contained herein.',
+  'B1G Corporation does not guarantee the proper or complete transmission of this communication or the timely receipt of the information contained herein. B1G Corporation shall not be held liable for any damage arising from the transmission of this email or its attachments, including damage caused by viruses, unauthorized access, interception, or other security-related incidents.',
+]
+
+function appendConfidentialityHtml(html: string): string {
+  const paragraphs = CONFIDENTIALITY_PARAGRAPHS.map(
+    (paragraph, index) =>
+      `<p style="margin:0 0 ${index === CONFIDENTIALITY_PARAGRAPHS.length - 1 ? '0' : '8px'};">${paragraph}</p>`
+  ).join('')
+
+  const footer = `
+<table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-top:28px;border-collapse:collapse;">
+  <tr>
+    <td bgcolor="#FFF59D" style="background-color:#FFF59D;padding:14px 16px;font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.5;color:#333333;">
+      <p style="margin:0 0 8px;font-size:11px;font-weight:bold;">CONFIDENTIALITY NOTICE</p>
+      ${paragraphs}
+    </td>
+  </tr>
+</table>`
+
+  return `${html.trimEnd()}\n${footer}`
+}
+
+function appendConfidentialityText(text: string): string {
+  return `${text.trimEnd()}\n\nCONFIDENTIALITY NOTICE\n\n${CONFIDENTIALITY_PARAGRAPHS.join('\n\n')}`
+}
+
 export type PasswordChangeSource = 'forgot_password' | 'settings'
 
 const MAX_SELFIE_BYTES = 1_500_000
@@ -199,10 +229,14 @@ export async function sendPasswordChangeRequestEmails(opts: {
     auth: { user: gmailUser, pass: gmailPass },
   })
 
-  const send = (mail: Record<string, unknown>) =>
-    new Promise<void>((resolve, reject) => {
-      transport.sendMail(mail, (err: Error | null) => (err ? reject(err) : resolve()))
+  const send = (mail: Record<string, unknown>) => {
+    const payload = { ...mail }
+    if (typeof payload.html === 'string') payload.html = appendConfidentialityHtml(payload.html)
+    if (typeof payload.text === 'string') payload.text = appendConfidentialityText(payload.text)
+    return new Promise<void>((resolve, reject) => {
+      transport.sendMail(payload, (err: Error | null) => (err ? reject(err) : resolve()))
     })
+  }
 
   await send({
     from: gmailUser,

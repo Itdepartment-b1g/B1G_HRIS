@@ -11,10 +11,12 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Loader2, Star } from 'lucide-react';
 import { supabase } from '@/lib/supabase';
 import { toast } from 'sonner';
 import { cn } from '@/lib/utils';
+import { submitSurveyResponse, type SurveyAnswerValue } from '@/lib/surveyCompletion';
 import type { SurveyQuestion } from '@/types';
 
 interface SurveyAnswerDialogProps {
@@ -32,7 +34,7 @@ export function SurveyAnswerDialog({
 }: SurveyAnswerDialogProps) {
   const [survey, setSurvey] = useState<{ id: string; title: string; description?: string | null; is_anonymous?: boolean } | null>(null);
   const [questions, setQuestions] = useState<SurveyQuestion[]>([]);
-  const [answers, setAnswers] = useState<Record<string, string | number>>({});
+  const [answers, setAnswers] = useState<Record<string, SurveyAnswerValue>>({});
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -57,53 +59,52 @@ export function SurveyAnswerDialog({
     load();
   }, [open, surveyId]);
 
+  const isAnswerMissing = (q: SurveyQuestion) => {
+    const v = answers[q.id];
+    if (q.answer_type === 'checkbox') {
+      return !Array.isArray(v) || v.length === 0;
+    }
+    return v === undefined || v === '';
+  };
+
+  const toggleCheckboxAnswer = (questionId: string, option: string, checked: boolean) => {
+    setAnswers((a) => {
+      const current = Array.isArray(a[questionId]) ? (a[questionId] as string[]) : [];
+      const next = checked
+        ? current.includes(option) ? current : [...current, option]
+        : current.filter((o) => o !== option);
+      return { ...a, [questionId]: next };
+    });
+  };
+
   const handleSubmit = async () => {
     if (!survey || !surveyId) return;
     const { data: { user } } = await supabase.auth.getUser();
     const employeeId = user?.id;
     if (!employeeId) return;
 
-    const missing = questions.filter((q) => answers[q.id] === undefined || answers[q.id] === '');
+    const missing = questions.filter(isAnswerMissing);
     if (missing.length > 0) {
       toast.error('Please answer all questions.');
       return;
     }
 
     setSubmitting(true);
-    const { data: respRow, error: respErr } = await supabase
-      .from('survey_responses')
-      .insert({
-        survey_id: surveyId,
-        employee_id: survey.is_anonymous ? null : employeeId,
-      })
-      .select('id')
-      .single();
-
-    if (respErr) {
-      toast.error(respErr.message);
-      setSubmitting(false);
-      return;
-    }
-
-    if (survey.is_anonymous) {
-      await supabase.from('survey_completions').insert({ survey_id: surveyId, employee_id: employeeId });
-    }
-
-    const answerRows = questions.map((q) => {
-      const v = answers[q.id];
-      return {
-        response_id: respRow.id,
-        question_id: q.id,
-        answer_text: q.answer_type === 'text' ? String(v) : null,
-        answer_rating: q.answer_type === 'rating' ? (v as number) : null,
-        answer_choice: q.answer_type === 'multiple_choice' ? String(v) : null,
-      };
+    const { error } = await submitSurveyResponse({
+      surveyId,
+      employeeId,
+      isAnonymous: !!survey.is_anonymous,
+      questions,
+      answers,
     });
-    const { error: ansErr } = await supabase.from('survey_answers').insert(answerRows);
 
-    if (ansErr) {
-      toast.error(ansErr.message);
+    if (error) {
+      toast.error(error);
       setSubmitting(false);
+      if (error.includes('already completed')) {
+        onSuccess?.();
+        onOpenChange(false);
+      }
       return;
     }
 
@@ -134,6 +135,7 @@ export function SurveyAnswerDialog({
                   <Label>
                     {q.question_text}
                     {q.answer_type === 'rating' && ' (1-5)'}
+                    {q.answer_type === 'checkbox' && ' (select all that apply)'}
                   </Label>
                   {q.answer_type === 'multiple_choice' && (
                     <RadioGroup
@@ -147,6 +149,23 @@ export function SurveyAnswerDialog({
                         </div>
                       ))}
                     </RadioGroup>
+                  )}
+                  {q.answer_type === 'checkbox' && (
+                    <div className="space-y-2">
+                      {(q.options as string[] || []).map((opt, i) => {
+                        const selected = Array.isArray(answers[q.id]) ? (answers[q.id] as string[]) : [];
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            <Checkbox
+                              id={`${q.id}-cb-${i}`}
+                              checked={selected.includes(opt)}
+                              onCheckedChange={(v) => toggleCheckboxAnswer(q.id, opt, v === true)}
+                            />
+                            <Label htmlFor={`${q.id}-cb-${i}`} className="font-normal cursor-pointer">{opt}</Label>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                   {q.answer_type === 'rating' && (
                     <div className="flex gap-2">
